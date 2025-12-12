@@ -1,0 +1,259 @@
+import { Body, Get, JsonController, Param, Post, Req, Res } from 'routing-controllers';
+import { Request, Response } from 'express';
+import archiver from 'archiver';
+import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, Matches, ValidateIf, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { Service } from 'typedi';
+import { ChatService } from '../services/ChatService';
+import { SseService } from '../services/SseService';
+import { SessionStore } from '../services/session/SessionStore';
+import { ChatAttachment } from '../types/chat';
+
+class ScreenshotAttachmentRequest {
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['screenshot'])
+  type!: 'screenshot';
+
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  selector!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^data:image\/[a-z0-9.+-]+;base64,/i)
+  dataUrl!: string;
+}
+
+class SelectionRequest {
+  @IsString()
+  @IsNotEmpty()
+  selector!: string;
+}
+
+class ChatRequest {
+  @IsString()
+  @IsNotEmpty()
+  sessionId!: string;
+
+  @IsString()
+  @ValidateIf((o) => !o.attachments || o.attachments.length === 0)
+  @IsNotEmpty()
+  message?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ScreenshotAttachmentRequest)
+  attachments?: ScreenshotAttachmentRequest[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SelectionRequest)
+  selection?: SelectionRequest;
+}
+
+@Service()
+@JsonController()
+export class ChatController {
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly sessionStore: SessionStore,
+    private readonly sseService: SseService,
+  ) {}
+
+  @Get('/api/sse')
+  stream(@Req() request: Request, @Res() response: Response): Response {
+    this.sseService.addClient(request, response);
+    return response;
+  }
+
+  @Post('/api/sessions')
+  createSession() {
+    const session = this.sessionStore.create();
+    return {
+      id: session.id,
+      files: session.files,
+      history: [],
+      updatedAt: session.updatedAt.toISOString(),
+      group: session.group,
+      currentVersion: session.currentVersion,
+    };
+  }
+
+  @Post('/api/sessions/:sessionId/clone')
+  cloneSession(@Param('sessionId') sessionId: string) {
+    const session = this.sessionStore.clone(sessionId);
+    return {
+      id: session.id,
+      files: session.files,
+      history: session.history.map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+        selection: entry.selection,
+        version: entry.version,
+        createdAt: entry.createdAt.toISOString(),
+      })),
+      updatedAt: session.updatedAt.toISOString(),
+      group: session.group,
+      currentVersion: session.currentVersion,
+    };
+  }
+
+  @Post('/api/chat')
+  async sendMessage(@Body({ options: { limit: '10mb' } }) payload: ChatRequest) {
+    const attachments: ChatAttachment[] = (payload.attachments ?? []).map((attachment) => ({
+      type: 'screenshot',
+      selector: attachment.selector.trim(),
+      dataUrl: attachment.dataUrl.trim(),
+      id: attachment.id?.trim(),
+    }));
+    const message = typeof payload.message === 'string' ? payload.message : '';
+    const selection = payload.selection ? { selector: payload.selection.selector } : undefined;
+    const result = await this.chatService.handleUserMessage(payload.sessionId, message, attachments, true, selection);
+    return { message: result.message };
+  }
+
+  @Get('/api/sessions/:sessionId')
+  getSession(@Param('sessionId') sessionId: string) {
+    const snapshot = this.sessionStore.snapshot(sessionId) ?? this.sessionStore.getOrCreate(sessionId);
+    return {
+      id: snapshot.id,
+      files: snapshot.files,
+      history: snapshot.history.map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+        selection: entry.selection,
+        version: entry.version,
+        createdAt: entry.createdAt.toISOString(),
+      })),
+      updatedAt: snapshot.updatedAt.toISOString(),
+      group: snapshot.group,
+      currentVersion: snapshot.currentVersion,
+    };
+  }
+
+  @Post('/api/sessions/:sessionId/reset')
+  resetSession(@Param('sessionId') sessionId: string) {
+    const snapshot = this.sessionStore.reset(sessionId);
+    return {
+      id: snapshot.id,
+      files: snapshot.files,
+      history: snapshot.history.map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+        selection: entry.selection,
+        version: entry.version,
+        createdAt: entry.createdAt.toISOString(),
+      })),
+      updatedAt: snapshot.updatedAt.toISOString(),
+      group: snapshot.group,
+      currentVersion: snapshot.currentVersion,
+    };
+  }
+
+  @Get('/api/sessions/:sessionId/archive')
+  downloadArchive(@Param('sessionId') sessionId: string, @Res() response: Response) {
+    try {
+      const files = this.sessionStore.getFiles(sessionId);
+      if (!files) {
+        return response.status(404).json({ message: 'Сессия не найдена' });
+      }
+
+      const safeId = sessionId?.replace(/[^a-zA-Z0-9-_]/g, '_') || 'session';
+      const archive = archiver('zip', { zlib: { level: 9 } });
+
+      archive.on('error', (error) => {
+        console.error('Failed to stream session archive', error);
+        if (!response.headersSent) {
+          response.status(500).json({ message: 'Не удалось сформировать архив' });
+        } else {
+          response.end();
+        }
+        archive.abort();
+      });
+
+      response.setHeader('Content-Type', 'application/zip');
+      response.setHeader('Content-Disposition', `attachment; filename="session-${safeId}.zip"`);
+
+      archive.pipe(response);
+      archive.append(files.html ?? '', { name: 'index.html' });
+      archive.append(files.css ?? '', { name: 'styles.css' });
+      archive.append(files.js ?? '', { name: 'script.js' });
+      void archive.finalize();
+      return response;
+    } catch (error) {
+      console.error('Failed to prepare session archive', error);
+      return response.status(500).json({ message: 'Не удалось подготовить архив' });
+    }
+  }
+
+  @Get('/api/sessions/:sessionId/files')
+  getFiles(@Param('sessionId') sessionId: string) {
+    const files = this.sessionStore.getFiles(sessionId);
+    if (!files) {
+      return {
+        html: '',
+        css: '',
+        js: '',
+      };
+    }
+    return files;
+  }
+
+  @Get('/api/sessions/:sessionId/versions/:version/files')
+  getFilesVersion(
+    @Param('sessionId') sessionId: string,
+    @Param('version') versionParam: string,
+    @Res() response: Response,
+  ) {
+    const version = Number.parseInt(versionParam, 10);
+    if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+      return response.status(400).json({ message: 'Некорректная версия' });
+    }
+
+    const files = this.sessionStore.getFilesByVersion(sessionId, version);
+    if (!files) {
+      return response.status(404).json({ message: 'Версия не найдена' });
+    }
+
+    return response.json({ ...files, version });
+  }
+
+  @Post('/api/sessions/:sessionId/versions/:version/clone')
+  cloneVersion(
+    @Param('sessionId') sessionId: string,
+    @Param('version') versionParam: string,
+    @Res() response: Response,
+  ) {
+    const version = Number.parseInt(versionParam, 10);
+    if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+      return response.status(400).json({ message: 'Некорректная версия' });
+    }
+
+    try {
+      const session = this.sessionStore.cloneAtVersion(sessionId, version);
+      return response.json({
+        id: session.id,
+        files: session.files,
+        history: session.history.map((entry) => ({
+          role: entry.role,
+          content: entry.content,
+          selection: entry.selection,
+          version: entry.version,
+          createdAt: entry.createdAt.toISOString(),
+        })),
+        updatedAt: session.updatedAt.toISOString(),
+        group: session.group,
+        currentVersion: session.currentVersion,
+      });
+    } catch (error) {
+      console.error('Failed to clone session by version', error);
+      return response.status(400).json({ message: 'Не удалось клонировать указанную версию' });
+    }
+  }
+}
