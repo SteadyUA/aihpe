@@ -5,14 +5,14 @@ import cors from 'cors';
 import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'typedi';
 import { ChatController } from './controllers/ChatController';
-import { GptClientToken, OpenAIGptClient } from './services/llm/GptClient';
+
 
 useContainer(Container);
 
 export function createApp(): express.Express {
   const app = express();
 
-  Container.set(GptClientToken, Container.get(OpenAIGptClient));
+
 
   app.use(cors());
 

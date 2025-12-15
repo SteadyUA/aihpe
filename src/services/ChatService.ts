@@ -2,7 +2,7 @@ import { Inject, Service } from 'typedi';
 import { ChatAttachment, ChatMessage, SessionData } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
-import { GptClient, GptClientToken } from './llm/GptClient';
+import { LlmFactory } from './llm/LlmFactory';
 
 interface ChatResult {
   message: string;
@@ -14,8 +14,8 @@ export class ChatService {
   constructor(
     private readonly sessionStore: SessionStore,
     private readonly sseService: SseService,
-    @Inject(GptClientToken) private readonly gptClient: GptClient,
-  ) {}
+    private readonly llmFactory: LlmFactory,
+  ) { }
 
   async handleUserMessage(
     sessionId: string,
@@ -52,27 +52,28 @@ export class ChatService {
     // Exclude the message we just added (the last one) so GPT treats it as "instruction" not "previous conversation"
     const currentHistory = this.sessionStore.getOrCreate(sessionId).history;
     const historyForPrompt = currentHistory.slice(0, -1);
-    
+
     const conversation = historyForPrompt
       .filter((item) => item.role === 'user' || item.role === 'assistant')
-      .map((item) => ({ 
-        role: item.role as 'user' | 'assistant', 
-        content: this.enrichContentWithSelection(item.content, item.selection) 
+      .map((item) => ({
+        role: item.role as 'user' | 'assistant',
+        content: this.enrichContentWithSelection(item.content, item.selection)
       }));
 
     const selectorsSummary = normalizedAttachments.map((attachment) => attachment.selector).join(', ');
     const selectionContext = selection ? `Выбран элемент: ${selection.selector}.` : '';
-    
+
     let effectiveInstructions = trimmed;
     if (selectionContext) {
       effectiveInstructions = `${selectionContext} ${effectiveInstructions}`;
     }
     if (!effectiveInstructions && selectorsSummary) {
-       effectiveInstructions = `Обработай вложенные скриншоты выбранных элементов: ${selectorsSummary}.`;
+      effectiveInstructions = `Обработай вложенные скриншоты выбранных элементов: ${selectorsSummary}.`;
     }
 
     try {
-      const generation = await this.gptClient.generatePage({
+      const client = this.llmFactory.getClient();
+      const generation = await client.generatePage({
         sessionId,
         instructions: effectiveInstructions,
         files: session.files,
@@ -89,16 +90,16 @@ export class ChatService {
 
         for (let i = 0; i < count; i++) {
           const newSession = this.sessionStore.clone(sessionId);
-          
+
           // Generate a random group for each variant to distinguish them visually
           const variantGroup = Math.floor(Math.random() * 32);
 
           // Remove the last message from the new session (which is the prompt that triggered this variant generation)
           if (newSession.history.length > 0) {
-              const newHistory = newSession.history.slice(0, -1);
-              this.sessionStore.upsert(newSession.id, { history: newHistory, group: variantGroup });
+            const newHistory = newSession.history.slice(0, -1);
+            this.sessionStore.upsert(newSession.id, { history: newHistory, group: variantGroup });
           } else {
-              this.sessionStore.upsert(newSession.id, { group: variantGroup });
+            this.sessionStore.upsert(newSession.id, { group: variantGroup });
           }
 
           this.sseService.emitSessionCreated({
@@ -106,22 +107,22 @@ export class ChatService {
             newSessionId: newSession.id,
             group: variantGroup,
           });
-          
+
           variantsCreated.push(newSession.id);
 
           // Trigger generation for the new session in the background
           const variantInstruction = instructions[i] || effectiveInstructions;
           this.handleUserMessage(
-            newSession.id, 
-            variantInstruction, 
-            [], 
-            false 
+            newSession.id,
+            variantInstruction,
+            [],
+            false
           ).catch(e => console.error(`Failed to generate variant for session ${newSession.id}`, e));
         }
-        
+
         const summary = `Создано ${count} вариантов в новых сессиях.`;
         this.appendAssistantMessage(sessionId, summary, session.currentVersion);
-        
+
         return {
           message: summary,
           session: this.sessionStore.getOrCreate(sessionId),
