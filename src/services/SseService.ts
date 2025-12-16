@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Service } from 'typedi';
 
-export type ChatStatus = 'started' | 'completed' | 'error' | 'skipped';
+export type ChatStatus = 'started' | 'generating' | 'completed' | 'error' | 'skipped';
 
 export interface ChatStatusPayload {
   sessionId: string;

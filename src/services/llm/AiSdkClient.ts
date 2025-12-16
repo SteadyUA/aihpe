@@ -1,4 +1,4 @@
-import { generateText, tool, ModelMessage, ImagePart, TextPart, LanguageModel } from 'ai';
+import { generateText, streamText, tool, ModelMessage, ImagePart, TextPart, LanguageModel } from 'ai';
 import { z } from 'zod';
 import { SessionFiles } from '../../types/chat';
 import { GeneratePageRequest, GeneratePageResult, LlmClient, VariantRequest } from './types';
@@ -40,21 +40,25 @@ export class AiSdkClient implements LlmClient {
         }
 
         try {
-            const result = await generateText({
+            const result = streamText({
                 model: this.model,
                 system: systemPrompt,
                 messages: messages,
                 tools: request.allowVariants ? tools : undefined,
             });
 
-            if (this.modelId) {
-                console.log('Model:', this.modelId);
+            let fullText = '';
+            for await (const chunk of result.textStream) {
+                fullText += chunk;
+                if (request.onProgress) {
+                    request.onProgress(chunk);
+                }
             }
-            console.log('User Instructions:', request.instructions);
-            console.log('Token Usage:', JSON.stringify(result.usage, null, 2));
 
-            // Check for tool calls
-            const variantCall = result.toolCalls.find((t) => t.toolName === 'generate_variants');
+            // We need to await the full tool calls resolution if any
+            const toolCalls = await result.toolCalls;
+            const variantCall = toolCalls.find((t) => t.toolName === 'generate_variants');
+
             if (variantCall) {
                 return {
                     summary: 'Generating variants...',
@@ -63,8 +67,15 @@ export class AiSdkClient implements LlmClient {
                 };
             }
 
-            const text = result.text;
-            const parsed = this.parseResponse(text, request.files);
+            if (this.modelId) {
+                console.log('Model:', this.modelId);
+            }
+            console.log('User Instructions:', request.instructions);
+            
+            const usage = await result.usage;
+            console.log('Token Usage:', JSON.stringify(usage, null, 2));
+
+            const parsed = this.parseResponse(fullText, request.files);
             return parsed;
         } catch (error) {
             console.error(`Failed to generate page with ${this.modelId || 'unknown model'}`, error);
@@ -178,13 +189,13 @@ ${files.js}
 
     private extractJsonBlock(content: string): string | undefined {
         // 1. Try strict markdown code block with 'json' identifier
-        const matchJson = content.match(/```json\s*([\s\S]*?)\s*```/i);
+        const matchJson = content.match(/\`\`\`json\s*([\s\S]*?)\s*\`\`\`/i);
         if (matchJson) {
             return matchJson[1];
         }
 
         // 2. Try generic markdown code block
-        const matchGeneric = content.match(/```\s*([\s\S]*?)\s*```/i);
+        const matchGeneric = content.match(/\`\`\`\s*([\s\S]*?)\s*\`\`\`/i);
         if (matchGeneric) {
             return matchGeneric[1];
         }

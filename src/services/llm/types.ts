@@ -7,6 +7,7 @@ export interface GeneratePageRequest {
     conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
     attachments?: ChatAttachment[];
     allowVariants?: boolean;
+    onProgress?: (chunk: string) => void;
 }
 
 export interface VariantRequest {

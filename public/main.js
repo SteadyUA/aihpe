@@ -693,6 +693,12 @@ function handleChatStatusUpdate(payload) {
       setBusy(true, label);
       break;
     }
+    case 'generating': {
+      const label = message || 'Генерация ответа...';
+      ensureAssistantPlaceholder(label);
+      setBusy(true, label);
+      break;
+    }
     case 'completed': {
       const summary = typeof details === 'string' && details.trim().length > 0 ? details : message || 'Готово';
       finalizePendingAssistantMessage(summary);
@@ -726,20 +732,29 @@ function handleChatStatusUpdate(payload) {
 }
 
 function updateSessionState(payload) {
-  const { sessionId, status, message } = payload;
-  if (!sessionStates[sessionId]) {
-    sessionStates[sessionId] = { status: 'idle' };
+  const { sessionId: targetId, status, message } = payload;
+  if (!sessionStates[targetId]) {
+    sessionStates[targetId] = { status: 'idle' };
   }
   
-  if (status === 'started') {
-    sessionStates[sessionId].status = 'busy';
-    sessionStates[sessionId].message = message;
+  const prevState = sessionStates[targetId].status;
+  let nextState = prevState;
+
+  if (status === 'started' || status === 'generating') {
+    nextState = 'busy';
+    sessionStates[targetId].message = message;
   } else if (['completed', 'error', 'skipped'].includes(status)) {
-    sessionStates[sessionId].status = 'idle';
-    sessionStates[sessionId].message = '';
+    nextState = 'idle';
+    sessionStates[targetId].message = '';
   }
   
-  renderSessionTabs();
+  sessionStates[targetId].status = nextState;
+  
+  // Only re-render tabs if the busy/idle state actually changed.
+  // This prevents flickering during 'generating' stream updates.
+  if (prevState !== nextState) {
+    renderSessionTabs();
+  }
 }
 
 function restoreSessionState() {

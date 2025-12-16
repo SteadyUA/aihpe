@@ -72,6 +72,9 @@ export class ChatService {
     }
 
     try {
+      let lastProgressEmit = 0;
+      let charsGenerated = 0;
+
       const client = this.llmFactory.getClient();
       const generation = await client.generatePage({
         sessionId,
@@ -80,6 +83,14 @@ export class ChatService {
         conversation,
         attachments: normalizedAttachments,
         allowVariants,
+        onProgress: (chunk) => {
+             charsGenerated += chunk.length;
+             const now = Date.now();
+             if (now - lastProgressEmit > 200) { // Emit every 200ms
+                 this.notifyStatus(sessionId, 'generating', `Генерация ответа... (${charsGenerated} символов)`, { chars: charsGenerated });
+                 lastProgressEmit = now;
+             }
+        }
       });
 
       if (generation.variantRequest) {
