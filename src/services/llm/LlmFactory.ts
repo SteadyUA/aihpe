@@ -1,25 +1,42 @@
-import { Service, Inject } from 'typedi';
+import { Service } from 'typedi';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { LanguageModel } from 'ai';
 import { LlmClient } from './types';
-import { OpenAiClient } from './OpenAiClient';
-import { GeminiClient } from './GeminiClient';
+import { AiSdkClient } from './AiSdkClient';
 
 @Service()
 export class LlmFactory {
-    // We can let TypeDI manage the instances as singletons or create them here.
-    // Since they hold state (client instance), singletons via DI is good.
-
-    constructor(
-        @Inject(() => OpenAiClient) private readonly openAiClient: OpenAiClient,
-        @Inject(() => GeminiClient) private readonly geminiClient: GeminiClient,
-    ) { }
-
+    
     getClient(): LlmClient {
-        const model = process.env.MODEL || 'gpt-5.1-codex';
+        const modelId = process.env.MODEL || 'gpt-4o';
+        const isGemini = modelId.startsWith('gemini');
+        
+        let model: LanguageModel | undefined;
 
-        if (model.startsWith('gemini')) {
-            return this.geminiClient;
+        if (isGemini) {
+            // Check for explicit GEMINI_API_KEY (custom) or standard GOOGLE_GENERATIVE_AI_API_KEY
+            const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+            
+            if (apiKey) {
+                // Explicitly create provider with the found API key
+                const google = createGoogleGenerativeAI({
+                    apiKey: apiKey
+                });
+                model = google(modelId);
+            }
+        } else {
+            const apiKey = process.env.OPENAI_API_KEY;
+            
+            if (apiKey) {
+                // Explicitly create provider with the found API key
+                const openai = createOpenAI({
+                    apiKey: apiKey
+                });
+                model = openai(modelId);
+            }
         }
 
-        return this.openAiClient;
+        return new AiSdkClient(model, modelId);
     }
 }
