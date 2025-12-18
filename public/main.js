@@ -1,4 +1,9 @@
 import { ElementSelector } from './element-selector.js';
+import { marked } from './vendor/marked.esm.js';
+
+marked.setOptions({
+  breaks: true,
+});
 
 const activeSessionKey = 'html-preview-active-session-id';
 const sessionsListKey = 'html-preview-sessions-list';
@@ -512,7 +517,13 @@ function addMessage(role, text, options = {}) {
   }
   
   const textNode = document.createElement('div');
-  textNode.textContent = text;
+  textNode.className = 'message-text';
+  const resolvedText = typeof text === 'string' ? text : '';
+  if (role === 'assistant') {
+    textNode.innerHTML = renderAssistantMarkdown(resolvedText);
+  } else {
+    textNode.textContent = resolvedText;
+  }
   contentEl.appendChild(textNode);
   el.appendChild(contentEl);
 
@@ -558,6 +569,18 @@ function addMessage(role, text, options = {}) {
   return el;
 }
 
+function renderAssistantMarkdown(text) {
+  const value = (text || '').trim();
+  if (!value) {
+    return '';
+  }
+  try {
+    return marked.parse(value, { async: false });
+  } catch (error) {
+    console.error('Failed to render assistant markdown', error);
+    return value;
+  }
+}
 
 function createAssistantPlaceholder(initialMessage = 'Готовлю ответ...') {
   if (!messagesEl) {

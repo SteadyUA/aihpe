@@ -246,6 +246,19 @@ body {
   border: 1px solid var(--border-color);
   color: var(--text-primary);
   border-bottom-left-radius: 2px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.message.assistant {
+    p, ul, ol {
+        margin: 0.75rem 0;
+    }
+    ul, ol {
+        padding-inline-start: 1rem;
+    }
+    li > ul, li > ol {
+        margin: 0;
+    }
 }
 
 .message-has-version {

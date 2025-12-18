@@ -10,6 +10,7 @@ import { SessionStore } from '../services/session/SessionStore';
 import { ChatAttachment } from '../types/chat';
 
 class ScreenshotAttachmentRequest {
+
   @IsString()
   @IsNotEmpty()
   @IsIn(['screenshot'])
