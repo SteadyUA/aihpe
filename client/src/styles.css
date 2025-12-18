@@ -27,6 +27,15 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Header */
@@ -46,7 +55,7 @@ body {
   align-items: center;
   justify-content: space-between;
   height: var(--header-height);
-    display: none;
+  display: none;
 }
 
 .app-header h1 {
@@ -182,8 +191,10 @@ body {
 .app {
   display: grid;
   grid-template-columns: 400px 1fr;
+  grid-template-rows: auto 1fr;
   flex: 1;
   overflow: hidden;
+  height: 100%;
 }
 
 /* Chat Panel */
@@ -249,16 +260,24 @@ body {
   padding-top: 0;
   padding-bottom: 0;
 }
+
 .message.assistant {
-    p, ul, ol {
-        margin: 0.75rem 0;
-    }
-    ul, ol {
-        padding-inline-start: 1rem;
-    }
-    li > ul, li > ol {
-        margin: 0;
-    }
+
+  p,
+  ul,
+  ol {
+    margin: 0.75rem 0;
+  }
+
+  ul,
+  ol {
+    padding-inline-start: 1rem;
+  }
+
+  li>ul,
+  li>ol {
+    margin: 0;
+  }
 }
 
 .message-has-version {
@@ -323,7 +342,7 @@ body {
 
 .message-version-active .message-version-clone {
   opacity: 1;
-      pointer-events: auto;
+  pointer-events: auto;
 }
 
 .message-version-clone-hidden {
@@ -334,13 +353,14 @@ body {
   position: relative;
   margin-top: -1rem;
 }
+
 .message-version-divider::after {
-    content: '';
-    display: block;
-    width: 100%;
-    border-top: 1px dashed var(--border-color);
-    top: 0.5rem;
-    position: absolute;
+  content: '';
+  display: block;
+  width: 100%;
+  border-top: 1px dashed var(--border-color);
+  top: 0.5rem;
+  position: absolute;
 }
 
 .message.message-dimmed {
@@ -374,7 +394,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-form {
@@ -444,7 +466,8 @@ button[type="submit"]:disabled {
   gap: 0.5rem;
 }
 
-.picker-button-chat:hover, .picker-button-chat[aria-pressed="true"] {
+.picker-button-chat:hover,
+.picker-button-chat[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(37, 99, 235, 0.05);
@@ -510,7 +533,8 @@ button[type="submit"]:disabled {
   height: 28px;
 }
 
-.preview-action:hover, .preview-action[aria-pressed="true"] {
+.preview-action:hover,
+.preview-action[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(37, 99, 235, 0.05);
@@ -577,11 +601,11 @@ button[type="submit"]:disabled {
   transition: transform 0.2s;
 }
 
-.toggle input:checked + .toggle-switch {
+.toggle input:checked+.toggle-switch {
   background: var(--accent);
 }
 
-.toggle input:checked + .toggle-switch::after {
+.toggle input:checked+.toggle-switch::after {
   transform: translateX(16px);
 }
 
@@ -663,7 +687,8 @@ iframe {
   color: var(--text-primary);
 }
 
-.asset-tab.active, .asset-tab[aria-selected="true"] {
+.asset-tab.active,
+.asset-tab[aria-selected="true"] {
   background: white;
   border-color: var(--border-color);
   color: var(--accent);
@@ -671,16 +696,17 @@ iframe {
   box-shadow: 0 1px 0 white;
   margin-bottom: -1px;
   z-index: 1;
-    position: relative;
+  position: relative;
 }
+
 .asset-tab.active::after {
-    content: '';
-    position: absolute;
-    z-index: 10;
-    width: 100%;
-    border-bottom: 1px solid white;
-    bottom: -1px;
-    left: 0;
+  content: '';
+  position: absolute;
+  z-index: 10;
+  width: 100%;
+  border-bottom: 1px solid white;
+  bottom: -1px;
+  left: 0;
 }
 
 .assets-spacer {
@@ -879,9 +905,10 @@ pre {
   font-weight: 600;
   /* position sticky is not needed in grid if the container is fixed, 
      but keeping it doesn't hurt. However, grid naturally places it at top. */
-  position: relative; 
+  position: relative;
   top: 0;
-  flex: 0 0 auto; /* Ignored in grid but harmless */
+  flex: 0 0 auto;
+  /* Ignored in grid but harmless */
 }
 
 .preview-panel.code-view .assets details[open] pre {
@@ -923,7 +950,7 @@ pre {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
   }
-  
+
   .chat-panel {
     border-right: none;
     border-bottom: 1px solid var(--border-color);
@@ -1571,4 +1598,3 @@ pre {
   border-color: var(--group-color);
   border-top-color: transparent;
 }
-
