@@ -54,9 +54,8 @@ export class ChatService {
     const historyForPrompt = currentHistory.slice(0, -1);
 
     const conversation = historyForPrompt
-      .filter((item) => item.role === 'user' || item.role === 'assistant')
       .map((item) => ({
-        role: item.role as 'user' | 'assistant',
+        ...item,
         content: this.enrichContentWithSelection(item.content, item.selection)
       }));
 
@@ -74,6 +73,7 @@ export class ChatService {
     try {
       let lastProgressEmit = 0;
       let charsGenerated = 0;
+      let currentDisplayMessage = '';
 
       const client = this.llmFactory.getClient();
       const generation = await client.generatePage({
@@ -84,10 +84,28 @@ export class ChatService {
         attachments: normalizedAttachments,
         allowVariants,
         onProgress: (chunk) => {
-             charsGenerated += chunk.length;
+             // Logic to handle both streaming thoughts and tool status updates
+             if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
+                 // Append tool status to the log, ensuring it starts on a new line if there's content
+                 if (currentDisplayMessage && !currentDisplayMessage.endsWith('\n')) {
+                     currentDisplayMessage += '\n';
+                 }
+                 currentDisplayMessage += `[${chunk}]`; // Wrap in brackets to distinguish
+             } else {
+                 // Streaming text chunk (thought/reasoning)
+                 currentDisplayMessage += chunk;
+                 charsGenerated += chunk.length;
+             }
+
              const now = Date.now();
-             if (now - lastProgressEmit > 200) { // Emit every 200ms
-                 this.notifyStatus(sessionId, 'generating', `Генерация ответа... (${charsGenerated} символов)`, { chars: charsGenerated });
+             if (now - lastProgressEmit > 100) { // Emit more frequently for smooth typing effect
+                 // Truncate if too long to keep UI clean, show last 200 chars to include reasoning + tool
+                 const display = currentDisplayMessage.length > 200 
+                    ? '...' + currentDisplayMessage.slice(-200) 
+                    : currentDisplayMessage;
+                 
+                 const label = display.trim() || `Генерация ответа... (${charsGenerated} символов)`;
+                 this.notifyStatus(sessionId, 'generating', label, { chars: charsGenerated });
                  lastProgressEmit = now;
              }
         }
@@ -141,7 +159,42 @@ export class ChatService {
       }
 
       const updated = this.sessionStore.updateFiles(sessionId, generation.files);
-      this.appendAssistantMessage(sessionId, generation.summary, updated.currentVersion);
+      
+      if (generation.newMessages && generation.newMessages.length > 0) {
+        for (const msg of generation.newMessages) {
+             // Create a clean message object to ensure all required fields are present
+             const cleanMsg: ChatMessage = {
+                 role: msg.role,
+                 content: msg.content,
+                 createdAt: new Date(),
+                 version: updated.currentVersion,
+                 selection: msg.selection
+             };
+             this.sessionStore.appendMessage(sessionId, cleanMsg);
+        }
+
+        // Check if we need to append the summary explicitly.
+        // If the last message was a tool execution (role='tool') or an assistant call without text response,
+        // we should append the summary so the user sees it.
+        const lastMsg = generation.newMessages[generation.newMessages.length - 1];
+        let hasVisibleResponse = false;
+
+        if (lastMsg.role === 'assistant') {
+            if (typeof lastMsg.content === 'string' && lastMsg.content.trim().length > 0) {
+                hasVisibleResponse = true;
+            } else if (Array.isArray(lastMsg.content)) {
+                // Check if there is any text part with content
+                const textPart = lastMsg.content.find((p: any) => p.type === 'text' && p.text && p.text.trim().length > 0);
+                if (textPart) hasVisibleResponse = true;
+            }
+        }
+
+        if (!hasVisibleResponse && generation.summary) {
+             this.appendAssistantMessage(sessionId, generation.summary, updated.currentVersion);
+        }
+      } else {
+        this.appendAssistantMessage(sessionId, generation.summary, updated.currentVersion);
+      }
 
       this.notifyStatus(sessionId, 'completed', 'Запрос к GPT завершён.', generation.summary);
 
@@ -206,7 +259,7 @@ export class ChatService {
     return attachmentLines;
   }
 
-  private appendAssistantMessage(sessionId: string, content: string, version?: number): void {
+  private appendAssistantMessage(sessionId: string, content: any, version?: number): void {
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: content,
@@ -216,9 +269,12 @@ export class ChatService {
     this.sessionStore.appendMessage(sessionId, assistantMessage);
   }
 
-  private enrichContentWithSelection(content: string, selection?: { selector: string }): string {
+  private enrichContentWithSelection(content: any, selection?: { selector: string }): any {
     if (!selection) return content;
-    return `[Выбран элемент: ${selection.selector}] ${content}`;
+    if (typeof content === 'string') {
+        return `[Выбран элемент: ${selection.selector}] ${content}`;
+    }
+    return content;
   }
 
   getSession(sessionId: string): SessionData {

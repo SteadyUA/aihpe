@@ -13,6 +13,13 @@ export class LlmFactory {
         const isGemini = modelId.startsWith('gemini');
         
         let model: LanguageModel | undefined;
+        // Determine approximate context window
+        let maxTokens = 128000;
+        if (modelId.includes('gemini-1.5-pro')) maxTokens = 2000000;
+        else if (modelId.includes('gemini-1.5-flash')) maxTokens = 1000000;
+        else if (modelId.includes('claude-3-5')) maxTokens = 200000;
+        else if (modelId.includes('gpt-4-turbo') || modelId.includes('gpt-4o')) maxTokens = 128000;
+        else if (modelId.includes('gpt-3.5')) maxTokens = 16000;
 
         if (isGemini) {
             // Check for explicit GEMINI_API_KEY (custom) or standard GOOGLE_GENERATIVE_AI_API_KEY
@@ -37,6 +44,6 @@ export class LlmFactory {
             }
         }
 
-        return new AiSdkClient(model, modelId);
+        return new AiSdkClient(model, modelId, maxTokens);
     }
 }

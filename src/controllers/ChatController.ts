@@ -66,6 +66,34 @@ export class ChatController {
     private readonly sseService: SseService,
   ) {}
 
+  private formatHistory(history: any[]) {
+    return history
+        .map((entry) => ({
+            role: entry.role,
+            content: this.formatContent(entry.content),
+            selection: entry.selection,
+            version: entry.version,
+            createdAt: entry.createdAt.toISOString(),
+        }))
+        .filter(entry => {
+            // Filter out empty messages (usually tool calls/results hidden from UI)
+            // But always keep user messages to avoid confusion
+            if (entry.role === 'user') return true;
+            return entry.content.trim().length > 0;
+        });
+  }
+
+  private formatContent(content: any): string {
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+          return content
+              .filter(part => part.type === 'text')
+              .map(part => part.text)
+              .join('\n');
+      }
+      return ''; // Fallback for unknown objects to empty string (hidden)
+  }
+
   @Get('/api/sse')
   stream(@Req() request: Request, @Res() response: Response): Response {
     this.sseService.addClient(request, response);
@@ -91,13 +119,7 @@ export class ChatController {
     return {
       id: session.id,
       files: session.files,
-      history: session.history.map((entry) => ({
-        role: entry.role,
-        content: entry.content,
-        selection: entry.selection,
-        version: entry.version,
-        createdAt: entry.createdAt.toISOString(),
-      })),
+      history: this.formatHistory(session.history),
       updatedAt: session.updatedAt.toISOString(),
       group: session.group,
       currentVersion: session.currentVersion,
@@ -124,13 +146,7 @@ export class ChatController {
     return {
       id: snapshot.id,
       files: snapshot.files,
-      history: snapshot.history.map((entry) => ({
-        role: entry.role,
-        content: entry.content,
-        selection: entry.selection,
-        version: entry.version,
-        createdAt: entry.createdAt.toISOString(),
-      })),
+      history: this.formatHistory(snapshot.history),
       updatedAt: snapshot.updatedAt.toISOString(),
       group: snapshot.group,
       currentVersion: snapshot.currentVersion,
@@ -143,13 +159,7 @@ export class ChatController {
     return {
       id: snapshot.id,
       files: snapshot.files,
-      history: snapshot.history.map((entry) => ({
-        role: entry.role,
-        content: entry.content,
-        selection: entry.selection,
-        version: entry.version,
-        createdAt: entry.createdAt.toISOString(),
-      })),
+      history: this.formatHistory(snapshot.history),
       updatedAt: snapshot.updatedAt.toISOString(),
       group: snapshot.group,
       currentVersion: snapshot.currentVersion,
@@ -240,13 +250,7 @@ export class ChatController {
       return response.json({
         id: session.id,
         files: session.files,
-        history: session.history.map((entry) => ({
-          role: entry.role,
-          content: entry.content,
-          selection: entry.selection,
-          version: entry.version,
-          createdAt: entry.createdAt.toISOString(),
-        })),
+        history: this.formatHistory(session.history),
         updatedAt: session.updatedAt.toISOString(),
         group: session.group,
         currentVersion: session.currentVersion,

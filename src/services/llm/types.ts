@@ -1,10 +1,10 @@
-import { ChatAttachment, SessionFiles } from '../../types/chat';
+import { ChatAttachment, SessionFiles, ChatMessage } from '../../types/chat';
 
 export interface GeneratePageRequest {
     sessionId: string;
     instructions: string;
     files: SessionFiles;
-    conversation: Array<{ role: 'user' | 'assistant'; content: string }>;
+    conversation: ChatMessage[];
     attachments?: ChatAttachment[];
     allowVariants?: boolean;
     onProgress?: (chunk: string) => void;
@@ -19,6 +19,7 @@ export interface GeneratePageResult {
     summary: string;
     files: SessionFiles;
     variantRequest?: VariantRequest;
+    newMessages?: ChatMessage[];
 }
 
 export interface LlmClient {

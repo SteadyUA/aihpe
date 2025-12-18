@@ -4,11 +4,11 @@ export interface SessionFiles {
   js: string;
 }
 
-export type ChatRole = 'user' | 'assistant' | 'system';
+export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  content: any;
   selection?: { selector: string };
   version?: number;
   createdAt: Date;
