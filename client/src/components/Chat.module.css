@@ -1,0 +1,306 @@
+/* Chat Panel */
+.chatPanel {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border-color);
+    height: 100%;
+    min-height: 0;
+}
+
+.messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.message {
+    position: relative;
+    max-width: 90%;
+    padding: 0.75rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.selectionChip {
+    display: inline-block;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    margin-bottom: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    color: white;
+    cursor: pointer;
+    transition:
+        background 0.2s,
+        border-color 0.2s;
+}
+
+.selectionChip:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.assistant {
+    align-self: flex-start;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.assistant p,
+.assistant ul,
+.assistant ol {
+    margin: 0.75rem 0;
+}
+
+.assistant ul,
+.assistant ol {
+    padding-inline-start: 1rem;
+}
+
+.assistant li > ul,
+.assistant li > ol {
+    margin: 0;
+}
+
+.hasVersion {
+    cursor: pointer;
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.hasVersion:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+
+.activeVersion {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.messageActions {
+    display: none;
+    position: absolute;
+    bottom: 0;
+    right: -36px;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.activeVersion .messageActions {
+    display: flex;
+}
+
+.latest .messageActions {
+    display: none !important;
+}
+
+.cloneButton {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: white;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    cursor: pointer;
+    opacity: 1;
+    pointer-events: auto;
+    transition: all 0.2s ease;
+}
+
+.cloneButton svg {
+    pointer-events: none;
+}
+
+.cloneButton:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.activeVersion .cloneButton {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.cloneButtonHidden {
+    display: none !important;
+}
+
+.versionDivider {
+    position: relative;
+    margin-top: -1rem;
+}
+
+.versionDivider::after {
+    content: '';
+    display: block;
+    width: 100%;
+    border-top: 1px dashed var(--border-color);
+    top: 0.5rem;
+    position: absolute;
+}
+
+.dimmed {
+    opacity: 0.45;
+}
+
+.system {
+    align-self: center;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    font-style: italic;
+}
+
+.error {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+.spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--text-secondary);
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s linear infinite;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.chatForm {
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--panel-bg);
+}
+
+.chatForm textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    resize: none;
+    margin-bottom: 0.5rem;
+    transition: border-color 0.2s;
+}
+
+.chatForm textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.formActions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.submitButton {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.submitButton:hover {
+    background: var(--accent-hover);
+}
+
+.submitButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pickerButton {
+    width: 100%;
+    background: white;
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    margin-bottom: 0.5rem;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.pickerButton:hover,
+.pickerButton[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.secondaryButton {
+    background: white;
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.secondaryButton:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.pending {
+    /* .message-pending from legacy */
+}
+
+@media (max-width: 768px) {
+    .chatPanel {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+}

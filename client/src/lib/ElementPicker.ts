@@ -1,4 +1,3 @@
-
 export class ElementPicker {
     private iframe: HTMLIFrameElement | null = null;
     private onSelect: ((selector: string) => void) | null = null;
@@ -110,13 +109,17 @@ export class ElementPicker {
         if (!this.iframe?.contentDocument?.body) return;
         const body = this.iframe.contentDocument.body;
 
-        if (this.handleMouseOver) body.removeEventListener('mouseover', this.handleMouseOver);
-        if (this.handleMouseOut) body.removeEventListener('mouseout', this.handleMouseOut);
-        if (this.handleClick) body.removeEventListener('click', this.handleClick);
+        if (this.handleMouseOver)
+            body.removeEventListener('mouseover', this.handleMouseOver);
+        if (this.handleMouseOut)
+            body.removeEventListener('mouseout', this.handleMouseOut);
+        if (this.handleClick)
+            body.removeEventListener('click', this.handleClick);
 
         if (this.iframe.contentDocument) {
-            this.iframe.contentDocument.querySelectorAll('.element-picker-hover')
-                .forEach(el => el.classList.remove('element-picker-hover'));
+            this.iframe.contentDocument
+                .querySelectorAll('.element-picker-hover')
+                .forEach((el) => el.classList.remove('element-picker-hover'));
         }
     }
 
@@ -133,7 +136,11 @@ export class ElementPicker {
         const path: string[] = [];
         let current: HTMLElement | null = el;
 
-        while (current && current.tagName !== 'BODY' && current.tagName !== 'HTML') {
+        while (
+            current &&
+            current.tagName !== 'BODY' &&
+            current.tagName !== 'HTML'
+        ) {
             let selector = current.tagName.toLowerCase();
 
             if (current.id) {
@@ -141,9 +148,9 @@ export class ElementPicker {
                 path.unshift(selector);
                 break;
             } else if (current.parentElement) {
-                const siblings = Array.from(current.parentElement.children).filter(
-                    c => c.tagName === current!.tagName
-                );
+                const siblings = Array.from(
+                    current.parentElement.children,
+                ).filter((c) => c.tagName === current!.tagName);
                 if (siblings.length > 1) {
                     const index = siblings.indexOf(current) + 1;
                     selector += `:nth-child(${index})`;

@@ -1,0 +1,22 @@
+/* Main App Layout */
+.app {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    grid-template-rows: auto 1fr;
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+}
+
+.sessionBarWrapper {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-color);
+}
+
+@media (max-width: 768px) {
+    .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
+    }
+}

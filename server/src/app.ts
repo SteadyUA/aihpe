@@ -6,28 +6,25 @@ import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'typedi';
 import { ChatController } from './controllers/ChatController';
 
-
 useContainer(Container);
 
 export function createApp(): express.Express {
-  const app = express();
+    const app = express();
 
+    app.use(cors());
 
+    const publicDir = path.resolve(__dirname, '..', 'public');
+    app.use(express.static(publicDir));
 
-  app.use(cors());
+    useExpressServer(app, {
+        controllers: [ChatController],
+        validation: {
+            whitelist: true,
+            forbidNonWhitelisted: true,
+            validationError: { target: false },
+        },
+        classTransformer: true,
+    });
 
-  const publicDir = path.resolve(__dirname, '..', 'public');
-  app.use(express.static(publicDir));
-
-  useExpressServer(app, {
-    controllers: [ChatController],
-    validation: {
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      validationError: { target: false },
-    },
-    classTransformer: true,
-  });
-
-  return app;
+    return app;
 }
