@@ -5,17 +5,17 @@ import { Preview } from './components/Preview';
 import { ElementPicker } from './lib/ElementPicker';
 import styles from './App.module.css';
 
-interface AppProps {}
+interface AppProps { }
 
 interface AppState {
     sessions: string[];
     activeSessionId: string | null;
     groups: Record<string, number>;
     messages: any[];
-    files: { html: string; css: string; js: string };
     utilStatus: string;
     utilMessage: string | null;
     activeVersion: number | null;
+    currentVersion: number;
     activeVersions: Record<string, number | null>; // Map sessionId -> activeVersion
 
     // UI states
@@ -35,10 +35,10 @@ export default class App extends React.Component<AppProps, AppState> {
             activeSessionId: null,
             groups: {},
             messages: [],
-            files: { html: '', css: '', js: '' },
             utilStatus: 'idle',
             utilMessage: null,
             activeVersion: null,
+            currentVersion: 0,
             activeVersions: {},
             selection: null,
             isPicking: false,
@@ -111,7 +111,6 @@ export default class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) {
             this.setState({
                 messages: [],
-                files: { html: '', css: '', js: '' },
                 utilStatus: 'idle',
                 utilMessage: null,
                 selection: null,
@@ -144,6 +143,8 @@ export default class App extends React.Component<AppProps, AppState> {
             } else if (data.status === 'completed') {
                 this.setState({ utilStatus: 'idle', utilMessage: null });
                 this.fetchSession(activeSessionId).then(() => {
+                    // Update current version if it increased (it should have)
+                    // The fetchSession call will update state.currentVersion
                     // If we are viewing a specific version, ensure we keep seeing it
                     const { activeVersion } = this.state;
                     if (activeVersion !== null) {
@@ -182,7 +183,7 @@ export default class App extends React.Component<AppProps, AppState> {
             const data = await res.json();
             this.setState({
                 messages: data.history || [],
-                files: data.files || { html: '', css: '', js: '' },
+                currentVersion: data.currentVersion ?? 0,
             });
         } catch (error) {
             console.error('Failed to fetch session', error);
@@ -196,6 +197,7 @@ export default class App extends React.Component<AppProps, AppState> {
             this.setState((prevState) => ({
                 sessions: [...prevState.sessions, session.id],
                 activeSessionId: session.id,
+                currentVersion: session.currentVersion ?? 0,
                 groups: session.group
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
@@ -219,6 +221,7 @@ export default class App extends React.Component<AppProps, AppState> {
             this.setState((prevState) => ({
                 sessions: [...prevState.sessions, session.id],
                 activeSessionId: session.id, // Switch to new session
+                currentVersion: session.currentVersion ?? 0,
                 groups: session.group
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
@@ -244,6 +247,7 @@ export default class App extends React.Component<AppProps, AppState> {
             this.setState((prevState) => ({
                 sessions: [...prevState.sessions, session.id],
                 activeSessionId: session.id,
+                currentVersion: session.currentVersion ?? 0, // Should be same as version cloned
                 groups: session.group
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
@@ -270,14 +274,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 },
             }));
 
-            const res = await fetch(
-                `/api/sessions/${activeSessionId}/versions/${version}/files`,
-            );
-            if (!res.ok) throw new Error('Failed to fetch version files');
-
-            const files = await res.json();
             this.setState({
-                files: { html: files.html, css: files.css, js: files.js },
                 utilStatus: 'idle',
             });
         } catch (error) {
@@ -381,7 +378,6 @@ export default class App extends React.Component<AppProps, AppState> {
             sessions,
             activeSessionId,
             messages,
-            files,
             utilStatus,
             selection,
             isPicking,
@@ -432,8 +428,10 @@ export default class App extends React.Component<AppProps, AppState> {
 
                 <Preview
                     ref={this.previewRef}
-                    files={files}
                     sessionId={activeSessionId}
+                    version={
+                        this.state.activeVersion ?? this.state.currentVersion
+                    }
                 />
             </div>
         );

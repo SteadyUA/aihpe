@@ -2,15 +2,9 @@ import React from 'react';
 import classNames from 'classnames';
 import styles from './Preview.module.css';
 
-interface Files {
-    html: string;
-    css: string;
-    js: string;
-}
-
 interface PreviewProps {
-    files: Files;
     sessionId: string | null;
+    version: number;
 }
 
 interface Device {
@@ -29,11 +23,16 @@ const DEVICES: Device[] = [
     { name: 'iPad Air', width: 820, height: 1180 },
 ];
 
+type AssetType = 'html' | 'css' | 'js';
+type TabType = 'preview' | AssetType;
+
 interface PreviewState {
-    doc: string;
     isMobile: boolean;
     deviceIndex: number;
-    activeTab: 'preview' | 'html' | 'css' | 'js';
+    activeTab: TabType;
+    iframeKey: number;
+    fileCache: Record<AssetType, string | null>;
+    loading: Record<AssetType, boolean>;
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
@@ -42,39 +41,83 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     constructor(props: PreviewProps) {
         super(props);
         this.state = {
-            doc: '',
             isMobile: false,
             deviceIndex: 0,
             activeTab: 'preview',
+            iframeKey: 0,
+            fileCache: { html: null, css: null, js: null },
+            loading: { html: false, css: false, js: false },
         };
         this.iframeRef = React.createRef();
     }
 
-    componentDidMount() {
-        this.updateDoc();
-    }
-
     componentDidUpdate(prevProps: PreviewProps) {
-        if (prevProps.files !== this.props.files) {
-            this.updateDoc();
+        if (
+            prevProps.sessionId !== this.props.sessionId ||
+            prevProps.version !== this.props.version
+        ) {
+            // Reset cache when session or version changes
+            this.setState(
+                {
+                    fileCache: { html: null, css: null, js: null },
+                    loading: { html: false, css: false, js: false },
+                },
+                () => {
+                    // If we are on a code tab, we need to re-fetch correctly
+                    if (this.state.activeTab !== 'preview') {
+                        this.fetchFile(this.state.activeTab);
+                    }
+                },
+            );
         }
     }
 
-    updateDoc = () => {
-        const { html = '', css = '', js = '' } = this.props.files;
-        const doc = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>${css}</style>
-        </head>
-        <body>
-            ${html}
-            <script type="module">${js}<\/script>
-        </body>
-        </html>
-        `;
-        this.setState({ doc });
+    fetchFile = async (type: AssetType) => {
+        const { sessionId, version } = this.props;
+        if (!sessionId) return;
+
+        // Check if already loaded or loading
+        if (this.state.fileCache[type] !== null || this.state.loading[type]) {
+            return;
+        }
+
+        this.setState((prev) => ({
+            loading: { ...prev.loading, [type]: true },
+        }));
+
+        const filenameMap: Record<AssetType, string> = {
+            html: 'index.html',
+            css: 'styles.css',
+            js: 'script.js',
+        };
+
+        try {
+            const res = await fetch(
+                `/api/sessions/${sessionId}/versions/${version}/static/${filenameMap[type]}`,
+            );
+            if (!res.ok) throw new Error('Failed to fetch file');
+            const text = await res.text();
+            this.setState((prev) => ({
+                fileCache: { ...prev.fileCache, [type]: text },
+                loading: { ...prev.loading, [type]: false },
+            }));
+        } catch (error) {
+            console.error(`Failed to load ${type}`, error);
+            this.setState((prev) => ({
+                fileCache: {
+                    ...prev.fileCache,
+                    [type]: 'Error loading content',
+                },
+                loading: { ...prev.loading, [type]: false },
+            }));
+        }
+    };
+
+    handleTabChange = (tab: TabType) => {
+        this.setState({ activeTab: tab });
+        if (tab !== 'preview') {
+            this.fetchFile(tab);
+        }
     };
 
     handleDownload = async () => {
@@ -102,12 +145,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleNewWindow = () => {
-        const newWindow = window.open('', '_blank');
-        if (newWindow) {
-            newWindow.document.open();
-            newWindow.document.write(this.state.doc);
-            newWindow.document.close();
-        }
+        const { sessionId, version } = this.props;
+        if (!sessionId) return;
+
+        const url = `/api/sessions/${sessionId}/versions/${version}/static/index.html`;
+        window.open(url, '_blank');
     };
 
     handleDeviceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -119,16 +161,25 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     getCodeContent = () => {
-        const { files } = this.props;
-        const { activeTab } = this.state;
+        const { activeTab, fileCache, loading } = this.state;
         if (activeTab === 'preview') return null;
-        return files[activeTab] || '';
+
+        if (loading[activeTab]) {
+            return 'Loading...';
+        }
+        return fileCache[activeTab] || '';
     };
 
     render() {
+        const { sessionId, version } = this.props;
         const { isMobile, deviceIndex, activeTab } = this.state;
         const device = DEVICES[deviceIndex];
         const isCodeView = activeTab !== 'preview';
+
+        const previewUrl =
+            sessionId && typeof version === 'number'
+                ? `/api/sessions/${sessionId}/versions/${version}/static/index.html`
+                : 'about:blank';
 
         return (
             <div
@@ -216,15 +267,15 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     >
                         <iframe
                             ref={this.iframeRef}
-                            srcDoc={this.state.doc}
+                            src={previewUrl}
                             title="Preview"
                             sandbox="allow-scripts allow-same-origin allow-modals"
                             style={
                                 isMobile
                                     ? {
-                                          width: `${device.width}px`,
-                                          height: `${device.height}px`,
-                                      }
+                                        width: `${device.width}px`,
+                                        height: `${device.height}px`,
+                                    }
                                     : {}
                             }
                         />
@@ -237,9 +288,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             className={classNames(styles.assetTab, {
                                 [styles.active]: activeTab === 'preview',
                             })}
-                            onClick={() =>
-                                this.setState({ activeTab: 'preview' })
-                            }
+                            onClick={() => this.handleTabChange('preview')}
                         >
                             Preview
                         </button>
@@ -250,9 +299,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 className={classNames(styles.assetTab, {
                                     [styles.active]: activeTab === type,
                                 })}
-                                onClick={() =>
-                                    this.setState({ activeTab: type })
-                                }
+                                onClick={() => this.handleTabChange(type)}
                             >
                                 {type.toUpperCase()}
                             </button>
@@ -260,9 +307,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         {isCodeView && (
                             <button
                                 className={styles.assetClose}
-                                onClick={() =>
-                                    this.setState({ activeTab: 'preview' })
-                                }
+                                onClick={() => this.handleTabChange('preview')}
                                 title="Close Code View"
                             >
                                 <svg
@@ -290,7 +335,6 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             </div>
         );
     }
-
     public getIframe = (): HTMLIFrameElement | null => {
         return this.iframeRef.current;
     };

@@ -81,7 +81,7 @@ export class ChatController {
         private readonly chatService: ChatService,
         private readonly sessionStore: SessionStore,
         private readonly sseService: SseService,
-    ) {}
+    ) { }
 
     private formatHistory(history: any[]) {
         return history
@@ -313,5 +313,49 @@ export class ChatController {
                 .status(400)
                 .json({ message: 'Не удалось клонировать указанную версию' });
         }
+    }
+
+    @Get('/api/sessions/:sessionId/versions/:version/static/:filename')
+    getStaticFile(
+        @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
+        }
+
+        const validFiles = ['index.html', 'styles.css', 'script.js'];
+        if (!validFiles.includes(filename)) {
+            return response.status(404).send('File not found');
+        }
+
+        const files = this.sessionStore.getFilesByVersion(sessionId, version);
+        if (!files) {
+            return response.status(404).send('Version not found');
+        }
+
+        let content = '';
+        let contentType = 'text/plain';
+
+        switch (filename) {
+            case 'index.html':
+                content = files.html;
+                contentType = 'text/html';
+                break;
+            case 'styles.css':
+                content = files.css;
+                contentType = 'text/css';
+                break;
+            case 'script.js':
+                content = files.js;
+                contentType = 'application/javascript';
+                break;
+        }
+
+        response.setHeader('Content-Type', contentType);
+        return response.send(content);
     }
 }
