@@ -11,6 +11,14 @@ interface IDisposable {
 interface PreviewProps {
     sessionId: string | null;
     version: number;
+    maxDate?: string;
+}
+
+interface ImageMetadata {
+    filename: string;
+    description: string;
+    createdAt: string;
+    model: string;
 }
 
 interface Device {
@@ -36,7 +44,7 @@ const FILENAME_MAP: Record<AssetType, string> = {
 };
 
 type AssetType = 'html' | 'css' | 'js';
-type TabType = 'preview' | AssetType;
+type TabType = 'preview' | 'images' | AssetType;
 
 interface PreviewState {
     isMobile: boolean;
@@ -44,9 +52,10 @@ interface PreviewState {
     activeTab: TabType;
     iframeKey: number;
     fileCache: Record<AssetType, string | null>;
-    loading: Record<AssetType, boolean>;
+    loading: Record<AssetType, boolean> & { images: boolean };
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
+    images: ImageMetadata[];
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
@@ -61,9 +70,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             activeTab: 'preview',
             iframeKey: 0,
             fileCache: { html: null, css: null, js: null },
-            loading: { html: false, css: false, js: false },
+            loading: { html: false, css: false, js: false, images: false },
             unsavedContent: { html: null, css: null, js: null },
             isSaving: false,
+            images: [],
         };
         this.iframeRef = React.createRef();
     }
@@ -105,14 +115,16 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             this.setState(
                 {
                     fileCache: { html: null, css: null, js: null },
-                    loading: { html: false, css: false, js: false },
+                    loading: { html: false, css: false, js: false, images: false },
                     unsavedContent: { html: null, css: null, js: null },
                     activeTab: 'preview', // Reset to preview on version switch
                 },
                 () => {
                     // If we stayed on code tab (unlikely due to reset), re-fetch
-                    if (this.state.activeTab !== 'preview') {
+                    if (this.state.activeTab !== 'preview' && this.state.activeTab !== 'images') {
                         this.fetchFile(this.state.activeTab);
+                    } else if (this.state.activeTab === 'images') {
+                        this.fetchImages();
                     }
                 },
             );
@@ -184,22 +196,53 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     };
 
+    fetchImages = async () => {
+        const { sessionId } = this.props;
+        if (!sessionId) return;
+
+        // If already loaded successfully (and session/version hasn't changed, handled by componentDidUpdate reset), return
+        // Actually, we reset images to [] on update, so just check if loading.
+        if (this.state.loading.images) return;
+
+        this.setState((prev) => ({
+            loading: { ...prev.loading, images: true },
+        }));
+
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/images`);
+            if (!res.ok) throw new Error('Failed to fetch images');
+            const images = await res.json();
+            this.setState((prev) => ({
+                images,
+                loading: { ...prev.loading, images: false },
+            }));
+        } catch (error) {
+            console.error('Failed to load images', error);
+            this.setState((prev) => ({
+                images: [],
+                loading: { ...prev.loading, images: false },
+            }));
+        }
+    };
+
     handleTabChange = async (tab: TabType) => {
         // Auto-save if needed before switching
         const { activeTab, unsavedContent } = this.state;
-        if (activeTab !== 'preview' && unsavedContent[activeTab] !== null) {
+        if (activeTab !== 'preview' && activeTab !== 'images' && unsavedContent[activeTab as AssetType] !== null) {
             await this.handleSave();
         }
 
         this.setState({ activeTab: tab });
-        if (tab !== 'preview') {
+        if (tab === 'images') {
+            this.fetchImages();
+        } else if (tab !== 'preview') {
             this.fetchFile(tab);
         }
     };
 
     handleEditorChange = (value: string | undefined) => {
         const { activeTab } = this.state;
-        if (activeTab === 'preview' || value === undefined) return;
+        if (activeTab === 'preview' || activeTab === 'images' || value === undefined) return;
 
         this.setState((prev) => ({
             unsavedContent: {
@@ -213,8 +256,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         const { sessionId, version } = this.props;
         const { activeTab, unsavedContent } = this.state;
 
-        if (activeTab === 'preview') return;
-        const content = unsavedContent[activeTab];
+        if (activeTab === 'preview' || activeTab === 'images') return;
+        const content = unsavedContent[activeTab as AssetType];
         if (content === null) return; // No changes
 
         if (!sessionId) return;
@@ -265,6 +308,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 return 'css';
             case 'js':
                 return 'javascript';
+            default:
+                return 'plaintext';
         }
     };
 
@@ -436,9 +481,16 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 : 'about:blank';
 
         const currentContent =
-            activeTab !== 'preview'
-                ? unsavedContent[activeTab] ?? fileCache[activeTab] ?? ''
+            activeTab !== 'preview' && activeTab !== 'images'
+                ? unsavedContent[activeTab as AssetType] ??
+                fileCache[activeTab as AssetType] ??
+                ''
                 : '';
+
+        const visibleImages = this.state.images.filter((img) => {
+            if (!this.props.maxDate) return true;
+            return new Date(img.createdAt) <= new Date(this.props.maxDate);
+        });
 
         return (
             <div
@@ -455,6 +507,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     >
                         Preview
                     </button>
+                    <button
+                        className={classNames(styles.assetTab, {
+                            [styles.active]: activeTab === 'images',
+                        })}
+                        onClick={() => this.handleTabChange('images')}
+                    >
+                        Images
+                    </button>
                     <div className={styles.assetsSpacer}></div>
                     {(['html', 'css', 'js'] as const).map((type) => (
                         <button
@@ -469,6 +529,36 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         </button>
                     ))}
                 </div>
+
+                {activeTab === 'images' && (
+                    <div className={styles.imagesPanel}>
+                        {loading.images ? (
+                            <div className={styles.loading}>Loading images...</div>
+                        ) : visibleImages.length === 0 ? (
+                            <div className={styles.noImages}>
+                                No images found for this version
+                            </div>
+                        ) : (
+                            <div className={styles.imageGrid}>
+                                {visibleImages.map((img) => (
+                                    <div
+                                        key={img.filename}
+                                        className={styles.imageTile}
+                                    >
+                                        <img
+                                            src={`/api/sessions/${sessionId}/versions/${version}/static/${img.filename}`}
+                                            alt={img.description}
+                                            className={styles.imageThumb}
+                                        />
+                                        <div className={styles.imageDesc}>
+                                            {img.description}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {!isCodeView && (
                     <div className={styles.toolbar}>
@@ -567,9 +657,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     </div>
                 )}
 
-                {isCodeView && (
+                {isCodeView && activeTab !== 'images' && (
                     <div className={styles.assetsPanels}>
-                        {loading[activeTab] ? (
+                        {loading[activeTab as AssetType] ? (
                             <div className={styles.loading}>Loading...</div>
                         ) : (
                             <Editor

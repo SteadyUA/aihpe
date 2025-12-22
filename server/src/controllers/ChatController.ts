@@ -27,6 +27,7 @@ import { ChatService } from '../services/ChatService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
 import { ChatAttachment } from '../types/chat';
+import { ImageService } from '../services/image/ImageService';
 
 class ScreenshotAttachmentRequest {
     @IsString()
@@ -83,6 +84,7 @@ export class ChatController {
         private readonly chatService: ChatService,
         private readonly sessionStore: SessionStore,
         private readonly sseService: SseService,
+        private readonly imageService: ImageService,
     ) {
         console.log('ChatController initialized');
     }
@@ -423,5 +425,9 @@ export class ChatController {
                 .status(500)
                 .json({ message: 'Не удалось обновить файлы' });
         }
+    }
+    @Get('/api/sessions/:sessionId/images')
+    async getImages(@Param('sessionId') sessionId: string) {
+        return this.imageService.listImages(sessionId);
     }
 }

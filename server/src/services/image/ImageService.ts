@@ -83,14 +83,9 @@ export class ImageService {
         }
     }
 
-    async listImages(sessionId: string): Promise<{ filename: string; description: string }[]> {
+    async listImages(sessionId: string): Promise<ImageMetadata[]> {
         const metadata = this.loadMetadata(sessionId);
-        // Verify files exist? optional, but good practice.
-        // For now just return metadata.
-        return metadata.map(m => ({
-            filename: m.filename,
-            description: m.description,
-        }));
+        return metadata;
     }
 
     private resolveSessionDir(sessionId: string): string {

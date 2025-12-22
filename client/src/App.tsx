@@ -419,6 +419,15 @@ export default class App extends React.Component<AppProps, AppState> {
             statusMap[activeSessionId] = utilStatus;
         }
 
+        const currentVersion = this.state.activeVersion ?? this.state.currentVersion;
+        const nextVersionMsg = this.state.messages.find(
+            (m) =>
+                typeof m.version === 'number' && m.version > currentVersion,
+        );
+        // If there is a message with a higher version, use its date as cutoff.
+        // Otherwise (we are at latest or no newer version exists), pass null/undefined to show all.
+        const maxDate = nextVersionMsg ? nextVersionMsg.createdAt : undefined;
+
         return (
             <div className={styles.app}>
                 <div className={styles.sessionBarWrapper}>
@@ -460,9 +469,8 @@ export default class App extends React.Component<AppProps, AppState> {
                 <Preview
                     ref={this.previewRef}
                     sessionId={activeSessionId}
-                    version={
-                        this.state.activeVersion ?? this.state.currentVersion
-                    }
+                    version={currentVersion}
+                    maxDate={maxDate}
                 />
             </div>
         );
