@@ -4,6 +4,7 @@
     flex-direction: column;
     background: var(--panel-bg);
     border-right: 1px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
     height: 100%;
     min-height: 0;
 }
@@ -75,8 +76,8 @@
     padding-inline-start: 1rem;
 }
 
-.assistant li > ul,
-.assistant li > ol {
+.assistant li>ul,
+.assistant li>ol {
     margin: 0;
 }
 
@@ -251,29 +252,7 @@
     cursor: not-allowed;
 }
 
-.pickerButton {
-    width: 100%;
-    background: white;
-    border: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    margin-bottom: 0.5rem;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-}
 
-.pickerButton:hover,
-.pickerButton[aria-pressed='true'] {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(37, 99, 235, 0.05);
-}
 
 .secondaryButton {
     background: white;

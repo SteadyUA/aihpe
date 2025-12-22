@@ -395,6 +395,30 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     [styles.codeView]: isCodeView,
                 })}
             >
+                <div className={styles.assetsTabs}>
+                    <button
+                        className={classNames(styles.assetTab, {
+                            [styles.active]: activeTab === 'preview',
+                        })}
+                        onClick={() => this.handleTabChange('preview')}
+                    >
+                        Preview
+                    </button>
+                    <div className={styles.assetsSpacer}></div>
+                    {(['html', 'css', 'js'] as const).map((type) => (
+                        <button
+                            key={type}
+                            className={classNames(styles.assetTab, {
+                                [styles.active]: activeTab === type,
+                            })}
+                            onClick={() => this.handleTabChange(type)}
+                        >
+                            {FILENAME_MAP[type]}
+                            {unsavedContent[type] !== null && ' *'}
+                        </button>
+                    ))}
+                </div>
+
                 {!isCodeView && (
                     <div className={styles.toolbar}>
                         <div className={styles.deviceControls}>
@@ -491,91 +515,31 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     </div>
                 )}
 
-                <div className={styles.assets}>
-                    <div className={styles.assetsTabs}>
-                        <button
-                            className={classNames(styles.assetTab, {
-                                [styles.active]: activeTab === 'preview',
-                            })}
-                            onClick={() => this.handleTabChange('preview')}
-                        >
-                            Preview
-                        </button>
-                        <div className={styles.assetsSpacer}></div>
-                        {(['html', 'css', 'js'] as const).map((type) => (
-                            <button
-                                key={type}
-                                className={classNames(styles.assetTab, {
-                                    [styles.active]: activeTab === type,
-                                })}
-                                onClick={() => this.handleTabChange(type)}
-                            >
-                                {FILENAME_MAP[type]}
-                                {unsavedContent[type] !== null && ' *'}
-                            </button>
-                        ))}
-                        {isCodeView && (
-                            <>
-                                <button
-                                    className={styles.assetClose}
-                                    onClick={() =>
-                                        this.handleTabChange('preview')
-                                    }
-                                    title="Close Code View"
-                                >
-                                    <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    >
-                                        <line
-                                            x1="18"
-                                            y1="6"
-                                            x2="6"
-                                            y2="18"
-                                        ></line>
-                                        <line
-                                            x1="6"
-                                            y1="6"
-                                            x2="18"
-                                            y2="18"
-                                        ></line>
-                                    </svg>
-                                </button>
-                            </>
+                {isCodeView && (
+                    <div className={styles.assetsPanels}>
+                        {loading[activeTab] ? (
+                            <div className={styles.loading}>Loading...</div>
+                        ) : (
+                            <Editor
+                                height="100%"
+                                defaultLanguage={this.getEditorLanguage(
+                                    activeTab,
+                                )}
+                                language={this.getEditorLanguage(activeTab)}
+                                value={currentContent}
+                                theme="light"
+                                onMount={this.handleEditorDidMount}
+                                onChange={this.handleEditorChange}
+                                options={{
+                                    minimap: { enabled: false },
+                                    fontSize: 14,
+                                    wordWrap: 'on',
+                                    padding: { top: 16, bottom: 16 },
+                                }}
+                            />
                         )}
                     </div>
-                    {isCodeView && (
-                        <div className={styles.assetsPanels}>
-                            {loading[activeTab] ? (
-                                <div className={styles.loading}>Loading...</div>
-                            ) : (
-                                <Editor
-                                    height="100%"
-                                    defaultLanguage={this.getEditorLanguage(
-                                        activeTab,
-                                    )}
-                                    language={this.getEditorLanguage(activeTab)}
-                                    value={currentContent}
-                                    theme="light"
-                                    onMount={this.handleEditorDidMount}
-                                    onChange={this.handleEditorChange}
-                                    options={{
-                                        minimap: { enabled: false },
-                                        fontSize: 14,
-                                        wordWrap: 'on',
-                                        padding: { top: 16, bottom: 16 },
-                                    }}
-                                />
-                            )}
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
         );
     }

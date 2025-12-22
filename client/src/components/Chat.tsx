@@ -1,6 +1,7 @@
 import React from 'react';
 import { marked } from 'marked';
 import classNames from 'classnames';
+import { ElementPicker } from './ElementPicker';
 import styles from './Chat.module.css';
 
 marked.setOptions({ breaks: true });
@@ -287,121 +288,25 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 <form className={styles.chatForm} onSubmit={this.handleSubmit}>
                     {/* Toolbar above input */}
 
-                    {/* Show Picker button ONLY if no selection is active */}
-                    {!selection && (
-                        <div style={{ marginBottom: '8px' }}>
-                            {isPicking ? (
-                                <button
-                                    type="button"
-                                    className={styles.pickerButton}
-                                    onClick={onCancelPick}
-                                    title="Cancel selection"
-                                    style={{
-                                        borderColor: 'var(--danger)',
-                                        color: 'var(--danger)',
-                                    }}
-                                    disabled={disabled}
-                                >
-                                    <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    >
-                                        <line
-                                            x1="18"
-                                            y1="6"
-                                            x2="6"
-                                            y2="18"
-                                        ></line>
-                                        <line
-                                            x1="6"
-                                            y1="6"
-                                            x2="18"
-                                            y2="18"
-                                        ></line>
-                                    </svg>
-                                    <span>Cancel Selection</span>
-                                </button>
-                            ) : (
-                                <button
-                                    type="button"
-                                    className={styles.pickerButton}
-                                    onClick={onPickElement}
-                                    title="Select an element in preview"
-                                    disabled={disabled}
-                                >
-                                    <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    >
-                                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-                                    </svg>
-                                    <span>Pick Element</span>
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {selection && (
-                        <div
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                background: 'rgba(37, 99, 235, 0.1)',
-                                padding: '4px 8px',
-                                borderRadius: '4px',
-                                marginBottom: '8px',
-                                fontSize: '0.85rem',
-                                border: '1px solid rgba(37, 99, 235, 0.2)',
-                            }}
-                        >
-                            <span style={{ fontWeight: 600, color: '#2563eb' }}>
-                                Selected:
-                            </span>
-                            <span style={{ fontFamily: 'monospace' }}>
-                                {selection}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={onClearSelection}
-                                style={{
-                                    border: 'none',
-                                    background: 'none',
-                                    cursor: 'pointer',
-                                    color: '#666',
-                                    marginLeft: 'auto',
-                                    padding: '0 4px',
-                                    fontSize: '1.2rem',
-                                    lineHeight: '1',
-                                }}
-                            >
-                                ×
-                            </button>
-                        </div>
-                    )}
+                    {/* Toolbar above input */}
+                    <ElementPicker
+                        selection={selection ?? null}
+                        isPicking={isPicking}
+                        onPick={onPickElement}
+                        onCancel={onCancelPick}
+                        onClear={onClearSelection}
+                        disabled={disabled}
+                    />
 
                     <textarea
                         value={input}
                         onChange={this.handleInputChange}
                         placeholder={disabled ? "Create a session to start chatting..." : "Describe changes..."}
-                        rows={3}
+                        rows={4}
                         disabled={disabled}
                     />
                     <div
                         className={styles.formActions}
-                        style={{ marginTop: '8px' }}
                     >
                         <button
                             type="submit"

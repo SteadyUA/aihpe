@@ -1,0 +1,77 @@
+/* ElementPicker.module.css */
+
+.pickerButton {
+    width: 100%;
+    background: white;
+    border: 1px solid var(--border-color);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.pickerButton:hover,
+.pickerButton[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.pickerContainer {
+    margin-bottom: 8px;
+}
+
+.selectionBanner {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(37, 99, 235, 0.1);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    border-radius: 6px;
+    padding: 4px;
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+
+.selectionValue {
+    flex: 1;
+    font-family: monospace;
+    background: rgba(255, 255, 255, 0.5);
+    padding: 4px;
+    border-radius: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* direction: rtl; */
+    /* text-align: left; */
+}
+
+.clearButton {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(37, 99, 235, 0.2);
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-size: 14px;
+    margin-right: 0.25rem;
+    transition: all 160ms ease;
+}
+
+.clearButton:hover {
+    background: var(--accent);
+    color: #fff;
+}

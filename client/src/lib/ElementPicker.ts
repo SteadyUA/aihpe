@@ -3,13 +3,14 @@ export class ElementPicker {
     private onSelect: ((selector: string) => void) | null = null;
     private selectedElement: HTMLElement | null = null;
 
-    // Event handlers stored as properties for removal
-    private handleMouseOver: ((e: Event) => void) | null = null;
-    private handleMouseOut: ((e: Event) => void) | null = null;
-    private handleClick: ((e: Event) => void) | null = null;
+    private overlay: HTMLElement | null = null;
+    private overlayHandlers: {
+        mousemove: (e: MouseEvent) => void;
+        click: (e: MouseEvent) => void;
+    } | null = null;
 
     stop() {
-        this.removeListeners();
+        this.removeOverlay();
         this.clearSelection();
         this.iframe = null;
         this.onSelect = null;
@@ -25,37 +26,75 @@ export class ElementPicker {
         if (!doc) return;
 
         this.injectStyles(doc);
+        this.createOverlay(doc);
+    }
 
-        this.handleMouseOver = (e: Event) => {
-            e.stopPropagation();
-            const target = e.target as HTMLElement;
-            if (target === doc.documentElement) return;
-            if (target === this.selectedElement) return;
-            target.classList.add('element-picker-hover');
+    private createOverlay(doc: Document) {
+        this.overlay = doc.createElement('div');
+        this.overlay.style.position = 'fixed';
+        this.overlay.style.top = '0';
+        this.overlay.style.left = '0';
+        this.overlay.style.width = '100%';
+        this.overlay.style.height = '100%';
+        this.overlay.style.zIndex = '2147483647'; // Max z-index
+        this.overlay.style.backgroundColor = 'transparent';
+        this.overlay.style.cursor = 'default';
+
+        // Handlers attached to the overlay
+        this.overlayHandlers = {
+            mousemove: (e: MouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Hide overlay momentarily to find element underneath
+                this.overlay!.style.pointerEvents = 'none';
+                const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
+                this.overlay!.style.pointerEvents = 'auto'; // Restore immediately
+
+                if (el && el !== doc.documentElement && el !== doc.body) {
+                    this.highlightElement(el);
+                }
+            },
+            click: (e: MouseEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                this.overlay!.style.pointerEvents = 'none';
+                const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
+                this.overlay!.style.pointerEvents = 'auto';
+
+                if (el) {
+                    this.selectElement(el);
+                    const selector = this.generateSelector(el);
+                    this.onSelect?.(selector);
+                    this.removeOverlay(); // Stop picking but keep selection
+                }
+            }
         };
 
-        this.handleMouseOut = (e: Event) => {
-            e.stopPropagation();
-            const target = e.target as HTMLElement;
-            target.classList.remove('element-picker-hover');
-        };
+        this.overlay.addEventListener('mousemove', this.overlayHandlers.mousemove);
+        this.overlay.addEventListener('click', this.overlayHandlers.click);
 
-        this.handleClick = (e: Event) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const target = e.target as HTMLElement;
+        doc.body.appendChild(this.overlay);
+    }
 
-            this.highlightElement(target);
+    private removeOverlay() {
+        if (this.overlay && this.overlay.parentNode) {
+            if (this.overlayHandlers) {
+                this.overlay.removeEventListener('mousemove', this.overlayHandlers.mousemove);
+                this.overlay.removeEventListener('click', this.overlayHandlers.click);
+                this.overlayHandlers = null;
+            }
+            this.overlay.parentNode.removeChild(this.overlay);
+        }
+        this.overlay = null;
 
-            const selector = this.generateSelector(target);
-            this.onSelect?.(selector);
-
-            this.removeListeners();
-        };
-
-        doc.body.addEventListener('mouseover', this.handleMouseOver);
-        doc.body.addEventListener('mouseout', this.handleMouseOut);
-        doc.body.addEventListener('click', this.handleClick);
+        // Cleanup hover effects
+        if (this.iframe?.contentDocument) {
+            this.iframe.contentDocument
+                .querySelectorAll('.element-picker-hover')
+                .forEach((el) => el.classList.remove('element-picker-hover'));
+        }
     }
 
     // Programmatically select an element by selector
@@ -69,7 +108,7 @@ export class ElementPicker {
 
         const el = doc.querySelector(selector) as HTMLElement;
         if (el) {
-            this.highlightElement(el);
+            this.selectElement(el);
             // Optionally scroll to it
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -83,12 +122,13 @@ export class ElementPicker {
             style.textContent = `
                 .element-picker-hover {
                     outline: 2px dashed #2563eb !important;
-                    background-color: rgba(37, 99, 235, 0.1) !important;
+                    outline-offset: 2px !important;
                     cursor: crosshair !important;
                 }
                 .element-picker-selected {
-                    outline: 2px solid #10b981 !important;
-                    background-color: rgba(16, 185, 129, 0.1) !important;
+                    outline: 3px solid #10b981 !important;
+                    outline-offset: 2px !important;
+                    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2) inset !important;
                 }
             `;
             doc.head.appendChild(style);
@@ -100,27 +140,26 @@ export class ElementPicker {
             this.selectedElement.classList.remove('element-picker-selected');
         }
 
-        target.classList.remove('element-picker-hover');
-        target.classList.add('element-picker-selected');
-        this.selectedElement = target;
-    }
-
-    private removeListeners() {
-        if (!this.iframe?.contentDocument?.body) return;
-        const body = this.iframe.contentDocument.body;
-
-        if (this.handleMouseOver)
-            body.removeEventListener('mouseover', this.handleMouseOver);
-        if (this.handleMouseOut)
-            body.removeEventListener('mouseout', this.handleMouseOut);
-        if (this.handleClick)
-            body.removeEventListener('click', this.handleClick);
-
-        if (this.iframe.contentDocument) {
+        // Clean up previous hover
+        if (this.iframe?.contentDocument) {
             this.iframe.contentDocument
                 .querySelectorAll('.element-picker-hover')
                 .forEach((el) => el.classList.remove('element-picker-hover'));
         }
+
+        target.classList.add('element-picker-hover');
+    }
+
+    private selectElement(target: HTMLElement) {
+        if (this.selectedElement) {
+            this.selectedElement.classList.remove('element-picker-selected');
+        }
+
+        // Remove hover class just in case
+        target.classList.remove('element-picker-hover');
+
+        target.classList.add('element-picker-selected');
+        this.selectedElement = target;
     }
 
     clearSelection() {

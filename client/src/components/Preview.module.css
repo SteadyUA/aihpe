@@ -74,6 +74,7 @@
 .toggle {
     display: flex;
     align-items: center;
+    line-height: 28px;
     gap: 0.5rem;
     cursor: pointer;
     font-size: 0.9rem;
@@ -182,7 +183,6 @@
     cursor: pointer;
     color: var(--text-secondary);
     border-radius: 4px 4px 0 0;
-    margin-top: 4px;
     transition: all 0.2s;
     white-space: nowrap;
 }
@@ -218,30 +218,7 @@
     flex: 1;
 }
 
-.assetClose {
-    background: none;
-    border: none;
-    padding: 0.4rem;
-    cursor: pointer;
-    color: var(--text-secondary);
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s;
-}
 
-.panel.codeView .assetClose {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.assetClose:hover {
-    background: rgba(0, 0, 0, 0.03);
-    color: var(--text-primary);
-}
 
 .assetsPanels {
     flex: 1;
