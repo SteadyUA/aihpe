@@ -3,6 +3,7 @@ import { SessionBar } from './components/SessionBar';
 import { Chat } from './components/Chat';
 import { Preview } from './components/Preview';
 import { ElementPicker } from './lib/ElementPicker';
+import { SessionStore } from './store/SessionStore';
 import styles from './App.module.css';
 
 interface AppProps { }
@@ -48,47 +49,44 @@ export default class App extends React.Component<AppProps, AppState> {
     }
 
     componentDidMount() {
-        // Load from localStorage
+        // Load from SessionStore
         try {
-            const savedSessions = localStorage.getItem('sessions');
-            const savedActiveId = localStorage.getItem('activeSessionId');
-            const savedGroups = localStorage.getItem('sessionGroups');
+            const sessions = SessionStore.loadSessions();
+            const activeSessionId = SessionStore.loadActiveSessionId();
+            const groups = SessionStore.loadGroups();
 
-            if (savedSessions) {
-                const sessions = JSON.parse(savedSessions);
-                const groups = savedGroups ? JSON.parse(savedGroups) : {};
+            if (sessions.length > 0) {
                 this.setState({
                     sessions,
                     groups,
-                    activeSessionId: savedActiveId || null,
+                    activeSessionId,
                 });
+            } else {
+                // Auto-create session on startup if none exist
+                this.createSession();
             }
         } catch (e) {
-            console.error('Failed to load from localStorage', e);
+            console.error('Failed to load from SessionStore', e);
         }
     }
 
     componentDidUpdate(_prevProps: AppProps, prevState: AppState) {
         if (prevState.activeSessionId !== this.state.activeSessionId) {
-            localStorage.setItem(
-                'activeSessionId',
-                this.state.activeSessionId || '',
-            );
+            SessionStore.saveActiveSessionId(this.state.activeSessionId);
             this.handleSessionChange();
         }
 
         if (prevState.sessions !== this.state.sessions) {
-            localStorage.setItem(
-                'sessions',
-                JSON.stringify(this.state.sessions),
-            );
+            SessionStore.saveSessions(this.state.sessions);
+
+            // Auto-create if all sessions were removed
+            if (this.state.sessions.length === 0 && prevState.sessions.length > 0) {
+                this.createSession();
+            }
         }
 
         if (prevState.groups !== this.state.groups) {
-            localStorage.setItem(
-                'sessionGroups',
-                JSON.stringify(this.state.groups),
-            );
+            SessionStore.saveGroups(this.state.groups);
         }
     }
 
@@ -190,21 +188,58 @@ export default class App extends React.Component<AppProps, AppState> {
         }
     };
 
+    private static creatingSessionPromise: Promise<any> | null = null;
+
     createSession = async () => {
+        if (App.creatingSessionPromise) {
+            try {
+                const session = await App.creatingSessionPromise;
+                // If this instance is still mounted (or rather, just run the update), try to update state
+                // Note: If multiple instances await, they all get the same session.
+                // We should check if we already have it?
+                // Actually, just proceeding to setState is fine. React handles dedup if strictly same?
+                // But here we are pushing to array.
+                // We need to avoid adding it twice if this function runs twice on the SAME instance?
+                // But here the issue is TWO instances calls it.
+                // If instance 1 calls it, makes promise.
+                // Instance 2 calls it, awaits promise.
+                // Promise resolves.
+                // Instance 1 updates state (warns if unmounted).
+                // Instance 2 updates state (works).
+                // Result: 1 session in state. Correct.
+                this.handleSessionCreated(session);
+                return;
+            } catch (e) {
+                // If failed, maybe try again?
+                App.creatingSessionPromise = null;
+            }
+        }
+
         try {
-            const res = await fetch('/api/sessions', { method: 'POST' });
-            const session = await res.json();
-            this.setState((prevState) => ({
+            App.creatingSessionPromise = fetch('/api/sessions', { method: 'POST' }).then(res => res.json());
+            const session = await App.creatingSessionPromise;
+            // Clear promise so future calls (e.g. user manually creating) make new ones
+            App.creatingSessionPromise = null;
+
+            this.handleSessionCreated(session);
+        } catch (error) {
+            console.error('Failed to create session', error);
+            App.creatingSessionPromise = null;
+        }
+    };
+
+    handleSessionCreated = (session: any) => {
+        this.setState((prevState) => {
+            if (prevState.sessions.includes(session.id)) return null;
+            return {
                 sessions: [...prevState.sessions, session.id],
                 activeSessionId: session.id,
                 currentVersion: session.currentVersion ?? 0,
                 groups: session.group
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
-            }));
-        } catch (error) {
-            console.error('Failed to create session', error);
-        }
+            };
+        });
     };
 
     cloneSession = async () => {
@@ -424,6 +459,7 @@ export default class App extends React.Component<AppProps, AppState> {
                     onCloneVersion={this.cloneVersion}
                     activeVersion={this.state.activeVersion}
                     onPreviewVersion={this.previewVersion}
+                    disabled={!activeSessionId}
                 />
 
                 <Preview

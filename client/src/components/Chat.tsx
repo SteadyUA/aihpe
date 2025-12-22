@@ -157,6 +157,7 @@ interface ChatProps {
     onCloneVersion?: (version: number) => void;
     onPreviewVersion?: (version: number) => void;
     activeVersion?: number | null;
+    disabled?: boolean;
 }
 
 interface ChatState {
@@ -193,6 +194,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (this.props.disabled) return;
         if (!this.state.input.trim()) return;
         this.props.onSend(this.state.input);
         this.setState({ input: '' });
@@ -217,6 +219,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onCloneVersion,
             activeVersion,
             onPreviewVersion,
+            disabled,
         } = this.props;
         const { input } = this.state;
 
@@ -297,6 +300,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         borderColor: 'var(--danger)',
                                         color: 'var(--danger)',
                                     }}
+                                    disabled={disabled}
                                 >
                                     <svg
                                         width="14"
@@ -329,6 +333,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     className={styles.pickerButton}
                                     onClick={onPickElement}
                                     title="Select an element in preview"
+                                    disabled={disabled}
                                 >
                                     <svg
                                         width="14"
@@ -390,8 +395,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <textarea
                         value={input}
                         onChange={this.handleInputChange}
-                        placeholder="Describe changes..."
+                        placeholder={disabled ? "Create a session to start chatting..." : "Describe changes..."}
                         rows={3}
+                        disabled={disabled}
                     />
                     <div
                         className={styles.formActions}
@@ -399,7 +405,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     >
                         <button
                             type="submit"
-                            disabled={status === 'busy'}
+                            disabled={status === 'busy' || disabled}
                             className={styles.submitButton}
                         >
                             Send
@@ -410,6 +416,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                             onClick={onCloneSession}
                             title="Clone this chat"
                             style={{ padding: '0.5rem', width: 'auto' }}
+                            disabled={disabled}
                         >
                             <svg
                                 width="16"

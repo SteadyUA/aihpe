@@ -1,6 +1,12 @@
 import React from 'react';
 import classNames from 'classnames';
+import Editor, { OnMount } from '@monaco-editor/react';
 import styles from './Preview.module.css';
+
+// Define IDisposable locally to avoid deep import issues
+interface IDisposable {
+    dispose(): void;
+}
 
 interface PreviewProps {
     sessionId: string | null;
@@ -23,6 +29,12 @@ const DEVICES: Device[] = [
     { name: 'iPad Air', width: 820, height: 1180 },
 ];
 
+const FILENAME_MAP: Record<AssetType, string> = {
+    html: 'index.html',
+    css: 'styles.css',
+    js: 'script.js',
+};
+
 type AssetType = 'html' | 'css' | 'js';
 type TabType = 'preview' | AssetType;
 
@@ -33,10 +45,13 @@ interface PreviewState {
     iframeKey: number;
     fileCache: Record<AssetType, string | null>;
     loading: Record<AssetType, boolean>;
+    unsavedContent: Record<AssetType, string | null>;
+    isSaving: boolean;
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
     private iframeRef: React.RefObject<HTMLIFrameElement | null>;
+    private disposables: IDisposable[] = [];
 
     constructor(props: PreviewProps) {
         super(props);
@@ -47,6 +62,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             iframeKey: 0,
             fileCache: { html: null, css: null, js: null },
             loading: { html: false, css: false, js: false },
+            unsavedContent: { html: null, css: null, js: null },
+            isSaving: false,
         };
         this.iframeRef = React.createRef();
     }
@@ -61,15 +78,22 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 {
                     fileCache: { html: null, css: null, js: null },
                     loading: { html: false, css: false, js: false },
+                    unsavedContent: { html: null, css: null, js: null },
+                    activeTab: 'preview', // Reset to preview on version switch
                 },
                 () => {
-                    // If we are on a code tab, we need to re-fetch correctly
+                    // If we stayed on code tab (unlikely due to reset), re-fetch
                     if (this.state.activeTab !== 'preview') {
                         this.fetchFile(this.state.activeTab);
                     }
                 },
             );
         }
+    }
+
+    componentWillUnmount() {
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
     }
 
     fetchFile = async (type: AssetType) => {
@@ -85,11 +109,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             loading: { ...prev.loading, [type]: true },
         }));
 
-        const filenameMap: Record<AssetType, string> = {
-            html: 'index.html',
-            css: 'styles.css',
-            js: 'script.js',
-        };
+        const filenameMap: Record<AssetType, string> = FILENAME_MAP;
 
         try {
             const res = await fetch(
@@ -113,10 +133,87 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     };
 
-    handleTabChange = (tab: TabType) => {
+    handleTabChange = async (tab: TabType) => {
+        // Auto-save if needed before switching
+        const { activeTab, unsavedContent } = this.state;
+        if (activeTab !== 'preview' && unsavedContent[activeTab] !== null) {
+            await this.handleSave();
+        }
+
         this.setState({ activeTab: tab });
         if (tab !== 'preview') {
             this.fetchFile(tab);
+        }
+    };
+
+    handleEditorChange = (value: string | undefined) => {
+        const { activeTab } = this.state;
+        if (activeTab === 'preview' || value === undefined) return;
+
+        this.setState((prev) => ({
+            unsavedContent: {
+                ...prev.unsavedContent,
+                [activeTab]: value,
+            },
+        }));
+    };
+
+    handleSave = async () => {
+        const { sessionId, version } = this.props;
+        const { activeTab, unsavedContent } = this.state;
+
+        if (activeTab === 'preview') return;
+        const content = unsavedContent[activeTab];
+        if (content === null) return; // No changes
+
+        if (!sessionId) return;
+
+        this.setState({ isSaving: true });
+
+        try {
+            const body = { [activeTab]: content };
+            const res = await fetch(
+                `/api/sessions/${sessionId}/versions/${version}/files`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                },
+            );
+
+            if (!res.ok) {
+                const error = await res.json();
+                alert(`Error saving: ${error.message}`);
+                throw new Error(error.message);
+            }
+
+            // Update cache with saved content and clear unsaved state
+            this.setState((prev) => ({
+                fileCache: {
+                    ...prev.fileCache,
+                    [activeTab]: content,
+                },
+                unsavedContent: {
+                    ...prev.unsavedContent,
+                    [activeTab]: null,
+                },
+                isSaving: false,
+                iframeKey: prev.iframeKey + 1, // Force iframe reload
+            }));
+        } catch (error) {
+            console.error('Failed to save', error);
+            this.setState({ isSaving: false });
+        }
+    };
+
+    getEditorLanguage = (tab: AssetType) => {
+        switch (tab) {
+            case 'html':
+                return 'html';
+            case 'css':
+                return 'css';
+            case 'js':
+                return 'javascript';
         }
     };
 
@@ -160,19 +257,125 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.setState({ isMobile: e.target.checked });
     };
 
-    getCodeContent = () => {
-        const { activeTab, fileCache, loading } = this.state;
-        if (activeTab === 'preview') return null;
+    handleEditorDidMount: OnMount = (editor, monaco) => {
+        // Dispose old providers
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
 
-        if (loading[activeTab]) {
-            return 'Loading...';
-        }
-        return fileCache[activeTab] || '';
+        // CSS Classes provider for HTML
+        this.disposables.push(
+            monaco.languages.registerCompletionItemProvider('html', {
+                provideCompletionItems: (model: any, position: any) => {
+                    const textUntilPosition: string = model.getValueInRange({
+                        startLineNumber: position.lineNumber,
+                        startColumn: 1,
+                        endLineNumber: position.lineNumber,
+                        endColumn: position.column,
+                    });
+
+                    // Trigger only if typing inside class="..."
+                    if (!textUntilPosition.match(/class=["|'][\w- ]*$/)) {
+                        return { suggestions: [] };
+                    }
+
+                    // Get CSS content
+                    const cssContent =
+                        this.state.unsavedContent?.css ??
+                        this.state.fileCache?.css ??
+                        '';
+                    // Extract classes
+                    const classRegex = /\.([a-zA-Z0-9-_]+)/g;
+                    const classes = new Set<string>();
+                    let match;
+                    while ((match = classRegex.exec(cssContent)) !== null) {
+                        classes.add(match[1]);
+                    }
+
+                    const suggestions = Array.from(classes).map((cls) => ({
+                        label: cls,
+                        kind: monaco.languages.CompletionItemKind.Class,
+                        insertText: cls,
+                        detail: 'from styles.css',
+                    }));
+
+                    return { suggestions };
+                },
+            }),
+        );
+
+        // HTML IDs and Classes provider for JS
+        this.disposables.push(
+            monaco.languages.registerCompletionItemProvider('javascript', {
+                provideCompletionItems: (_model: any, _position: any) => {
+                    // Start simple: always suggest known IDs and classes
+                    const htmlContent =
+                        this.state.unsavedContent?.html ??
+                        this.state.fileCache?.html ??
+                        '';
+
+                    const suggestions: any[] = [];
+
+                    // Extract IDs
+                    const idRegex = /id=["|']([a-zA-Z0-9-_]+)["|']/g;
+                    let idMatch;
+                    while ((idMatch = idRegex.exec(htmlContent)) !== null) {
+                        suggestions.push({
+                            label: idMatch[1],
+                            kind: monaco.languages.CompletionItemKind.Field,
+                            insertText: idMatch[1],
+                            detail: 'ID from index.html',
+                        });
+                    }
+
+                    // Extract Classes
+                    const classRegex = /class=["|']([a-zA-Z0-9-_ ]+)["|']/g;
+                    let classMatch;
+                    const seenClasses = new Set<string>();
+                    while (
+                        (classMatch = classRegex.exec(htmlContent)) !== null
+                    ) {
+                        const classes = classMatch[1].split(' ');
+                        classes.forEach((c) => {
+                            if (c && !seenClasses.has(c)) {
+                                seenClasses.add(c);
+                                suggestions.push({
+                                    label: c,
+                                    kind: monaco.languages.CompletionItemKind
+                                        .Class,
+                                    insertText: c,
+                                    detail: 'Class from index.html',
+                                });
+                            }
+                        });
+                    }
+
+                    return { suggestions };
+                },
+            }),
+        );
+
+        // Auto-save on blur
+        editor.onDidBlurEditorText(() => {
+            this.handleSave();
+        });
+
+        // Ctrl+S shortcut
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+            this.handleSave();
+        });
     };
 
     render() {
         const { sessionId, version } = this.props;
-        const { isMobile, deviceIndex, activeTab } = this.state;
+        const {
+            isMobile,
+            deviceIndex,
+            activeTab,
+            fileCache,
+            loading,
+            unsavedContent,
+            iframeKey,
+        } = this.state;
         const device = DEVICES[deviceIndex];
         const isCodeView = activeTab !== 'preview';
 
@@ -180,6 +383,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             sessionId && typeof version === 'number'
                 ? `/api/sessions/${sessionId}/versions/${version}/static/index.html`
                 : 'about:blank';
+
+        const currentContent =
+            activeTab !== 'preview'
+                ? unsavedContent[activeTab] ?? fileCache[activeTab] ?? ''
+                : '';
 
         return (
             <div
@@ -266,6 +474,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         })}
                     >
                         <iframe
+                            key={iframeKey}
                             ref={this.iframeRef}
                             src={previewUrl}
                             title="Preview"
@@ -301,34 +510,69 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 })}
                                 onClick={() => this.handleTabChange(type)}
                             >
-                                {type.toUpperCase()}
+                                {FILENAME_MAP[type]}
+                                {unsavedContent[type] !== null && ' *'}
                             </button>
                         ))}
                         {isCodeView && (
-                            <button
-                                className={styles.assetClose}
-                                onClick={() => this.handleTabChange('preview')}
-                                title="Close Code View"
-                            >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
+                            <>
+                                <button
+                                    className={styles.assetClose}
+                                    onClick={() =>
+                                        this.handleTabChange('preview')
+                                    }
+                                    title="Close Code View"
                                 >
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
+                                    <svg
+                                        width="14"
+                                        height="14"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    >
+                                        <line
+                                            x1="18"
+                                            y1="6"
+                                            x2="6"
+                                            y2="18"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="6"
+                                            x2="18"
+                                            y2="18"
+                                        ></line>
+                                    </svg>
+                                </button>
+                            </>
                         )}
                     </div>
                     {isCodeView && (
                         <div className={styles.assetsPanels}>
-                            <pre>{this.getCodeContent()}</pre>
+                            {loading[activeTab] ? (
+                                <div className={styles.loading}>Loading...</div>
+                            ) : (
+                                <Editor
+                                    height="100%"
+                                    defaultLanguage={this.getEditorLanguage(
+                                        activeTab,
+                                    )}
+                                    language={this.getEditorLanguage(activeTab)}
+                                    value={currentContent}
+                                    theme="light"
+                                    onMount={this.handleEditorDidMount}
+                                    onChange={this.handleEditorChange}
+                                    options={{
+                                        minimap: { enabled: false },
+                                        fontSize: 14,
+                                        wordWrap: 'on',
+                                        padding: { top: 16, bottom: 16 },
+                                    }}
+                                />
+                            )}
                         </div>
                     )}
                 </div>

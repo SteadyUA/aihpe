@@ -358,4 +358,38 @@ export class ChatController {
         response.setHeader('Content-Type', contentType);
         return response.send(content);
     }
+
+    @Post('/api/sessions/:sessionId/versions/:version/files')
+    updateFilesVersion(
+        @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
+        @Body() body: Partial<{ html: string; css: string; js: string }>,
+        @Res() response: Response,
+    ) {
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response
+                .status(400)
+                .json({ message: 'Некорректная версия' });
+        }
+
+        try {
+            const updatedSession = this.sessionStore.updateSessionFiles(
+                sessionId,
+                version,
+                body,
+            );
+            return response.json(updatedSession.files);
+        } catch (error: any) {
+            console.error('Failed to update files', error);
+            if (error.message === 'Cannot edit past versions') {
+                return response
+                    .status(403)
+                    .json({ message: 'Редактирование старых версий запрещено' });
+            }
+            return response
+                .status(500)
+                .json({ message: 'Не удалось обновить файлы' });
+        }
+    }
 }

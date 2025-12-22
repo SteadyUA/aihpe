@@ -229,6 +229,34 @@ export class SessionStore {
         return cloneSession(updated);
     }
 
+    updateSessionFiles(
+        sessionId: string,
+        version: number,
+        updates: Partial<SessionFiles>,
+    ): SessionData {
+        const session = this.getOrCreate(sessionId);
+        // Only allow editing the current version to ensure consistency
+        if (version !== session.currentVersion) {
+            throw new Error('Cannot edit past versions');
+        }
+
+        const newFiles: SessionFiles = {
+            ...session.files,
+            ...updates,
+        };
+
+        const updated: SessionData = {
+            ...session,
+            files: newFiles,
+            updatedAt: new Date(),
+            // Version stays the same
+        };
+
+        this.sessions.set(sessionId, updated);
+        this.persistSession(updated);
+        return cloneSession(updated);
+    }
+
     getFiles(sessionId: string): SessionFiles | undefined {
         const cached = this.sessions.get(sessionId);
         if (cached) {
@@ -344,15 +372,15 @@ export class SessionStore {
 
             const history = Array.isArray(parsed.history)
                 ? parsed.history.map((entry) => ({
-                      role: entry.role,
-                      content: entry.content,
-                      selection: entry.selection,
-                      version:
-                          typeof entry.version === 'number'
-                              ? entry.version
-                              : undefined,
-                      createdAt: new Date(entry.createdAt),
-                  }))
+                    role: entry.role,
+                    content: entry.content,
+                    selection: entry.selection,
+                    version:
+                        typeof entry.version === 'number'
+                            ? entry.version
+                            : undefined,
+                    createdAt: new Date(entry.createdAt),
+                }))
                 : [];
 
             const session: SessionData = {
