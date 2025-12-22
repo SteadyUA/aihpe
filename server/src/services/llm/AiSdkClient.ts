@@ -183,8 +183,9 @@ export class AiSdkClient implements LlmClient {
             description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
             inputSchema: z.object({
                 description: z.string().describe('Detailed description of the image to generate'),
+                summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
             }),
-            execute: async ({ description }: { description: string }) => {
+            execute: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
                     const filename = await this.imageService.generateAndSave(request.sessionId, description);
                     return `Image generated successfully: ${filename}`;
@@ -196,8 +197,10 @@ export class AiSdkClient implements LlmClient {
 
         tools.list_images = tool({
             description: 'List available images in the current session. Use this to see if a suitable image already exists before generating a new one.',
-            inputSchema: z.object({}),
-            execute: async () => {
+            inputSchema: z.object({
+                summary: z.string().describe('Explain why you are listing images. This will be shown to the user.'),
+            }),
+            execute: async ({ summary }: { summary: string }) => {
                 try {
                     const images = await this.imageService.listImages(request.sessionId);
                     if (images.length === 0) {
@@ -206,6 +209,23 @@ export class AiSdkClient implements LlmClient {
                     return JSON.stringify(images);
                 } catch (error: any) {
                     return `Failed to list images: ${error.message}`;
+                }
+            },
+        });
+
+        tools.edit_image = tool({
+            description: 'Regenerate an existing image. Use this when the user wants to change or improve an image. The new image will replace the old one with the same filename.',
+            inputSchema: z.object({
+                filename: z.string().describe('The filename of the image to regenerate (e.g., "image.png")'),
+                description: z.string().describe('The new detailed description for the image'),
+                summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
+            }),
+            execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
+                try {
+                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, filename);
+                    return `Image updated successfully: ${savedFilename}`;
+                } catch (error: any) {
+                    return `Failed to update image: ${error.message}`;
                 }
             },
         });
@@ -530,6 +550,7 @@ Rules:
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - If the user asks for variants, use 'generate_variants'.
 - If the user asks for images or you need an image, use 'list_images' to check existing ones, or 'generate_image' to create a new one.
+- If the user asks to change/regenerate an existing image, use 'edit_image'.
 `;
     }
 

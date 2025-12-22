@@ -14,7 +14,7 @@ interface ImageMetadata {
 export class ImageService {
     private readonly modelId = 'gemini-2.5-flash-image';
 
-    async generateAndSave(sessionId: string, description: string): Promise<string> {
+    async generateAndSave(sessionId: string, description: string, targetFilename?: string): Promise<string> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -62,7 +62,7 @@ export class ImageService {
             this.ensureDirectory(filesDir);
 
             const uuid = randomUUID();
-            const filename = `${uuid}.png`;
+            const filename = targetFilename || `${uuid}.png`;
             const filePath = path.join(filesDir, filename);
 
             const buffer = Buffer.from(base64Data, 'base64');
@@ -122,7 +122,9 @@ export class ImageService {
     }
 
     private saveMetadata(sessionId: string, newEntry: ImageMetadata): void {
-        const current = this.loadMetadata(sessionId);
+        let current = this.loadMetadata(sessionId);
+        // Remove existing entry if any to support updates
+        current = current.filter(item => item.filename !== newEntry.filename);
         current.push(newEntry);
         const metaPath = this.getMetadataPath(sessionId);
         try {
