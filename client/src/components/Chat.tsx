@@ -56,7 +56,7 @@ class Message extends React.Component<MessageProps> {
                         : undefined
                 }
             >
-                <div className="message-content">
+                <div className={styles.messageContent}>
                     {msg.selection && (
                         <div
                             className={styles.selectionChip}
@@ -79,10 +79,12 @@ class Message extends React.Component<MessageProps> {
                         <div className="message-text">{msg.content}</div>
                     )}
 
-                    {/* Clone Version Button for Assistant Messages */}
-                    {isAssistant &&
-                        msg.version !== undefined &&
-                        onCloneVersion && (
+                </div>
+                {/* Clone Version Button for Assistant Messages */}
+                {isAssistant &&
+                    msg.version !== undefined &&
+                    onCloneVersion && (
+                        <div className={styles.messageActions}>
                             <button
                                 className={styles.cloneButton}
                                 onClick={(e) => {
@@ -90,29 +92,6 @@ class Message extends React.Component<MessageProps> {
                                     onCloneVersion(msg.version!);
                                 }}
                                 title={`Clone from version ${msg.version}`}
-                                style={{
-                                    position: 'absolute',
-                                    top: '4px',
-                                    right: '4px',
-                                    // background: 'transparent', // style moved to css
-                                    // border: 'none',
-                                    // cursor: 'pointer',
-                                    // opacity: 0.5,
-                                    // padding: '4px'
-                                    // NOTE: The inline styles were overrides in the original code.
-                                    // I should respect them or move them to CSS.
-                                    // The original CSS had .message-version-clone styles, but the inline styles here OVERRIDE them (e.g. background transparent).
-                                    // Actually, lines 60-69 in original contained inline styles.
-                                    // If I move to module, I should probably put these in the module `cloneButton` class or keep them inline?
-                                    // The original CSS `message-version-clone` had background white. The inline has transparent.
-                                    // I'll keep inline styles for now to ensure exact visual parity, or merge them into CSS class if strict refactor.
-                                    // I will keep them to be safe, as they position the button.
-                                    background: 'transparent',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    opacity: 0.5,
-                                    padding: '4px',
-                                }}
                             >
                                 <svg
                                     width="14"
@@ -135,8 +114,8 @@ class Message extends React.Component<MessageProps> {
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
                             </button>
-                        )}
-                </div>
+                        </div>
+                    )}
             </div>
         );
     }
@@ -150,7 +129,6 @@ interface ChatProps {
     // New props for toolbar features
     onPickElement?: () => void;
     onCancelPick?: () => void;
-    onCloneSession?: () => void;
     selection?: string | null;
     isPicking?: boolean;
     onClearSelection?: () => void;
@@ -212,7 +190,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             statusMessage,
             onPickElement,
             onCancelPick,
-            onCloneSession,
             selection,
             isPicking,
             onClearSelection,
@@ -314,35 +291,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                             className={styles.submitButton}
                         >
                             Send
-                        </button>
-                        <button
-                            type="button"
-                            className={styles.secondaryButton}
-                            onClick={onCloneSession}
-                            title="Clone this chat"
-                            style={{ padding: '0.5rem', width: 'auto' }}
-                            disabled={disabled}
-                        >
-                            <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <rect
-                                    x="9"
-                                    y="9"
-                                    width="13"
-                                    height="13"
-                                    rx="2"
-                                    ry="2"
-                                ></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
                         </button>
                     </div>
                 </form>

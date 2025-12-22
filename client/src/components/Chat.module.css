@@ -19,19 +19,26 @@
 }
 
 .message {
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.messageContent {
     position: relative;
-    max-width: 90%;
     padding: 0.75rem;
     border-radius: 8px;
     font-size: 0.95rem;
     line-height: 1.5;
 }
 
-.user {
+.user .messageContent {
     align-self: flex-end;
     background: var(--accent);
     color: white;
-    border-bottom-right-radius: 2px;
+    border-bottom-left-radius: 2px;
+    width: 90%;
 }
 
 .selectionChip {
@@ -55,12 +62,12 @@
     border-color: rgba(255, 255, 255, 0.5);
 }
 
-.assistant {
+.assistant .messageContent {
     align-self: flex-start;
     background: var(--bg-color);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
-    border-bottom-left-radius: 2px;
+    border-bottom-right-radius: 2px;
     padding-top: 0;
     padding-bottom: 0;
 }
@@ -81,54 +88,42 @@
     margin: 0;
 }
 
-.hasVersion {
+.hasVersion .messageContent {
     cursor: pointer;
     transition:
         border-color 0.2s ease,
         box-shadow 0.2s ease;
 }
 
-.hasVersion:hover {
+.hasVersion:hover .messageContent {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
 }
 
-.activeVersion {
+.activeVersion .messageContent {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
 }
 
 .messageActions {
-    display: none;
-    position: absolute;
-    bottom: 0;
-    right: -36px;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.activeVersion .messageActions {
     display: flex;
 }
 
-.latest .messageActions {
-    display: none !important;
-}
-
 .cloneButton {
+    position: relative;
     width: 28px;
     height: 28px;
     padding: 0;
     border-radius: 4px;
-    border: 1px solid var(--border-color);
-    background: white;
-    color: var(--text-primary);
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0.85rem;
     cursor: pointer;
-    opacity: 1;
+    opacity: 0.6;
     pointer-events: auto;
     transition: all 0.2s ease;
 }
@@ -150,20 +145,6 @@
 
 .cloneButtonHidden {
     display: none !important;
-}
-
-.versionDivider {
-    position: relative;
-    margin-top: -1rem;
-}
-
-.versionDivider::after {
-    content: '';
-    display: block;
-    width: 100%;
-    border-top: 1px dashed var(--border-color);
-    top: 0.5rem;
-    position: absolute;
 }
 
 .dimmed {
@@ -209,6 +190,7 @@
 }
 
 .chatForm textarea {
+    display: block;
     width: 100%;
     padding: 0.75rem;
     border: 1px solid var(--border-color);
@@ -216,7 +198,7 @@
     font-family: var(--font-sans);
     font-size: 0.95rem;
     resize: none;
-    margin-bottom: 0.5rem;
+    margin-bottom: 8px;
     transition: border-color 0.2s;
 }
 
@@ -251,8 +233,6 @@
     opacity: 0.5;
     cursor: not-allowed;
 }
-
-
 
 .secondaryButton {
     background: white;

@@ -242,31 +242,6 @@ export default class App extends React.Component<AppProps, AppState> {
         });
     };
 
-    cloneSession = async () => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        try {
-            // Assuming API supports this endpoint from Main.js logic
-            const res = await fetch(`/api/sessions/${activeSessionId}/clone`, {
-                method: 'POST',
-            });
-            if (!res.ok) throw new Error('Clone failed');
-            const session = await res.json();
-            this.setState((prevState) => ({
-                sessions: [...prevState.sessions, session.id],
-                activeSessionId: session.id, // Switch to new session
-                currentVersion: session.currentVersion ?? 0,
-                groups: session.group
-                    ? { ...prevState.groups, [session.id]: session.group }
-                    : prevState.groups,
-            }));
-        } catch (error) {
-            console.error('Failed to clone session', error);
-            // Fallback if clone endpoint doesn't exist yet?
-            // The user implies it existed.
-        }
-    };
 
     cloneVersion = async (version: number) => {
         const { activeSessionId } = this.state;
@@ -324,13 +299,34 @@ export default class App extends React.Component<AppProps, AppState> {
     };
 
     removeSession = (id: string) => {
-        this.setState((prevState) => ({
-            sessions: prevState.sessions.filter((s) => s !== id),
-            activeSessionId:
-                prevState.activeSessionId === id
-                    ? null
-                    : prevState.activeSessionId,
-        }));
+        this.setState((prevState) => {
+            const index = prevState.sessions.indexOf(id);
+            if (index === -1) return null;
+
+            const newSessions = prevState.sessions.filter((s) => s !== id);
+            let newActiveId = prevState.activeSessionId;
+
+            if (prevState.activeSessionId === id) {
+                if (newSessions.length === 0) {
+                    newActiveId = null;
+                } else if (index > 0) {
+                    // Activate left neighbor (which is at index-1 in newSessions because 
+                    // the removed element was at 'index', so 0..index-1 are same)
+                    // Wait, if we remove 'index', elements 0 to index-1 are unchanged.
+                    // So newSessions[index-1] is the correct left neighbor.
+                    // Example: [A, B, C], remove B (1). new: [A, C]. index-1=0 -> A. Correct.
+                    newActiveId = newSessions[index - 1];
+                } else {
+                    // Was first element, activate new first (original second)
+                    newActiveId = newSessions[0];
+                }
+            }
+
+            return {
+                sessions: newSessions,
+                activeSessionId: newActiveId,
+            };
+        });
     };
 
     sendMessage = async (text: string) => {
@@ -451,7 +447,6 @@ export default class App extends React.Component<AppProps, AppState> {
                     statusMessage={this.state.utilMessage}
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
-                    onCloneSession={this.cloneSession}
                     selection={selection}
                     isPicking={isPicking}
                     onClearSelection={this.clearSelection}

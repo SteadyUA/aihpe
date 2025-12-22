@@ -68,7 +68,35 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.iframeRef = React.createRef();
     }
 
-    componentDidUpdate(prevProps: PreviewProps) {
+    private preservedScroll: { x: number; y: number } | null = null;
+
+    getSnapshotBeforeUpdate(prevProps: PreviewProps, prevState: PreviewState) {
+        // If we are about to switch version within the same session
+        if (
+            prevProps.sessionId === this.props.sessionId &&
+            prevProps.version !== this.props.version &&
+            prevState.activeTab === 'preview'
+        ) {
+            const iframe = this.iframeRef.current;
+            if (iframe && iframe.contentWindow) {
+                try {
+                    return {
+                        x: iframe.contentWindow.scrollX,
+                        y: iframe.contentWindow.scrollY,
+                    };
+                } catch (e) {
+                    // Ignored (cross-origin etc)
+                }
+            }
+        }
+        return null;
+    }
+
+    componentDidUpdate(
+        prevProps: PreviewProps,
+        _prevState: PreviewState,
+        snapshot: any,
+    ) {
         if (
             prevProps.sessionId !== this.props.sessionId ||
             prevProps.version !== this.props.version
@@ -88,8 +116,31 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     }
                 },
             );
+
+            if (snapshot) {
+                this.preservedScroll = snapshot;
+            } else {
+                this.preservedScroll = null;
+            }
         }
     }
+
+    handleIframeLoad = () => {
+        if (this.preservedScroll) {
+            const iframe = this.iframeRef.current;
+            if (iframe && iframe.contentWindow) {
+                try {
+                    iframe.contentWindow.scrollTo(
+                        this.preservedScroll.x,
+                        this.preservedScroll.y,
+                    );
+                } catch (e) {
+                    // Ignored
+                }
+            }
+            this.preservedScroll = null;
+        }
+    };
 
     componentWillUnmount() {
         this.disposables.forEach((d) => d.dispose());
@@ -503,6 +554,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             src={previewUrl}
                             title="Preview"
                             sandbox="allow-scripts allow-same-origin allow-modals"
+                            onLoad={this.handleIframeLoad}
                             style={
                                 isMobile
                                     ? {
