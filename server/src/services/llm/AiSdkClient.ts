@@ -14,6 +14,7 @@ import {
     LlmClient,
     VariantRequest,
 } from './types';
+import { ImageService } from '../image/ImageService';
 
 const FALLBACK_RESPONSE: GeneratePageResult = {
     summary:
@@ -27,10 +28,11 @@ const FALLBACK_RESPONSE: GeneratePageResult = {
 
 export class AiSdkClient implements LlmClient {
     constructor(
+        private readonly imageService: ImageService,
         private readonly model?: LanguageModel,
         private readonly modelId?: string,
         private readonly maxContextTokens: number = 128000,
-    ) {}
+    ) { }
 
     async generatePage(
         request: GeneratePageRequest,
@@ -176,6 +178,38 @@ export class AiSdkClient implements LlmClient {
             }),
         };
 
+        // Add image tools
+        tools.generate_image = tool({
+            description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
+            inputSchema: z.object({
+                description: z.string().describe('Detailed description of the image to generate'),
+            }),
+            execute: async ({ description }: { description: string }) => {
+                try {
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description);
+                    return `Image generated successfully: ${filename}`;
+                } catch (error: any) {
+                    return `Failed to generate image: ${error.message}`;
+                }
+            },
+        });
+
+        tools.list_images = tool({
+            description: 'List available images in the current session. Use this to see if a suitable image already exists before generating a new one.',
+            inputSchema: z.object({}),
+            execute: async () => {
+                try {
+                    const images = await this.imageService.listImages(request.sessionId);
+                    if (images.length === 0) {
+                        return 'No images found in this session.';
+                    }
+                    return JSON.stringify(images);
+                } catch (error: any) {
+                    return `Failed to list images: ${error.message}`;
+                }
+            },
+        });
+
         if (request.allowVariants) {
             tools.generate_variants = tool({
                 description:
@@ -254,8 +288,8 @@ export class AiSdkClient implements LlmClient {
                 // Check for cached tokens
                 // @ts-ignore: Accessing potential cache properties
                 const cachedTokens =
-                    usage.cachedInputTokens ??
-                    usage.promptTokensDetails?.cachedTokens;
+                    (usage as any).cachedInputTokens ??
+                    (usage as any).promptTokensDetails?.cachedTokens;
                 if (cachedTokens !== undefined) {
                     console.log(`📦 CACHED TOKENS:  ${cachedTokens}`);
                 }
@@ -495,6 +529,7 @@ Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - If the user asks for variants, use 'generate_variants'.
+- If the user asks for images or you need an image, use 'list_images' to check existing ones, or 'generate_image' to create a new one.
 `;
     }
 

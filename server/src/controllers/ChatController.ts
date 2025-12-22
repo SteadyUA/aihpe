@@ -21,6 +21,8 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Service } from 'typedi';
+import path from 'path';
+import fs from 'fs';
 import { ChatService } from '../services/ChatService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
@@ -81,7 +83,13 @@ export class ChatController {
         private readonly chatService: ChatService,
         private readonly sessionStore: SessionStore,
         private readonly sseService: SseService,
-    ) { }
+    ) {
+        console.log('ChatController initialized');
+    }
+
+
+
+
 
     private formatHistory(history: any[]) {
         return history
@@ -281,6 +289,74 @@ export class ChatController {
         return response.json({ ...files, version });
     }
 
+    @Get('/api/sessions/:sessionId/versions/:version/static/:filename')
+    getStaticFile(
+        @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        // Basic validation
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
+        }
+
+        // Allow alphanumeric, dashes, underscores, dots only
+        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const validFiles = ['index.html', 'styles.css', 'script.js'];
+        if (validFiles.includes(filename)) {
+            const files = this.sessionStore.getFilesByVersion(sessionId, version);
+            if (!files) {
+                return response.status(404).send('Version not found');
+            }
+
+            let content = '';
+            let contentType = 'text/plain';
+
+            switch (filename) {
+                case 'index.html':
+                    content = files.html;
+                    contentType = 'text/html';
+                    break;
+                case 'styles.css':
+                    content = files.css;
+                    contentType = 'text/css';
+                    break;
+                case 'script.js':
+                    content = files.js;
+                    contentType = 'application/javascript';
+                    break;
+            }
+
+            response.setHeader('Content-Type', contentType);
+            return response.send(content);
+        }
+
+        const cwd = process.cwd();
+        const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
+        const filePath = path.join(sessionRoot, safeId, 'files', filename);
+
+        if (fs.existsSync(filePath)) {
+            const ext = path.extname(filename).toLowerCase();
+            let contentType = 'application/octet-stream';
+            if (ext === '.png') contentType = 'image/png';
+            if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+            if (ext === '.html') contentType = 'text/html';
+            if (ext === '.css') contentType = 'text/css';
+            if (ext === '.js') contentType = 'application/javascript';
+
+            response.setHeader('Content-Type', contentType);
+            return fs.createReadStream(filePath);
+        }
+
+        return response.status(404).send('File not found');
+    }
+
     @Post('/api/sessions/:sessionId/versions/:version/clone')
     cloneVersion(
         @Param('sessionId') sessionId: string,
@@ -313,50 +389,6 @@ export class ChatController {
                 .status(400)
                 .json({ message: 'Не удалось клонировать указанную версию' });
         }
-    }
-
-    @Get('/api/sessions/:sessionId/versions/:version/static/:filename')
-    getStaticFile(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
-        @Param('filename') filename: string,
-        @Res() response: Response,
-    ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response.status(400).send('Invalid version');
-        }
-
-        const validFiles = ['index.html', 'styles.css', 'script.js'];
-        if (!validFiles.includes(filename)) {
-            return response.status(404).send('File not found');
-        }
-
-        const files = this.sessionStore.getFilesByVersion(sessionId, version);
-        if (!files) {
-            return response.status(404).send('Version not found');
-        }
-
-        let content = '';
-        let contentType = 'text/plain';
-
-        switch (filename) {
-            case 'index.html':
-                content = files.html;
-                contentType = 'text/html';
-                break;
-            case 'styles.css':
-                content = files.css;
-                contentType = 'text/css';
-                break;
-            case 'script.js':
-                content = files.js;
-                contentType = 'application/javascript';
-                break;
-        }
-
-        response.setHeader('Content-Type', contentType);
-        return response.send(content);
     }
 
     @Post('/api/sessions/:sessionId/versions/:version/files')

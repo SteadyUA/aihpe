@@ -1,12 +1,16 @@
-import { Service } from 'typedi';
+import { Service, Inject } from 'typedi';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { LanguageModel } from 'ai';
 import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
+import { ImageService } from '../image/ImageService';
 
 @Service()
 export class LlmFactory {
+    @Inject()
+    private imageService!: ImageService;
+
     getClient(): LlmClient {
         const modelId = process.env.MODEL || 'gpt-4o';
         const isGemini = modelId.startsWith('gemini');
@@ -14,12 +18,20 @@ export class LlmFactory {
         let model: LanguageModel | undefined;
         // Determine approximate context window
         let maxTokens = 128000;
-        if (modelId.includes('gemini-1.5-pro')) maxTokens = 2000000;
-        else if (modelId.includes('gemini-1.5-flash')) maxTokens = 1000000;
-        else if (modelId.includes('claude-3-5')) maxTokens = 200000;
-        else if (modelId.includes('gpt-4-turbo') || modelId.includes('gpt-4o'))
+        if (modelId.includes('gemini-1.5-pro')) {
+            maxTokens = 2000000;
+        } else if (modelId.includes('gemini-1.5-flash')) {
+            maxTokens = 1000000;
+        } else if (modelId.includes('claude-3-5')) {
+            maxTokens = 200000;
+        } else if (
+            modelId.includes('gpt-4-turbo') ||
+            modelId.includes('gpt-4o')
+        ) {
             maxTokens = 128000;
-        else if (modelId.includes('gpt-3.5')) maxTokens = 16000;
+        } else if (modelId.includes('gpt-3.5')) {
+            maxTokens = 16000;
+        }
 
         if (isGemini) {
             // Check for explicit GEMINI_API_KEY (custom) or standard GOOGLE_GENERATIVE_AI_API_KEY
@@ -46,6 +58,11 @@ export class LlmFactory {
             }
         }
 
-        return new AiSdkClient(model, modelId, maxTokens);
+        return new AiSdkClient(
+            this.imageService,
+            model,
+            modelId,
+            maxTokens,
+        );
     }
 }
