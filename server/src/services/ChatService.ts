@@ -15,7 +15,7 @@ export class ChatService {
         private readonly sessionStore: SessionStore,
         private readonly sseService: SseService,
         private readonly llmFactory: LlmFactory,
-    ) {}
+    ) { }
 
     async handleUserMessage(
         sessionId: string,
@@ -36,10 +36,10 @@ export class ChatService {
             this.notifyStatus(
                 sessionId,
                 'skipped',
-                'Сообщение пустое. Изменения не применены.',
+                'Message is empty. No changes applied.',
             );
             return {
-                message: 'Сообщение пустое. Изменения не применены.',
+                message: 'Message is empty. No changes applied.',
                 session,
             };
         }
@@ -59,7 +59,7 @@ export class ChatService {
         };
         this.sessionStore.appendMessage(sessionId, userMessageEntry);
 
-        this.notifyStatus(sessionId, 'started', 'Запрос к GPT выполняется...');
+        this.notifyStatus(sessionId, 'started', 'Thinking...');
 
         // 2. Prepare conversation history for prompt
         // Exclude the message we just added (the last one) so GPT treats it as "instruction" not "previous conversation"
@@ -90,9 +90,8 @@ export class ChatService {
         }
 
         try {
-            let lastProgressEmit = 0;
-            let charsGenerated = 0;
-            let currentDisplayMessage = '';
+            // Buffer for streaming thoughts to avoid emitting too frequent partial updates
+            let thoughtBuffer = '';
 
             const client = this.llmFactory.getClient();
             const generation = await client.generatePage({
@@ -102,42 +101,63 @@ export class ChatService {
                 conversation,
                 attachments: normalizedAttachments,
                 allowVariants,
+                currentVersion: session.currentVersion,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
-                    if (
-                        chunk.startsWith('Tool call:') ||
-                        chunk.startsWith('Step ')
-                    ) {
-                        // Append tool status to the log, ensuring it starts on a new line if there's content
-                        if (
-                            currentDisplayMessage &&
-                            !currentDisplayMessage.endsWith('\n')
-                        ) {
-                            currentDisplayMessage += '\n';
-                        }
-                        currentDisplayMessage += `[${chunk}]`; // Wrap in brackets to distinguish
+                    // Chunk usually comes as tokens or lines.
+                    // We need to identify specific events.
+
+                    if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
+                        // Crucial event: emit immediately as a standalone message
+                        // Also flush any pending thoughts first if needed? 
+                        // Actually, 'utilMessages' on client is a list.
+                        // Ideally we append "thoughts" as items too.
+                        // But thoughts are streaming.
+                        // Let's compromise: If we hit a tool call, we emit it.
+                        // Thoughts are tricky with the new "list" requirements.
+                        // If "Generating..." is one item, and we update it, that works.
+                        // But the requirement says "client adds elements as new events arrive".
+                        // So we should emit completed thoughts or distinct steps.
+
+                        this.notifyStatus(sessionId, 'generating', chunk);
                     } else {
-                        // Streaming text chunk (thought/reasoning)
-                        currentDisplayMessage += chunk;
-                        charsGenerated += chunk.length;
-                    }
+                        // Text stream (thoughts)
+                        // In the old logic we concatenated. 
+                        // In the new logic, maybe we want to show thoughts?
+                        // Or just "Thinking..."? 
+                        // The user said "Thinking..." is the start.
+                        // Then "generating" events are added to the list.
+                        // If we emit every token, the list will explode.
+                        // So we should probably accumulate thoughts and emit lines?
+                        // Or maybe we ignore raw tokens and only emit specific log lines from the LLM wrapper?
+                        // The `chunk` here comes from `LlmClient` which might already be doing some processing.
+                        // Let's look at `LlmClient`... wait I can't look at it easily now without tool call.
+                        // Assuming `chunk` is a token string.
 
-                    const now = Date.now();
-                    if (now - lastProgressEmit > 100) {
-                        // Emit more frequently for smooth typing effect
-                        // Truncate if too long to keep UI clean, show last 200 chars to include reasoning + tool
-                        const display =
-                            currentDisplayMessage.length > 200
-                                ? '...' + currentDisplayMessage.slice(-200)
-                                : currentDisplayMessage;
+                        // If we just want to show "Tool calls", then we might ignore raw text if it's just "I will now..."
+                        // UNLESS the user wants to see the thoughts.
+                        // Let's assume we maintain a "Processing..." item that updates? 
+                        // No, the user said "adds elements".
+                        // So we should emit only SIGNIFICANT events.
+                        // Tool calls and Steps are significant.
+                        // Random text generation might be too noisy.
+                        // Let's try buffering lines.
 
-                        const label =
-                            display.trim() ||
-                            `Генерация ответа... (${charsGenerated} символов)`;
-                        this.notifyStatus(sessionId, 'generating', label, {
-                            chars: charsGenerated,
-                        });
-                        lastProgressEmit = now;
+                        thoughtBuffer += chunk;
+                        if (thoughtBuffer.includes('\n')) {
+                            const lines = thoughtBuffer.split('\n');
+                            thoughtBuffer = lines.pop() || ''; // Keep last partial line
+
+                            for (const line of lines) {
+                                const trimmedLine = line.trim();
+                                if (trimmedLine.length > 0) {
+                                    // Check if it looks like a log or just text
+                                    // If we emit every line of thought, it might be okay?
+                                    // Let's emit it.
+                                    this.notifyStatus(sessionId, 'generating', trimmedLine);
+                                }
+                            }
+                        }
                     }
                 },
             });
@@ -149,7 +169,7 @@ export class ChatService {
                 this.notifyStatus(
                     sessionId,
                     'completed',
-                    `Запущена генерация ${count} вариантов...`,
+                    `Starting generation of ${count} variants...`,
                 );
 
                 for (let i = 0; i < count; i++) {
@@ -195,7 +215,7 @@ export class ChatService {
                     );
                 }
 
-                const summary = `Создано ${count} вариантов в новых сессиях.`;
+                const summary = `Created ${count} variants in new sessions.`;
                 this.appendAssistantMessage(
                     sessionId,
                     summary,
@@ -269,7 +289,7 @@ export class ChatService {
             this.notifyStatus(
                 sessionId,
                 'completed',
-                'Запрос к GPT завершён.',
+                'Request completed.',
                 generation.summary,
             );
 
@@ -282,7 +302,7 @@ export class ChatService {
             this.notifyStatus(
                 sessionId,
                 'error',
-                'Не удалось выполнить запрос к GPT.',
+                'Failed to process request.',
                 description,
             );
             throw error;

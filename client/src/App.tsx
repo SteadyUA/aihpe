@@ -14,7 +14,14 @@ interface AppState {
     groups: Record<string, number>;
     messages: any[];
     utilStatus: string;
-    utilMessage: string | null;
+    utilMessages: string[];
+    requestStartTime: number | null;
+    utilMessage: string | null; // Keep for backward compatibility or simple status? Maybe remove if Chat handles list.
+    // Actually Chat needs string[] now. But App checks utilMessage != null?
+    // Let's keep utilMessage as null, and add utilMessages.
+    // Or just rename. Let's rename to avoid confusion.
+    // But other components might use it. Chat uses statusMessage.
+    // Let's replace utilMessage with utilMessages in state and pass the list.
     activeVersion: number | null;
     currentVersion: number;
     activeVersions: Record<string, number | null>; // Map sessionId -> activeVersion
@@ -37,6 +44,8 @@ export default class App extends React.Component<AppProps, AppState> {
             groups: {},
             messages: [],
             utilStatus: 'idle',
+            utilMessages: [],
+            requestStartTime: null,
             utilMessage: null,
             activeVersion: null,
             currentVersion: 0,
@@ -133,17 +142,28 @@ export default class App extends React.Component<AppProps, AppState> {
             const data = JSON.parse(e.data);
             if (data.sessionId !== activeSessionId) return;
 
-            if (data.status === 'started' || data.status === 'generating') {
+            if (data.status === 'started') {
                 this.setState({
                     utilStatus: 'busy',
-                    utilMessage: data.message || null,
+                    utilMessages: [data.message || 'Thinking...'],
+                    requestStartTime: Date.now(),
                 });
+            } else if (data.status === 'generating') {
+                // Append new status message if it's not effectively empty
+                if (data.message) {
+                    this.setState(prev => ({
+                        utilMessages: [...prev.utilMessages, data.message]
+                    }));
+                }
             } else if (data.status === 'completed') {
-                this.setState({ utilStatus: 'idle', utilMessage: null });
+                this.setState({
+                    utilStatus: 'idle',
+                    // Clear start time? Or keep it to show "Took X seconds"?
+                    // User requirement implies showing duration while waiting. 
+                    // Completed means we are done. 
+                    requestStartTime: null
+                });
                 this.fetchSession(activeSessionId).then(() => {
-                    // Update current version if it increased (it should have)
-                    // The fetchSession call will update state.currentVersion
-                    // If we are viewing a specific version, ensure we keep seeing it
                     const { activeVersion } = this.state;
                     if (activeVersion !== null) {
                         this.previewVersion(activeVersion);
@@ -152,7 +172,8 @@ export default class App extends React.Component<AppProps, AppState> {
             } else if (data.status === 'error') {
                 this.setState({
                     utilStatus: 'error',
-                    utilMessage: data.message || 'Error occurred',
+                    utilMessages: [...this.state.utilMessages, data.message || 'Error occurred'],
+                    requestStartTime: null,
                 });
             }
         });
@@ -351,11 +372,10 @@ export default class App extends React.Component<AppProps, AppState> {
         }));
 
         try {
-            await fetch('/api/chat', {
+            await fetch(`/api/sessions/${activeSessionId}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    sessionId: activeSessionId,
                     message: text,
                     selection: selectionData,
                 }),
@@ -453,7 +473,8 @@ export default class App extends React.Component<AppProps, AppState> {
                     messages={messages}
                     onSend={this.sendMessage}
                     status={utilStatus}
-                    statusMessage={this.state.utilMessage}
+                    statusMessages={this.state.utilMessages}
+                    startTime={this.state.requestStartTime}
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
                     selection={selection}

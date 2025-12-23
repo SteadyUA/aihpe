@@ -125,7 +125,8 @@ interface ChatProps {
     messages: MessageData[];
     onSend: (text: string) => void;
     status: string;
-    statusMessage?: string | null;
+    statusMessages?: string[]; // Renamed from statusMessage, now array
+    startTime?: number | null; // For timer
     // New props for toolbar features
     onPickElement?: () => void;
     onCancelPick?: () => void;
@@ -141,29 +142,59 @@ interface ChatProps {
 
 interface ChatState {
     input: string;
+    elapsedSeconds: number;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
+    private timerInterval: any = null;
 
     constructor(props: ChatProps) {
         super(props);
         this.state = {
             input: '',
+            elapsedSeconds: 0,
         };
         this.messagesEndRef = React.createRef();
     }
 
     componentDidMount() {
         this.scrollToBottom();
+        this.updateTimer();
     }
 
     componentDidUpdate(prevProps: ChatProps) {
         if (
             prevProps.messages.length !== this.props.messages.length ||
+            prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
             prevProps.status !== this.props.status
         ) {
             this.scrollToBottom();
+        }
+
+        if (prevProps.startTime !== this.props.startTime || prevProps.status !== this.props.status) {
+            this.updateTimer();
+        }
+    }
+
+    componentWillUnmount() {
+        if (this.timerInterval) clearInterval(this.timerInterval);
+    }
+
+    updateTimer = () => {
+        if (this.timerInterval) clearInterval(this.timerInterval);
+        this.timerInterval = null;
+
+        if (this.props.status === 'busy' && this.props.startTime) {
+            const tick = () => {
+                const now = Date.now();
+                const start = this.props.startTime || now;
+                this.setState({ elapsedSeconds: Math.floor((now - start) / 1000) });
+            };
+            tick();
+            this.timerInterval = setInterval(tick, 1000);
+        } else {
+            this.setState({ elapsedSeconds: 0 });
         }
     }
 
@@ -187,7 +218,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         const {
             messages,
             status,
-            statusMessage,
+            statusMessages,
             onPickElement,
             onCancelPick,
             selection,
@@ -199,7 +230,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onPreviewVersion,
             disabled,
         } = this.props;
-        const { input } = this.state;
+        const { input, elapsedSeconds } = this.state;
 
         // Logic to determine dimmed state
         let effectiveActiveVersion = activeVersion;
@@ -253,10 +284,32 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 styles.pending,
                             )}
                         >
-                            <span className={styles.spinner}></span>
-                            <span className="message-status">
-                                {statusMessage || 'Готовлю ответ...'}
-                            </span>
+                            <div className={styles.messageContent}>
+                                {statusMessages && statusMessages.length > 0 ? (
+                                    (() => {
+                                        const maxItems = 3;
+                                        const start = Math.max(0, statusMessages.length - maxItems);
+                                        const visibleMessages = statusMessages.slice(start);
+                                        const startIndex = start + 1; // 1-based index for <ol>
+
+                                        return (
+                                            <ol className={styles.statusList} start={startIndex}>
+                                                {visibleMessages.map((msg, idx) => (
+                                                    <li key={start + idx}>{msg}</li>
+                                                ))}
+                                            </ol>
+                                        );
+                                    })()
+                                ) : (
+                                    <p>Thinking...</p>
+                                )}
+                            </div>
+                            <div className={styles.messageActions}>
+                                <span className={styles.spinner}></span>
+                                <span className={styles.timer}>
+                                    {elapsedSeconds > 0 ? `${elapsedSeconds}s` : ''}
+                                </span>
+                            </div>
                         </div>
                     )}
                     <div ref={this.messagesEndRef} />

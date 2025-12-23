@@ -14,13 +14,13 @@ interface ImageMetadata {
 export class ImageService {
     private readonly modelId = 'gemini-2.5-flash-image';
 
-    async generateAndSave(sessionId: string, description: string, targetFilename?: string): Promise<string> {
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string): Promise<string> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
         }
 
-        console.log(`Generating image for session ${sessionId} with description: ${description}`);
+        console.log(`Generating image for session ${sessionId} version ${version} with description: ${description}`);
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
         const body = {
@@ -57,19 +57,18 @@ export class ImageService {
                 throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
             }
 
-            const sessionDir = this.resolveSessionDir(sessionId);
-            const filesDir = path.join(sessionDir, 'files');
-            this.ensureDirectory(filesDir);
+            const versionDir = this.resolveVersionDir(sessionId, version);
+            this.ensureDirectory(versionDir);
 
             const uuid = randomUUID();
             const filename = targetFilename || `${uuid}.png`;
-            const filePath = path.join(filesDir, filename);
+            const filePath = path.join(versionDir, filename);
 
             const buffer = Buffer.from(base64Data, 'base64');
             fs.writeFileSync(filePath, buffer);
 
             // Save metadata
-            this.saveMetadata(sessionId, {
+            this.saveMetadata(sessionId, version, {
                 filename,
                 description,
                 createdAt: new Date().toISOString(),
@@ -83,18 +82,17 @@ export class ImageService {
         }
     }
 
-    async listImages(sessionId: string): Promise<ImageMetadata[]> {
-        const metadata = this.loadMetadata(sessionId);
+    async listImages(sessionId: string, version: number): Promise<ImageMetadata[]> {
+        const metadata = this.loadMetadata(sessionId, version);
         return metadata;
     }
 
-    private resolveSessionDir(sessionId: string): string {
-        // Duplicate logic from SessionStore to avoid circular dependency or complex refactor
-        // Ideally SessionStore should expose this, but this is safer for now.
+    private resolveVersionDir(sessionId: string, version: number): string {
         const customRoot = process.env.SESSION_ROOT?.trim();
         const root = customRoot ? path.resolve(customRoot) : path.resolve(process.cwd(), 'data', 'sessions');
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        return path.join(root, safeId);
+        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+        return path.join(root, safeId, 'versions', String(safeVersion));
     }
 
     private ensureDirectory(dir: string): void {
@@ -103,12 +101,12 @@ export class ImageService {
         }
     }
 
-    private getMetadataPath(sessionId: string): string {
-        return path.join(this.resolveSessionDir(sessionId), 'files', 'images.json');
+    private getMetadataPath(sessionId: string, version: number): string {
+        return path.join(this.resolveVersionDir(sessionId, version), 'images.json');
     }
 
-    private loadMetadata(sessionId: string): ImageMetadata[] {
-        const metaPath = this.getMetadataPath(sessionId);
+    private loadMetadata(sessionId: string, version: number): ImageMetadata[] {
+        const metaPath = this.getMetadataPath(sessionId, version);
         try {
             if (!fs.existsSync(metaPath)) {
                 return [];
@@ -116,21 +114,21 @@ export class ImageService {
             const content = fs.readFileSync(metaPath, 'utf-8');
             return JSON.parse(content) as ImageMetadata[];
         } catch (e) {
-            console.error(`Failed to load image metadata for ${sessionId}`, e);
+            console.error(`Failed to load image metadata for ${sessionId} v${version}`, e);
             return [];
         }
     }
 
-    private saveMetadata(sessionId: string, newEntry: ImageMetadata): void {
-        let current = this.loadMetadata(sessionId);
+    private saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): void {
+        let current = this.loadMetadata(sessionId, version);
         // Remove existing entry if any to support updates
         current = current.filter(item => item.filename !== newEntry.filename);
         current.push(newEntry);
-        const metaPath = this.getMetadataPath(sessionId);
+        const metaPath = this.getMetadataPath(sessionId, version);
         try {
             fs.writeFileSync(metaPath, JSON.stringify(current, null, 2), 'utf-8');
         } catch (e) {
-            console.error(`Failed to save image metadata for ${sessionId}`, e);
+            console.error(`Failed to save image metadata for ${sessionId} v${version}`, e);
         }
     }
 }

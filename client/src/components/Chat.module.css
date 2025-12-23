@@ -107,6 +107,7 @@
 
 .messageActions {
     display: flex;
+    flex-direction: column;
 }
 
 .cloneButton {
@@ -167,14 +168,15 @@
 }
 
 .spinner {
-    display: inline-block;
+    display: block;
     width: 12px;
     height: 12px;
     border: 2px solid var(--text-secondary);
     border-radius: 50%;
     border-top-color: transparent;
     animation: spin 1s linear infinite;
-    margin-right: 0.5rem;
+    margin: 0 auto;
+    margin-bottom: 0.5rem;
 }
 
 @keyframes spin {
@@ -262,4 +264,22 @@
         border-right: none;
         border-bottom: 1px solid var(--border-color);
     }
+}
+
+.timer {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.statusList li {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+/* Highlight the last item as active */
+.statusList li:last-child {
+    color: var(--text-primary);
+    font-weight: 500;
 }

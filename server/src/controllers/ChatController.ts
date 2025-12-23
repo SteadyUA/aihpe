@@ -140,44 +140,20 @@ export class ChatController {
         };
     }
 
-    @Post('/api/sessions/:sessionId/clone')
-    cloneSession(@Param('sessionId') sessionId: string) {
-        const session = this.sessionStore.clone(sessionId);
-        return {
-            id: session.id,
-            files: session.files,
-            history: this.formatHistory(session.history),
-            updatedAt: session.updatedAt.toISOString(),
-            group: session.group,
-            currentVersion: session.currentVersion,
-        };
-    }
 
-    @Post('/api/chat')
-    async sendMessage(
-        @Body({ options: { limit: '10mb' } }) payload: ChatRequest,
+
+    @Post('/api/sessions/:sessionId/chat')
+    sendMessage(
+        @Param('sessionId') sessionId: string,
+        @Body() body: { message: string; selection?: { selector: string } },
     ) {
-        const attachments: ChatAttachment[] = (payload.attachments ?? []).map(
-            (attachment) => ({
-                type: 'screenshot',
-                selector: attachment.selector.trim(),
-                dataUrl: attachment.dataUrl.trim(),
-                id: attachment.id?.trim(),
-            }),
+        return this.chatService.handleUserMessage(
+            sessionId,
+            body.message,
+            [],
+            true, // allowVariants
+            body.selection,
         );
-        const message =
-            typeof payload.message === 'string' ? payload.message : '';
-        const selection = payload.selection
-            ? { selector: payload.selection.selector }
-            : undefined;
-        const result = await this.chatService.handleUserMessage(
-            payload.sessionId,
-            message,
-            attachments,
-            true,
-            selection,
-        );
-        return { message: result.message };
     }
 
     @Get('/api/sessions/:sessionId')
@@ -195,30 +171,28 @@ export class ChatController {
         };
     }
 
-    @Post('/api/sessions/:sessionId/reset')
-    resetSession(@Param('sessionId') sessionId: string) {
-        const snapshot = this.sessionStore.reset(sessionId);
-        return {
-            id: snapshot.id,
-            files: snapshot.files,
-            history: this.formatHistory(snapshot.history),
-            updatedAt: snapshot.updatedAt.toISOString(),
-            group: snapshot.group,
-            currentVersion: snapshot.currentVersion,
-        };
-    }
 
-    @Get('/api/sessions/:sessionId/archive')
-    downloadArchive(
+
+    @Get('/api/sessions/:sessionId/versions/:version/archive')
+    async downloadArchive(
         @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response
+                .status(400)
+                .json({ message: 'Некорректная версия' });
+        }
+
         try {
-            const files = this.sessionStore.getFiles(sessionId);
+            // Get code files
+            const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
                 return response
                     .status(404)
-                    .json({ message: 'Сессия не найдена' });
+                    .json({ message: 'Версия не найдена' });
             }
 
             const safeId =
@@ -240,13 +214,43 @@ export class ChatController {
             response.setHeader('Content-Type', 'application/zip');
             response.setHeader(
                 'Content-Disposition',
-                `attachment; filename="session-${safeId}.zip"`,
+                `attachment; filename="session-${safeId}-v${version}.zip"`,
             );
 
             archive.pipe(response);
+
+            // Add code files
             archive.append(files.html ?? '', { name: 'index.html' });
             archive.append(files.css ?? '', { name: 'styles.css' });
             archive.append(files.js ?? '', { name: 'script.js' });
+
+            // Add images
+            try {
+                const images = await this.imageService.listImages(sessionId, version);
+                const cwd = process.cwd();
+                const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+
+                // Reconstruct path logic similar to getStaticFile
+                // It would be better to have this in logic shared, but consistent within controller for now
+                const versionDir = path.join(
+                    sessionRoot,
+                    safeId,
+                    'versions',
+                    String(safeVersion)
+                );
+
+                for (const img of images) {
+                    const imgPath = path.join(versionDir, img.filename);
+                    if (fs.existsSync(imgPath)) {
+                        archive.file(imgPath, { name: img.filename });
+                    }
+                }
+            } catch (imageError) {
+                console.warn('Failed to add images to archive', imageError);
+                // Continue without images rather than failing entire archive
+            }
+
             void archive.finalize();
             return response;
         } catch (error) {
@@ -257,39 +261,9 @@ export class ChatController {
         }
     }
 
-    @Get('/api/sessions/:sessionId/files')
-    getFiles(@Param('sessionId') sessionId: string) {
-        const files = this.sessionStore.getFiles(sessionId);
-        if (!files) {
-            return {
-                html: '',
-                css: '',
-                js: '',
-            };
-        }
-        return files;
-    }
 
-    @Get('/api/sessions/:sessionId/versions/:version/files')
-    getFilesVersion(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
-        @Res() response: Response,
-    ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response
-                .status(400)
-                .json({ message: 'Некорректная версия' });
-        }
 
-        const files = this.sessionStore.getFilesByVersion(sessionId, version);
-        if (!files) {
-            return response.status(404).json({ message: 'Версия не найдена' });
-        }
 
-        return response.json({ ...files, version });
-    }
 
     @Get('/api/sessions/:sessionId/versions/:version/static/:filename')
     getStaticFile(
@@ -341,7 +315,8 @@ export class ChatController {
         const cwd = process.cwd();
         const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const filePath = path.join(sessionRoot, safeId, 'files', filename);
+        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+        const filePath = path.join(sessionRoot, safeId, 'versions', String(safeVersion), filename);
 
         if (fs.existsSync(filePath)) {
             const ext = path.extname(filename).toLowerCase();
@@ -393,41 +368,87 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/versions/:version/files')
-    updateFilesVersion(
+    @Post('/api/sessions/:sessionId/versions/:version/static/:filename')
+    updateStaticFile(
         @Param('sessionId') sessionId: string,
         @Param('version') versionParam: string,
-        @Body() body: Partial<{ html: string; css: string; js: string }>,
+        @Param('filename') filename: string,
+        @Body() body: any,
+        @Res() response: Response,
+    ) {
+        // Basic validation
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
+        }
+
+        // Map filename to SessionFiles key
+        let fileKey: 'html' | 'css' | 'js' | undefined;
+        if (filename === 'index.html') fileKey = 'html';
+        else if (filename === 'styles.css') fileKey = 'css';
+        else if (filename === 'script.js') fileKey = 'js';
+
+        if (!fileKey) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        // Handle body: verify it's text.
+        // routing-controllers might parse JSON by default if content-type is json.
+        // We expect raw text or a JSON wrapper { content: "..." } if client prefers.
+        // Looking at Preview.tsx handleSave, it sends JSON { [activeTab]: content }.
+        // Let's support both or stick to what client sends.
+        // Client sends: body = { [activeTab]: content }
+        // e.g. { html: "..." }
+
+        // Actually, to make it truly RESTful for a file resource, we should accept raw text body.
+        // But let's check what the client is going to send.
+        // The plan said: "Accepts the file content as the request body (Text/Plain)."
+        // So I will implement it to accept raw body or simple wrapper.
+        // Since I'm refactoring the client too, I can choose.
+        // I'll assume standard raw text for file uploads/updates is cleaner.
+        // But routing-controllers body parsing might be tricky for text/plain.
+        // If I use @Body(), it parses based on body-parser.
+
+        let content = '';
+        if (typeof body === 'string') {
+            content = body;
+        } else if (typeof body === 'object' && body !== null) {
+            // Fallback for JSON { content: "..." } or { html: "..." }
+            if (typeof body.content === 'string') content = body.content;
+            else if (typeof body[fileKey] === 'string') content = body[fileKey];
+            else return response.status(400).send('Missing content');
+        } else {
+            return response.status(400).send('Invalid body');
+        }
+
+        try {
+            const updatedSession = this.sessionStore.updateSessionFile(
+                sessionId,
+                version,
+                fileKey,
+                content
+            );
+            // Return just success or the file?
+            // Client doesn't strictly need the whole files object back if we saved one file.
+            // But let's return success.
+            return response.status(200).send('OK');
+        } catch (error: any) {
+            console.error('Failed to update file', error);
+            return response
+                .status(500)
+                .json({ message: 'Не удалось обновить файл' });
+        }
+    }
+    @Get('/api/sessions/:sessionId/versions/:version/images')
+    async getImages(
+        @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
         const version = Number.parseInt(versionParam, 10);
         if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response
-                .status(400)
-                .json({ message: 'Некорректная версия' });
+            return response.status(400).json({ message: 'Invalid version' });
         }
-
-        try {
-            const updatedSession = this.sessionStore.updateSessionFiles(
-                sessionId,
-                version,
-                body,
-            );
-            return response.json(updatedSession.files);
-        } catch (error: any) {
-            console.error('Failed to update files', error);
-            if (error.message === 'Cannot edit past versions') {
-                return response
-                    .status(403)
-                    .json({ message: 'Редактирование старых версий запрещено' });
-            }
-            return response
-                .status(500)
-                .json({ message: 'Не удалось обновить файлы' });
-        }
-    }
-    @Get('/api/sessions/:sessionId/images')
-    async getImages(@Param('sessionId') sessionId: string) {
-        return this.imageService.listImages(sessionId);
+        return this.imageService.listImages(sessionId, version);
     }
 }

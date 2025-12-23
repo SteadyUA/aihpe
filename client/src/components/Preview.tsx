@@ -197,7 +197,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     fetchImages = async () => {
-        const { sessionId } = this.props;
+        const { sessionId, version } = this.props;
         if (!sessionId) return;
 
         // If already loaded successfully (and session/version hasn't changed, handled by componentDidUpdate reset), return
@@ -209,7 +209,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }));
 
         try {
-            const res = await fetch(`/api/sessions/${sessionId}/images`);
+            const res = await fetch(
+                `/api/sessions/${sessionId}/versions/${version}/images`,
+            );
             if (!res.ok) throw new Error('Failed to fetch images');
             const images = await res.json();
             this.setState((prev) => ({
@@ -265,20 +267,28 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.setState({ isSaving: true });
 
         try {
-            const body = { [activeTab]: content };
+            const filenameMap: Record<AssetType, string> = FILENAME_MAP;
+            const filename = filenameMap[activeTab as AssetType];
+
             const res = await fetch(
-                `/api/sessions/${sessionId}/versions/${version}/files`,
+                `/api/sessions/${sessionId}/versions/${version}/static/${filename}`,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: content,
                 },
             );
 
             if (!res.ok) {
-                const error = await res.json();
-                alert(`Error saving: ${error.message}`);
-                throw new Error(error.message);
+                // Try to read error message if possible
+                let errorMessage = 'Unknown error';
+                try {
+                    const text = await res.text();
+                    errorMessage = text || res.statusText;
+                } catch (e) { }
+
+                alert(`Error saving: ${errorMessage}`);
+                throw new Error(errorMessage);
             }
 
             // Update cache with saved content and clear unsaved state
@@ -314,12 +324,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleDownload = async () => {
-        const { sessionId } = this.props;
+        const { sessionId, version } = this.props;
         if (!sessionId) return;
 
         try {
             const response = await fetch(
-                `/api/sessions/${encodeURIComponent(sessionId)}/archive`,
+                `/api/sessions/${encodeURIComponent(sessionId)}/versions/${version}/archive`,
             );
             if (!response.ok) throw new Error('Failed to download');
 
@@ -327,7 +337,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `session-${sessionId.slice(0, 8)}.zip`;
+            a.download = `session-${sessionId.slice(0, 8)}-v${version}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);

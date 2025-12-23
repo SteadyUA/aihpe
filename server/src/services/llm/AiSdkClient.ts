@@ -187,7 +187,7 @@ export class AiSdkClient implements LlmClient {
             }),
             execute: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, request.currentVersion);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
                     return `Failed to generate image: ${error.message}`;
@@ -202,7 +202,7 @@ export class AiSdkClient implements LlmClient {
             }),
             execute: async ({ summary }: { summary: string }) => {
                 try {
-                    const images = await this.imageService.listImages(request.sessionId);
+                    const images = await this.imageService.listImages(request.sessionId, request.currentVersion);
                     if (images.length === 0) {
                         return 'No images found in this session.';
                     }
@@ -222,7 +222,7 @@ export class AiSdkClient implements LlmClient {
             }),
             execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
                 try {
-                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, filename);
+                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, request.currentVersion, filename);
                     return `Image updated successfully: ${savedFilename}`;
                 } catch (error: any) {
                     return `Failed to update image: ${error.message}`;
@@ -291,6 +291,22 @@ export class AiSdkClient implements LlmClient {
                                 request.onProgress(part.text);
                             }
                             break;
+                        case 'tool-call':
+                            if (request.onProgress) {
+                                const toolName = part.toolName;
+                                let input = (part as any).input || (part as any).args;
+                                if (typeof input === 'string') {
+                                    try {
+                                        input = JSON.parse(input);
+                                    } catch (e) {
+                                        // Ignore parse errors, maybe it's just a string argument?
+                                    }
+                                }
+                                const summary = input?.summary;
+                                const label = summary || `Tool call: ${toolName}`;
+                                request.onProgress(`${label}\n`);
+                            }
+                            break;
                         case 'error':
                             console.error('Stream error:', part.error);
                             break;
@@ -334,17 +350,17 @@ export class AiSdkClient implements LlmClient {
                     collectedNewMessages.push(m);
 
                     // Notify about content found in response (tool calls and reasoning)
+                    // Notify about content found in response (tool calls and reasoning)
                     if (
                         m.role === 'assistant' &&
                         Array.isArray(m.content) &&
                         request.onProgress
                     ) {
-                        const prog = request.onProgress;
-                        m.content.forEach((part: any) => {
-                            if (part.type === 'tool-call') {
-                                prog(`${part.input.summary || part.toolName}`);
-                            }
-                        });
+                        // We already handled streaming tool calls.
+                        // We might want to handle non-streamed ones if any?
+                        // Generally stream loop covers it.
+                        // Let's keep it minimal or remove if duplicate.
+                        // If we are strictly streaming, we don't need this.
                     }
                 }
 

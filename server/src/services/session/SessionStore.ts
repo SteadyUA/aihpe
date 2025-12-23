@@ -62,7 +62,7 @@ const EMPTY_FILES: SessionFiles = {
 };
 
 const SESSION_ROOT = resolveSessionRoot();
-const FILES_DIRNAME = 'files';
+
 const VERSION_DIRNAME = 'versions';
 
 @Service()
@@ -217,6 +217,12 @@ export class SessionStore {
     updateFiles(sessionId: string, files: SessionFiles): SessionData {
         const session = this.getOrCreate(sessionId);
         const nextVersion = session.currentVersion + 1;
+
+        // Copy assets (images, etc) from current version to next version
+        // We do this BEFORE creating the new session state so that persistSession
+        // will just overwrite the code files (html/css/js) but keep the assets.
+        copyVersionContent(sessionId, sessionId, session.currentVersion, nextVersion);
+
         const updated: SessionData = {
             ...session,
             files,
@@ -229,48 +235,80 @@ export class SessionStore {
         return cloneSession(updated);
     }
 
-    updateSessionFiles(
+    updateSessionFile(
         sessionId: string,
         version: number,
-        updates: Partial<SessionFiles>,
+        filename: keyof SessionFiles,
+        content: string,
     ): SessionData {
         const session = this.getOrCreate(sessionId);
-        // Only allow editing the current version to ensure consistency
-        if (version !== session.currentVersion) {
-            throw new Error('Cannot edit past versions');
-        }
+
+        // We now allow editing past versions, so this check is removed:
+        // if (version !== session.currentVersion) { ... }
 
         const newFiles: SessionFiles = {
             ...session.files,
-            ...updates,
         };
+
+        // If we are editing the current version, update the main files object
+        // If we are editing an old version, we need to update that version's files specifically
+        // But wait, the logic for 'current version' files vs 'versioned' files storage is tricky in this store.
+        // 'session.files' holds the HEAD (current version). 
+        // Old versions are stored in 'versions' directory on disk.
+
+        // If editing current version:
+        if (version === session.currentVersion) {
+            newFiles[filename] = content;
+            const updated: SessionData = {
+                ...session,
+                files: newFiles,
+                updatedAt: new Date(),
+            };
+            this.sessions.set(sessionId, updated);
+            this.persistSession(updated);
+            return cloneSession(updated);
+        }
+
+        // If editing past version:
+        // We don't update 'session.files' because that's HEAD.
+        // We just need to persist the file to the version directory.
+        // However, 'SessionData' object in memory doesn't hold old versions content typically, 
+        // except what's in 'history'.
+        // But 'files' in SessionData is ONLY HEAD.
+
+        // So for past versions, we just write to disk.
+        // And if we want to return the updated session, the session object itself might not change 
+        // (unless we track 'updatedAt').
+
+        // Let's write to disk.
+        ensureVersionSnapshot(sessionId, version, readVersionFiles(sessionId, version) || EMPTY_FILES);
+        // We need to overwrite the specific file now.
+        const versionDir = resolveVersionDir(sessionId, version);
+        ensureDirectory(versionDir);
+
+        // Map abstract filename (html/css/js) to actual filename
+        const actualFilename = filename === 'html' ? 'index.html' :
+            filename === 'css' ? 'styles.css' :
+                filename === 'js' ? 'script.js' :
+                    undefined;
+
+        if (actualFilename) {
+            fs.writeFileSync(path.join(versionDir, actualFilename), content, 'utf-8');
+        }
 
         const updated: SessionData = {
             ...session,
-            files: newFiles,
             updatedAt: new Date(),
-            // Version stays the same
         };
-
         this.sessions.set(sessionId, updated);
+        // We might not need to persist the whole session.json if only a file in a version dir changed,
+        // but updating 'updatedAt' suggests we should.
         this.persistSession(updated);
+
         return cloneSession(updated);
     }
 
-    getFiles(sessionId: string): SessionFiles | undefined {
-        const cached = this.sessions.get(sessionId);
-        if (cached) {
-            return { ...cached.files };
-        }
 
-        const loaded = this.loadFromDisk(sessionId);
-        if (!loaded) {
-            return undefined;
-        }
-
-        this.sessions.set(sessionId, loaded);
-        return { ...loaded.files };
-    }
 
     getFilesByVersion(
         sessionId: string,
@@ -331,17 +369,7 @@ export class SessionStore {
         return cloneSession(merged);
     }
 
-    reset(sessionId: string): SessionData {
-        // Preserve group on reset
-        const oldSession = this.getOrCreate(sessionId);
-        const fresh = this.createFreshSession(sessionId, oldSession.group);
 
-        clearPersistedSessionData(sessionId);
-
-        this.sessions.set(sessionId, fresh);
-        this.persistSession(fresh);
-        return cloneSession(fresh);
-    }
 
     private loadFromDisk(sessionId: string): SessionData | undefined {
         const sessionDir = resolveSessionDir(sessionId);
@@ -353,19 +381,23 @@ export class SessionStore {
             }
 
             const raw = fs.readFileSync(metaPath, 'utf-8');
+
             const parsed: PersistedSession = JSON.parse(raw);
-            const filesDir = path.join(sessionDir, FILES_DIRNAME);
+
+            const currentVersion = typeof parsed.currentVersion === 'number' ? parsed.currentVersion : 0;
+            const versionDir = resolveVersionDir(sessionId, currentVersion);
+
             const files: SessionFiles = {
                 html: readFileOrDefault(
-                    path.join(filesDir, 'index.html'),
+                    path.join(versionDir, 'index.html'),
                     EMPTY_FILES.html,
                 ),
                 css: readFileOrDefault(
-                    path.join(filesDir, 'styles.css'),
+                    path.join(versionDir, 'styles.css'),
                     EMPTY_FILES.css,
                 ),
                 js: readFileOrDefault(
-                    path.join(filesDir, 'script.js'),
+                    path.join(versionDir, 'script.js'),
                     EMPTY_FILES.js,
                 ),
             };
@@ -421,11 +453,11 @@ export class SessionStore {
 
     private persistSession(session: SessionData): void {
         const sessionDir = resolveSessionDir(session.id);
-        const filesDir = path.join(sessionDir, FILES_DIRNAME);
+        const versionDir = resolveVersionDir(session.id, session.currentVersion);
 
         try {
             ensureDirectory(sessionDir);
-            ensureDirectory(filesDir);
+            ensureDirectory(versionDir);
 
             const payload: PersistedSession = {
                 id: session.id,
@@ -452,24 +484,19 @@ export class SessionStore {
                 'utf-8',
             );
             fs.writeFileSync(
-                path.join(filesDir, 'index.html'),
+                path.join(versionDir, 'index.html'),
                 session.files.html,
                 'utf-8',
             );
             fs.writeFileSync(
-                path.join(filesDir, 'styles.css'),
+                path.join(versionDir, 'styles.css'),
                 session.files.css,
                 'utf-8',
             );
             fs.writeFileSync(
-                path.join(filesDir, 'script.js'),
+                path.join(versionDir, 'script.js'),
                 session.files.js,
                 'utf-8',
-            );
-            persistVersionFiles(
-                session.id,
-                session.currentVersion,
-                session.files,
             );
         } catch (error) {
             console.error(
@@ -525,7 +552,6 @@ function removeDirectory(dir: string): void {
 function clearPersistedSessionData(sessionId: string): void {
     const sessionDir = resolveSessionDir(sessionId);
     ensureDirectory(sessionDir);
-    removeDirectory(path.join(sessionDir, FILES_DIRNAME));
     removeDirectory(path.join(sessionDir, VERSION_DIRNAME));
 }
 
@@ -603,6 +629,30 @@ function ensureVersionSnapshot(
         return;
     }
     persistVersionFiles(sessionId, version, files);
+}
+
+function copyVersionContent(
+    sourceId: string,
+    targetId: string,
+    sourceVersion: number,
+    targetVersion: number,
+): void {
+    const sourceDir = resolveVersionDir(sourceId, sourceVersion);
+    const targetDir = resolveVersionDir(targetId, targetVersion);
+
+    try {
+        if (!fs.existsSync(sourceDir)) {
+            return;
+        }
+
+        ensureDirectory(targetDir);
+        fs.cpSync(sourceDir, targetDir, { recursive: true });
+    } catch (error) {
+        console.error(
+            `Failed to copy version content from ${sourceId} v${sourceVersion} to ${targetId} v${targetVersion}`,
+            error,
+        );
+    }
 }
 
 function readVersionFiles(
