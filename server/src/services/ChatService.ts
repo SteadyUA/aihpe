@@ -228,10 +228,21 @@ export class ChatService {
                 };
             }
 
-            const updated = this.sessionStore.updateFiles(
-                sessionId,
-                generation.files,
-            );
+            if (generation.targetVersion) {
+                const updated = this.sessionStore.updateFiles(
+                    sessionId,
+                    generation.files,
+                    generation.targetVersion,
+                );
+            } else {
+                // No changes to files/version, just append messages
+                // We might want to ensure 'updated' variable is present or handle it?
+                // Wait, 'updated' is used below.
+                // If no update, we just fetch current session.
+            }
+
+            // Re-fetch strict session state
+            const updated = this.sessionStore.getOrCreate(sessionId);
 
             if (generation.newMessages && generation.newMessages.length > 0) {
                 for (const msg of generation.newMessages) {

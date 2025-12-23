@@ -214,24 +214,55 @@ export class SessionStore {
         return cloneSession(updated);
     }
 
-    updateFiles(sessionId: string, files: SessionFiles): SessionData {
+    initNextVersion(sessionId: string): number {
         const session = this.getOrCreate(sessionId);
         const nextVersion = session.currentVersion + 1;
 
-        // Copy assets (images, etc) from current version to next version
-        // We do this BEFORE creating the new session state so that persistSession
-        // will just overwrite the code files (html/css/js) but keep the assets.
+        const nextVersionDir = resolveVersionDir(sessionId, nextVersion);
+
+        // Idempotency check: if next version directory already exists, just return the version number
+        if (fs.existsSync(nextVersionDir)) {
+            return nextVersion;
+        }
+
+        // Copy content from current version to next version
         copyVersionContent(sessionId, sessionId, session.currentVersion, nextVersion);
+
+        return nextVersion;
+    }
+
+    updateFiles(sessionId: string, files: SessionFiles, targetVersion: number): SessionData {
+        if (targetVersion === undefined || targetVersion === null) {
+            throw new Error('targetVersion is required for updateFiles');
+        }
+
+        const session = this.getOrCreate(sessionId);
+
+        // Ensure the target version directory exists (must be initialized via initNextVersion)
+        const targetVersionDir = resolveVersionDir(sessionId, targetVersion);
+        if (!fs.existsSync(targetVersionDir)) {
+            throw new Error(`Version ${targetVersion} not initialized. Call initNextVersion first.`);
+        }
+
+        // We do NOT copy content here anymore. We assume initNextVersion did it.
+        // We just overwrite the files with the new content in memory.
+
+        // If we are updating to a newer version than current, bump currentVersion
+        const newCurrentVersion = targetVersion > session.currentVersion ? targetVersion : session.currentVersion;
 
         const updated: SessionData = {
             ...session,
             files,
             updatedAt: new Date(),
-            currentVersion: nextVersion,
+            currentVersion: newCurrentVersion,
         };
 
         this.sessions.set(sessionId, updated);
         this.persistSession(updated);
+
+        // Also ensure we persist the specific files to the version directory
+        persistVersionFiles(sessionId, targetVersion, files);
+
         return cloneSession(updated);
     }
 

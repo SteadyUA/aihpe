@@ -373,8 +373,8 @@ export class ChatController {
         @Param('sessionId') sessionId: string,
         @Param('version') versionParam: string,
         @Param('filename') filename: string,
-        @Body() body: any,
-        @Res() response: Response,
+        @Req() req: Request,
+        @Res() response: Response
     ) {
         // Basic validation
         const version = Number.parseInt(versionParam, 10);
@@ -392,23 +392,10 @@ export class ChatController {
             return response.status(400).send('Invalid filename');
         }
 
+        const body = req.body;
+        console.log(`[updateStaticFile] Saving ${filename}. Content-Type: ${req.headers['content-type']}. Body Type: ${typeof body}`);
+
         // Handle body: verify it's text.
-        // routing-controllers might parse JSON by default if content-type is json.
-        // We expect raw text or a JSON wrapper { content: "..." } if client prefers.
-        // Looking at Preview.tsx handleSave, it sends JSON { [activeTab]: content }.
-        // Let's support both or stick to what client sends.
-        // Client sends: body = { [activeTab]: content }
-        // e.g. { html: "..." }
-
-        // Actually, to make it truly RESTful for a file resource, we should accept raw text body.
-        // But let's check what the client is going to send.
-        // The plan said: "Accepts the file content as the request body (Text/Plain)."
-        // So I will implement it to accept raw body or simple wrapper.
-        // Since I'm refactoring the client too, I can choose.
-        // I'll assume standard raw text for file uploads/updates is cleaner.
-        // But routing-controllers body parsing might be tricky for text/plain.
-        // If I use @Body(), it parses based on body-parser.
-
         let content = '';
         if (typeof body === 'string') {
             content = body;
@@ -416,21 +403,22 @@ export class ChatController {
             // Fallback for JSON { content: "..." } or { html: "..." }
             if (typeof body.content === 'string') content = body.content;
             else if (typeof body[fileKey] === 'string') content = body[fileKey];
-            else return response.status(400).send('Missing content');
+            else {
+                console.error('[updateStaticFile] Missing content in object body', body);
+                return response.status(400).send('Missing content');
+            }
         } else {
+            console.error('[updateStaticFile] Invalid body type', typeof body);
             return response.status(400).send('Invalid body');
         }
 
         try {
-            const updatedSession = this.sessionStore.updateSessionFile(
+            this.sessionStore.updateSessionFile(
                 sessionId,
                 version,
                 fileKey,
                 content
             );
-            // Return just success or the file?
-            // Client doesn't strictly need the whole files object back if we saved one file.
-            // But let's return success.
             return response.status(200).send('OK');
         } catch (error: any) {
             console.error('Failed to update file', error);

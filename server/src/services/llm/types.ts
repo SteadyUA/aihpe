@@ -21,6 +21,7 @@ export interface GeneratePageResult {
     files: SessionFiles;
     variantRequest?: VariantRequest;
     newMessages?: ChatMessage[];
+    targetVersion?: number;
 }
 
 export interface LlmClient {

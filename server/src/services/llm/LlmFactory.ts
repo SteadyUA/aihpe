@@ -5,11 +5,15 @@ import { LanguageModel } from 'ai';
 import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
 import { ImageService } from '../image/ImageService';
+import { SessionStore } from '../session/SessionStore';
 
 @Service()
 export class LlmFactory {
     @Inject()
     private imageService!: ImageService;
+
+    @Inject()
+    private sessionStore!: SessionStore;
 
     getClient(): LlmClient {
         const modelId = process.env.MODEL || 'gpt-4o';
@@ -60,6 +64,7 @@ export class LlmFactory {
 
         return new AiSdkClient(
             this.imageService,
+            this.sessionStore,
             model,
             modelId,
             maxTokens,

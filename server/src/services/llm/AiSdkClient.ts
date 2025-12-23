@@ -26,13 +26,25 @@ const FALLBACK_RESPONSE: GeneratePageResult = {
     },
 };
 
+import { SessionStore } from '../session/SessionStore';
+
 export class AiSdkClient implements LlmClient {
+    private targetVersion: number | undefined;
+
     constructor(
         private readonly imageService: ImageService,
+        private readonly sessionStore: SessionStore,
         private readonly model?: LanguageModel,
         private readonly modelId?: string,
         private readonly maxContextTokens: number = 128000,
     ) { }
+
+    private ensureNextVersion(sessionId: string): number {
+        if (this.targetVersion === undefined) {
+            this.targetVersion = this.sessionStore.initNextVersion(sessionId);
+        }
+        return this.targetVersion;
+    }
 
     async generatePage(
         request: GeneratePageRequest,
@@ -110,6 +122,8 @@ export class AiSdkClient implements LlmClient {
                     newString: string;
                     summary: string;
                 }) => {
+                    this.ensureNextVersion(request.sessionId);
+
                     let content = '';
                     if (file === 'index.html') content = currentFiles.html;
                     else if (file === 'styles.css') content = currentFiles.css;
@@ -187,7 +201,8 @@ export class AiSdkClient implements LlmClient {
             }),
             execute: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, request.currentVersion);
+                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
                     return `Failed to generate image: ${error.message}`;
@@ -222,7 +237,8 @@ export class AiSdkClient implements LlmClient {
             }),
             execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
                 try {
-                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, request.currentVersion, filename);
+                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, filename);
                     return `Image updated successfully: ${savedFilename}`;
                 } catch (error: any) {
                     return `Failed to update image: ${error.message}`;
@@ -536,6 +552,7 @@ export class AiSdkClient implements LlmClient {
                 files: currentFiles,
                 variantRequest,
                 newMessages,
+                targetVersion: this.targetVersion,
             };
         } catch (error) {
             console.error(

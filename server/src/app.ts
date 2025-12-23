@@ -12,6 +12,8 @@ export function createApp(): express.Express {
     const app = express();
 
     app.use(cors());
+    // app.use(express.json());
+    // app.use(express.text());
 
     const publicDir = path.resolve(__dirname, '..', 'public');
     app.use(express.static(publicDir));
