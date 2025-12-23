@@ -128,16 +128,37 @@ export class ChatController {
     }
 
     @Post('/api/sessions')
-    createSession() {
-        const session = this.sessionStore.create();
-        return {
-            id: session.id,
-            files: session.files,
+    createSession(@Res() response: Response) {
+        const { id, group } = this.sessionStore.prepareCreate();
+
+        // Start creation in background
+        setImmediate(async () => {
+            try {
+                await this.sessionStore.executeCreate(id, group);
+                this.sseService.emitSessionCreated({
+                    sourceSessionId: 'system',
+                    newSessionId: id,
+                    group,
+                });
+            } catch (error) {
+                console.error('Background session creation failed', error);
+                this.sseService.emitChatStatus({
+                    sessionId: id,
+                    status: 'error',
+                    message: 'Failed to create session in background',
+                    details: error,
+                });
+            }
+        });
+
+        return response.status(201).json({
+            id,
+            group,
+            currentVersion: 0,
             history: [],
-            updatedAt: session.updatedAt.toISOString(),
-            group: session.group,
-            currentVersion: session.currentVersion,
-        };
+            files: {}, // Empty/Minimal files for client compliance if needed
+            updatedAt: new Date().toISOString(),
+        });
     }
 
 
@@ -348,23 +369,42 @@ export class ChatController {
         }
 
         try {
-            const session = this.sessionStore.cloneAtVersion(
-                sessionId,
-                version,
-            );
-            return response.json({
-                id: session.id,
-                files: session.files,
-                history: this.formatHistory(session.history),
-                updatedAt: session.updatedAt.toISOString(),
-                group: session.group,
-                currentVersion: session.currentVersion,
+            // Prepare ID and Group
+            const { id, group } = this.sessionStore.prepareClone(sessionId);
+
+            // Start cloning in background
+            setImmediate(async () => {
+                try {
+                    await this.sessionStore.executeCloneAtVersion(id, sessionId, version);
+                    this.sseService.emitSessionCreated({
+                        sourceSessionId: sessionId,
+                        newSessionId: id,
+                        group,
+                    });
+                } catch (error) {
+                    console.error('Background session cloning failed', error);
+                    this.sseService.emitChatStatus({
+                        sessionId: id,
+                        status: 'error',
+                        message: 'Failed to clone session in background',
+                        details: error,
+                    });
+                }
+            });
+
+            return response.status(201).json({
+                id,
+                group,
+                currentVersion: version,
+                history: [],
+                files: {},
+                updatedAt: new Date().toISOString(),
             });
         } catch (error) {
             console.error('Failed to clone session by version', error);
             return response
                 .status(400)
-                .json({ message: 'Не удалось клонировать указанную версию' });
+                .json({ message: 'Не удалось инициировать клонирование версии' });
         }
     }
 

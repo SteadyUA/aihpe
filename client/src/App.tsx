@@ -29,6 +29,8 @@ interface AppState {
     // UI states
     selection: string | null;
     isPicking: boolean;
+    pendingSessions: string[];
+    isConnected: boolean;
 }
 
 export default class App extends React.Component<AppProps, AppState> {
@@ -50,8 +52,11 @@ export default class App extends React.Component<AppProps, AppState> {
             activeVersion: null,
             currentVersion: 0,
             activeVersions: {},
+
             selection: null,
             isPicking: false,
+            pendingSessions: [],
+            isConnected: false,
         };
         this.picker = new ElementPicker();
         this.previewRef = React.createRef();
@@ -77,6 +82,9 @@ export default class App extends React.Component<AppProps, AppState> {
         } catch (e) {
             console.error('Failed to load from SessionStore', e);
         }
+
+        // Setup persistent SSE connection
+        this.setupSse();
     }
 
     componentDidUpdate(_prevProps: AppProps, prevState: AppState) {
@@ -109,12 +117,6 @@ export default class App extends React.Component<AppProps, AppState> {
     handleSessionChange = () => {
         const { activeSessionId } = this.state;
 
-        // Close previous connection
-        if (this.evtSource) {
-            this.evtSource.close();
-            this.evtSource = null;
-        }
-
         if (!activeSessionId) {
             this.setState({
                 messages: [],
@@ -134,12 +136,36 @@ export default class App extends React.Component<AppProps, AppState> {
                 this.previewVersion(activeVersion);
             }
         });
+    };
 
-        // Setup SSE
+    setupSse = () => {
+        if (this.evtSource) {
+            this.evtSource.close();
+        }
+
         this.evtSource = new EventSource('/api/sse');
+
+        this.evtSource.onopen = () => {
+            console.log('SSE Connected');
+            this.setState({ isConnected: true });
+        };
+
+        this.evtSource.onerror = (err) => {
+            console.error('SSE Error', err);
+            this.setState({ isConnected: false });
+            if (this.evtSource) {
+                this.evtSource.close();
+                this.evtSource = null;
+            }
+            // Reconnect after 1 second
+            setTimeout(() => this.setupSse(), 1000);
+        };
 
         this.evtSource.addEventListener('chat-status', (e) => {
             const data = JSON.parse(e.data);
+            const { activeSessionId } = this.state;
+
+            // Only handle status updates for the active session
             if (data.sessionId !== activeSessionId) return;
 
             if (data.status === 'started') {
@@ -163,12 +189,14 @@ export default class App extends React.Component<AppProps, AppState> {
                     // Completed means we are done. 
                     requestStartTime: null
                 });
-                this.fetchSession(activeSessionId).then(() => {
-                    const { activeVersion } = this.state;
-                    if (activeVersion !== null) {
-                        this.previewVersion(activeVersion);
-                    }
-                });
+                if (activeSessionId) {
+                    this.fetchSession(activeSessionId).then(() => {
+                        const { activeVersion } = this.state;
+                        if (activeVersion !== null) {
+                            this.previewVersion(activeVersion);
+                        }
+                    });
+                }
             } else if (data.status === 'error') {
                 this.setState({
                     utilStatus: 'error',
@@ -182,7 +210,14 @@ export default class App extends React.Component<AppProps, AppState> {
             const data = JSON.parse(e.data);
             // Avoid adding duplicate if this tab created it (already in state)
             this.setState((prevState) => {
-                if (prevState.sessions.includes(data.newSessionId)) return null;
+                if (prevState.sessions.includes(data.newSessionId)) {
+                    // Even if in sessions, we might need to clear pending status
+                    return {
+                        sessions: prevState.sessions,
+                        groups: prevState.groups,
+                        pendingSessions: prevState.pendingSessions.filter(id => id !== data.newSessionId),
+                    };
+                }
 
                 const newGroups = { ...prevState.groups };
                 if (data.group) {
@@ -191,6 +226,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 return {
                     sessions: [...prevState.sessions, data.newSessionId],
                     groups: newGroups,
+                    pendingSessions: prevState.pendingSessions.filter(id => id !== data.newSessionId),
                 };
             });
         });
@@ -251,14 +287,23 @@ export default class App extends React.Component<AppProps, AppState> {
 
     handleSessionCreated = (session: any) => {
         this.setState((prevState) => {
-            if (prevState.sessions.includes(session.id)) return null;
+            // Even if it exists (e.g. from SSE), we should switch to it if this was a user action
+            const exists = prevState.sessions.includes(session.id);
+            if (exists) {
+                return {
+                    activeSessionId: session.id,
+                };
+            }
+
             return {
                 sessions: [...prevState.sessions, session.id],
+                // Auto-activate immediately (it will show loader because it is pending)
                 activeSessionId: session.id,
                 currentVersion: session.currentVersion ?? 0,
-                groups: session.group
+                groups: session.group !== undefined
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
+                pendingSessions: [...prevState.pendingSessions, session.id],
             };
         });
     };
@@ -275,14 +320,7 @@ export default class App extends React.Component<AppProps, AppState> {
             );
             if (!res.ok) throw new Error('Clone version failed');
             const session = await res.json();
-            this.setState((prevState) => ({
-                sessions: [...prevState.sessions, session.id],
-                activeSessionId: session.id,
-                currentVersion: session.currentVersion ?? 0, // Should be same as version cloned
-                groups: session.group
-                    ? { ...prevState.groups, [session.id]: session.group }
-                    : prevState.groups,
-            }));
+            this.handleSessionCreated(session);
         } catch (error) {
             console.error('Failed to clone version', error);
         }
@@ -432,7 +470,10 @@ export default class App extends React.Component<AppProps, AppState> {
             utilStatus,
             selection,
             isPicking,
+            pendingSessions,
         } = this.state;
+
+        const isPending = activeSessionId ? pendingSessions.includes(activeSessionId) : false;
 
         const statusMap: Record<string, string> = {};
         if (activeSessionId) {
@@ -466,33 +507,48 @@ export default class App extends React.Component<AppProps, AppState> {
                             ]),
                         )}
                         groups={this.state.groups}
+                        pendingSessions={this.state.pendingSessions}
+                        isConnected={this.state.isConnected}
                     />
                 </div>
 
-                <Chat
-                    messages={messages}
-                    onSend={this.sendMessage}
-                    status={utilStatus}
-                    statusMessages={this.state.utilMessages}
-                    startTime={this.state.requestStartTime}
-                    onPickElement={this.startPicking}
-                    onCancelPick={this.stopPicking}
-                    selection={selection}
-                    isPicking={isPicking}
-                    onClearSelection={this.clearSelection}
-                    onSelectChip={this.restoreSelection}
-                    onCloneVersion={this.cloneVersion}
-                    activeVersion={this.state.activeVersion}
-                    onPreviewVersion={this.previewVersion}
-                    disabled={!activeSessionId}
-                />
 
-                <Preview
-                    ref={this.previewRef}
-                    sessionId={activeSessionId}
-                    version={currentVersion}
-                    maxDate={maxDate}
-                />
+
+                {
+                    isPending ? (
+                        <div className={styles.mainLoader}>
+                            <div className={styles.spinner}></div>
+                            <div>Creating session...</div>
+                        </div>
+                    ) : (
+                        <>
+                            <Chat
+                                messages={messages}
+                                onSend={this.sendMessage}
+                                status={utilStatus}
+                                statusMessages={this.state.utilMessages}
+                                startTime={this.state.requestStartTime}
+                                onPickElement={this.startPicking}
+                                onCancelPick={this.stopPicking}
+                                selection={selection}
+                                isPicking={isPicking}
+                                onClearSelection={this.clearSelection}
+                                onSelectChip={this.restoreSelection}
+                                onCloneVersion={this.cloneVersion}
+                                activeVersion={this.state.activeVersion}
+                                onPreviewVersion={this.previewVersion}
+                                disabled={!activeSessionId}
+                            />
+
+                            <Preview
+                                ref={this.previewRef}
+                                sessionId={activeSessionId}
+                                version={currentVersion}
+                                maxDate={maxDate}
+                            />
+                        </>
+                    )
+                }
             </div>
         );
     }

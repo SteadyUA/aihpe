@@ -10,9 +10,11 @@ interface SessionBarProps {
     statusMap: Record<string, string>;
     groups: Record<string, number>; // Map sessionId -> groupId
     onRemove: (id: string) => void;
+    pendingSessions: string[];
+    isConnected: boolean;
 }
 
-interface SessionBarState {}
+interface SessionBarState { }
 
 export class SessionBar extends React.Component<
     SessionBarProps,
@@ -27,15 +29,24 @@ export class SessionBar extends React.Component<
             statusMap,
             onRemove,
             groups,
+            pendingSessions,
+            isConnected,
         } = this.props;
 
         return (
             <div className={styles.sessionBar}>
+                <div
+                    className={classNames(styles.connectionStatus, {
+                        [styles.connected]: isConnected,
+                    })}
+                    title={isConnected ? 'Online' : 'Reconnecting...'}
+                />
                 <div className={styles.sessionTabs}>
                     {sessions.map((id) => {
                         const isActive = id === activeSessionId;
                         const status = statusMap?.[id] || 'idle';
-                        const isBusy = status === 'busy';
+                        const isPending = pendingSessions.includes(id);
+                        const isBusy = status === 'busy' || isPending;
                         const groupId = groups?.[id];
                         // Access dynamic group class from styles module
                         const groupClass =
@@ -50,10 +61,12 @@ export class SessionBar extends React.Component<
                                     styles.sessionTab,
                                     {
                                         [styles.active]: isActive,
+                                        [styles.pending]: isPending,
                                     },
                                     groupClass,
                                 )}
                                 onClick={() => onSwitch(id)}
+                            // style={isPending ? { cursor: 'not-allowed', opacity: 0.7 } : undefined} // Removed restriction
                             >
                                 <span
                                     className={classNames(

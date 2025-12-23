@@ -81,6 +81,19 @@ export class SessionStore {
         return cloneSession(session);
     }
 
+    prepareCreate(): { id: string; group: number } {
+        const id = randomUUID();
+        const group = Math.floor(Math.random() * 32);
+        return { id, group };
+    }
+
+    async executeCreate(id: string, group: number): Promise<SessionData> {
+        const session = this.createFreshSession(id, group);
+        this.sessions.set(id, session);
+        this.persistSession(session);
+        return cloneSession(session);
+    }
+
     clone(sourceId: string): SessionData {
         const source = this.getOrCreate(sourceId);
         const newId = randomUUID();
@@ -99,6 +112,32 @@ export class SessionStore {
         copyVersionHistory(sourceId, newId);
 
         this.sessions.set(newId, newSession);
+        this.persistSession(newSession);
+        return cloneSession(newSession);
+    }
+
+    prepareClone(sourceId: string): { id: string; group: number } {
+        const source = this.getOrCreate(sourceId);
+        const id = randomUUID();
+        return { id, group: source.group };
+    }
+
+    async executeClone(id: string, sourceId: string): Promise<SessionData> {
+        const source = this.getOrCreate(sourceId);
+        const newSession: SessionData = {
+            ...source,
+            id: id,
+            updatedAt: new Date(),
+            history: source.history.map((h) => ({ ...h })),
+            files: { ...source.files },
+            group: source.group,
+            currentVersion: source.currentVersion,
+        };
+
+        clearPersistedSessionData(id);
+        copyVersionHistory(sourceId, id);
+
+        this.sessions.set(id, newSession);
         this.persistSession(newSession);
         return cloneSession(newSession);
     }
@@ -166,6 +205,72 @@ export class SessionStore {
         copyVersionHistoryUpTo(sourceId, newId, normalizedVersion);
 
         this.sessions.set(newId, newSession);
+        this.persistSession(newSession);
+        return cloneSession(newSession);
+    }
+
+    async executeCloneAtVersion(id: string, sourceId: string, version: number): Promise<SessionData> {
+        const normalizedVersion = Math.floor(version);
+        if (!Number.isFinite(normalizedVersion) || normalizedVersion < 0) {
+            throw new Error(`Invalid version ${version}`);
+        }
+
+        const source = this.getOrCreate(sourceId);
+        if (normalizedVersion > source.currentVersion) {
+            throw new Error(
+                `Version ${normalizedVersion} exceeds current session version`,
+            );
+        }
+
+        const targetIndex = source.history.findIndex(
+            (entry) =>
+                entry.role === 'assistant' &&
+                typeof entry.version === 'number' &&
+                entry.version === normalizedVersion,
+        );
+
+        if (targetIndex === -1) {
+            throw new Error(
+                `Assistant message for version ${normalizedVersion} not found`,
+            );
+        }
+
+        const truncatedHistory = source.history
+            .slice(0, targetIndex + 1)
+            .map((entry) => ({
+                ...entry,
+                createdAt: new Date(entry.createdAt),
+                selection: entry.selection
+                    ? { selector: entry.selection.selector }
+                    : undefined,
+                version:
+                    typeof entry.version === 'number'
+                        ? entry.version
+                        : undefined,
+            }));
+
+        const snapshot =
+            normalizedVersion === source.currentVersion
+                ? { ...source.files }
+                : readVersionFiles(sourceId, normalizedVersion);
+
+        if (!snapshot) {
+            throw new Error(`Files for version ${normalizedVersion} not found`);
+        }
+
+        const newSession: SessionData = {
+            id: id,
+            files: { ...snapshot },
+            history: truncatedHistory,
+            updatedAt: new Date(),
+            group: source.group,
+            currentVersion: normalizedVersion,
+        };
+
+        clearPersistedSessionData(id);
+        copyVersionHistoryUpTo(sourceId, id, normalizedVersion);
+
+        this.sessions.set(id, newSession);
         this.persistSession(newSession);
         return cloneSession(newSession);
     }
