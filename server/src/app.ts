@@ -13,7 +13,7 @@ export function createApp(): express.Express {
 
     app.use(cors());
     // app.use(express.json());
-    // app.use(express.text());
+    app.use(express.text());
 
     const publicDir = path.resolve(__dirname, '..', 'public');
     app.use(express.static(publicDir));

@@ -22,6 +22,7 @@ export interface SessionData {
     updatedAt: Date;
     group: number;
     currentVersion: number;
+    imageGenerationAllowed?: boolean;
 }
 
 export interface ScreenshotAttachment {

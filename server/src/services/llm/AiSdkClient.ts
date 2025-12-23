@@ -54,7 +54,7 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt();
+        const systemPrompt = this.buildSystemPrompt(request.imageGenerationAllowed);
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
@@ -193,23 +193,6 @@ export class AiSdkClient implements LlmClient {
         };
 
         // Add image tools
-        tools.generate_image = tool({
-            description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
-            inputSchema: z.object({
-                description: z.string().describe('Detailed description of the image to generate'),
-                summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
-            }),
-            execute: async ({ description, summary }: { description: string; summary: string }) => {
-                try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
-                    return `Image generated successfully: ${filename}`;
-                } catch (error: any) {
-                    return `Failed to generate image: ${error.message}`;
-                }
-            },
-        });
-
         tools.list_images = tool({
             description: 'List available images in the current session. Use this to see if a suitable image already exists before generating a new one.',
             inputSchema: z.object({
@@ -228,23 +211,42 @@ export class AiSdkClient implements LlmClient {
             },
         });
 
-        tools.edit_image = tool({
-            description: 'Regenerate an existing image. Use this when the user wants to change or improve an image. The new image will replace the old one with the same filename.',
-            inputSchema: z.object({
-                filename: z.string().describe('The filename of the image to regenerate (e.g., "image.png")'),
-                description: z.string().describe('The new detailed description for the image'),
-                summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
-            }),
-            execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
-                try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, filename);
-                    return `Image updated successfully: ${savedFilename}`;
-                } catch (error: any) {
-                    return `Failed to update image: ${error.message}`;
-                }
-            },
-        });
+        if (request.imageGenerationAllowed) {
+            tools.generate_image = tool({
+                description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
+                inputSchema: z.object({
+                    description: z.string().describe('Detailed description of the image to generate'),
+                    summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
+                }),
+                execute: async ({ description, summary }: { description: string; summary: string }) => {
+                    try {
+                        const nextVersion = this.ensureNextVersion(request.sessionId);
+                        const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
+                        return `Image generated successfully: ${filename}`;
+                    } catch (error: any) {
+                        return `Failed to generate image: ${error.message}`;
+                    }
+                },
+            });
+
+            tools.edit_image = tool({
+                description: 'Regenerate an existing image. Use this when the user wants to change or improve an image. The new image will replace the old one with the same filename.',
+                inputSchema: z.object({
+                    filename: z.string().describe('The filename of the image to regenerate (e.g., "image.png")'),
+                    description: z.string().describe('The new detailed description for the image'),
+                    summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
+                }),
+                execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
+                    try {
+                        const nextVersion = this.ensureNextVersion(request.sessionId);
+                        const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, filename);
+                        return `Image updated successfully: ${savedFilename}`;
+                    } catch (error: any) {
+                        return `Failed to update image: ${error.message}`;
+                    }
+                },
+            });
+        }
 
         if (request.allowVariants) {
             tools.generate_variants = tool({
@@ -488,7 +490,11 @@ export class AiSdkClient implements LlmClient {
         }
     }
 
-    private buildSystemPrompt(): string {
+    private buildSystemPrompt(imageGenerationAllowed: boolean = true): string {
+        const imageInstructions = imageGenerationAllowed
+            ? `- Image generation is ENABLED. You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.`
+            : `- Image generation is DISABLED. You can use 'list_images' to view what is available, BUT you CANNOT generate new images or edit existing ones. If user asks to generate/edit, explain it is disabled.`;
+
         return `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
 Your goal is to fulfill the user's request by modifying these files.
@@ -504,8 +510,7 @@ Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - If the user asks for variants, use 'generate_variants'.
-- If the user asks for images or you need an image, use 'list_images' to check existing ones, or 'generate_image' to create a new one.
-- If the user asks to change/regenerate an existing image, use 'edit_image'.
+${imageInstructions}
 `;
     }
 

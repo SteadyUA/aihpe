@@ -2,6 +2,7 @@ import React from 'react';
 import { marked } from 'marked';
 import classNames from 'classnames';
 import { ElementPicker } from './ElementPicker';
+import { UiCheckbox } from './UiCheckbox';
 import styles from './Chat.module.css';
 
 marked.setOptions({ breaks: true });
@@ -138,6 +139,8 @@ interface ChatProps {
     onPreviewVersion?: (version: number) => void;
     activeVersion?: number | null;
     disabled?: boolean;
+    imageGenerationAllowed?: boolean;
+    onToggleImageGeneration?: (allowed: boolean) => void;
 }
 
 interface ChatState {
@@ -229,6 +232,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             activeVersion,
             onPreviewVersion,
             disabled,
+            imageGenerationAllowed,
+            onToggleImageGeneration,
         } = this.props;
         const { input, elapsedSeconds } = this.state;
 
@@ -334,14 +339,26 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         placeholder={disabled ? "Create a session to start chatting..." : "Describe changes..."}
                         rows={4}
                         disabled={disabled}
+                        tabIndex={1}
                     />
                     <div
                         className={styles.formActions}
                     >
+                        {onToggleImageGeneration && (
+                            <UiCheckbox
+                                checked={imageGenerationAllowed ?? true}
+                                onChange={onToggleImageGeneration}
+                                label="Image Gen"
+                                title="Enable/Disable image generation"
+                                disabled={disabled || status === 'busy'}
+                                className={styles.imageToggle}
+                            />
+                        )}
                         <button
                             type="submit"
                             disabled={status === 'busy' || disabled}
                             className={styles.submitButton}
+                            tabIndex={2}
                         >
                             Send
                         </button>

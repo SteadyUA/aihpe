@@ -106,6 +106,7 @@ export class ChatService {
                 conversation,
                 attachments: normalizedAttachments,
                 allowVariants,
+                imageGenerationAllowed: session.imageGenerationAllowed ?? true,
                 currentVersion: session.currentVersion,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates

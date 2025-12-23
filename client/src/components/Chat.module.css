@@ -283,3 +283,8 @@
     color: var(--text-primary);
     font-weight: 500;
 }
+
+.imageToggle {
+    margin-right: auto;
+    /* Push to left */
+}

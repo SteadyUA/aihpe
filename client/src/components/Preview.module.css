@@ -70,55 +70,6 @@
     border-color: var(--accent);
 }
 
-/* Toggle Switch */
-.toggle {
-    display: flex;
-    align-items: center;
-    line-height: 28px;
-    gap: 0.5rem;
-    cursor: pointer;
-    font-size: 0.9rem;
-    user-select: none;
-}
-
-.toggle input {
-    display: none;
-}
-
-.toggleSwitch {
-    width: 36px;
-    height: 20px;
-    background: var(--border-color);
-    border-radius: 10px;
-    position: relative;
-    transition: background 0.2s;
-}
-
-.toggleSwitch::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: white;
-    border-radius: 50%;
-    transition: transform 0.2s;
-}
-
-.toggle input:checked+.toggleSwitch {
-    background: var(--accent);
-}
-
-.toggle input:checked+.toggleSwitch::after {
-    transform: translateX(16px);
-}
-
-.toggleHint {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
 /* Preview Frame */
 .frameWrapper {
     flex: 1;

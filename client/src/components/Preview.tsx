@@ -1,6 +1,7 @@
 import React from 'react';
 import classNames from 'classnames';
 import Editor, { OnMount } from '@monaco-editor/react';
+import { UiCheckbox } from './UiCheckbox';
 import styles from './Preview.module.css';
 
 // Define IDisposable locally to avoid deep import issues
@@ -30,9 +31,8 @@ interface Device {
 const DEVICES: Device[] = [
     { name: 'iPhone SE', width: 375, height: 667 },
     { name: 'iPhone 12/13/14', width: 390, height: 844 },
+    { name: 'Pixel 7 / Samsung S20 Ultra', width: 412, height: 915 },
     { name: 'iPhone 14 Pro Max', width: 430, height: 932 },
-    { name: 'Pixel 7', width: 412, height: 915 },
-    { name: 'Samsung S20 Ultra', width: 412, height: 915 },
     { name: 'iPad Mini', width: 768, height: 1024 },
     { name: 'iPad Air', width: 820, height: 1180 },
 ];
@@ -359,8 +359,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.setState({ deviceIndex: Number(e.target.value) });
     };
 
-    toggleMobile = (e: React.ChangeEvent<HTMLInputElement>) => {
-        this.setState({ isMobile: e.target.checked });
+    toggleMobile = (checked: boolean) => {
+        this.setState({ isMobile: checked });
     };
 
     handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -573,17 +573,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 {!isCodeView && (
                     <div className={styles.toolbar}>
                         <div className={styles.deviceControls}>
-                            <label className={styles.toggle}>
-                                <input
-                                    type="checkbox"
-                                    checked={isMobile}
-                                    onChange={this.toggleMobile}
-                                />
-                                <span className={styles.toggleSwitch}></span>
-                                <span className={styles.toggleHint}>
-                                    Mobile
-                                </span>
-                            </label>
+                            <UiCheckbox
+                                checked={isMobile}
+                                onChange={this.toggleMobile}
+                                label="Mobile"
+                            />
                             <select
                                 className={styles.deviceSelect}
                                 disabled={!isMobile}

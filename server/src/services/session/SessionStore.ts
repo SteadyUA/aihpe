@@ -18,6 +18,7 @@ type PersistedSession = {
     updatedAt: string;
     group?: number;
     currentVersion?: number;
+    imageGenerationAllowed?: boolean;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -134,6 +135,7 @@ export class SessionStore {
             files: { ...source.files },
             group: source.group,
             currentVersion: source.currentVersion,
+            imageGenerationAllowed: source.imageGenerationAllowed,
         };
 
         clearPersistedSessionData(id);
@@ -328,7 +330,20 @@ export class SessionStore {
             updatedAt: new Date(),
             group: group ?? Math.floor(Math.random() * 32),
             currentVersion: 0,
+            imageGenerationAllowed: true,
         };
+    }
+
+    updateImageGenerationAllowed(sessionId: string, allowed: boolean): SessionData {
+        const session = this.getOrCreate(sessionId);
+        const updated: SessionData = {
+            ...session,
+            imageGenerationAllowed: allowed,
+            updatedAt: new Date(),
+        };
+        this.sessions.set(sessionId, updated);
+        this.persistSession(updated);
+        return cloneSession(updated);
     }
 
     getOrCreate(sessionId: string): SessionData {
@@ -595,6 +610,7 @@ export class SessionStore {
                     : new Date(),
                 group: parsed.group ?? 0,
                 currentVersion,
+                imageGenerationAllowed: parsed.imageGenerationAllowed ?? true, // Default to true if missing
             };
 
             // Attempt to load messages.json and context.json from version dir
@@ -652,6 +668,7 @@ export class SessionStore {
                 updatedAt: session.updatedAt.toISOString(),
                 group: session.group,
                 currentVersion: session.currentVersion,
+                imageGenerationAllowed: session.imageGenerationAllowed,
                 // store legacy history only if migration needed or backup? 
                 // We can stop writing strictly if we trust messages.json. 
                 // Let's write empty or stop writing it to save space.

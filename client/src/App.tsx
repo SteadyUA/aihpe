@@ -24,6 +24,7 @@ interface AppState {
     // Let's replace utilMessage with utilMessages in state and pass the list.
     activeVersion: number | null;
     currentVersion: number;
+    imageGenerationAllowed: boolean;
     activeVersions: Record<string, number | null>; // Map sessionId -> activeVersion
 
     // UI states
@@ -51,6 +52,7 @@ export default class App extends React.Component<AppProps, AppState> {
             utilMessage: null,
             activeVersion: null,
             currentVersion: 0,
+            imageGenerationAllowed: true,
             activeVersions: {},
 
             selection: null,
@@ -239,6 +241,7 @@ export default class App extends React.Component<AppProps, AppState> {
             this.setState({
                 messages: data.history || [],
                 currentVersion: data.currentVersion ?? 0,
+                imageGenerationAllowed: data.imageGenerationAllowed ?? true,
             });
         } catch (error) {
             console.error('Failed to fetch session', error);
@@ -292,7 +295,7 @@ export default class App extends React.Component<AppProps, AppState> {
             if (exists) {
                 return {
                     activeSessionId: session.id,
-                };
+                } as any;
             }
 
             return {
@@ -300,6 +303,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 // Auto-activate immediately (it will show loader because it is pending)
                 activeSessionId: session.id,
                 currentVersion: session.currentVersion ?? 0,
+                imageGenerationAllowed: session.imageGenerationAllowed ?? true,
                 groups: session.group !== undefined
                     ? { ...prevState.groups, [session.id]: session.group }
                     : prevState.groups,
@@ -462,6 +466,26 @@ export default class App extends React.Component<AppProps, AppState> {
         this.setState({ selection: null });
     };
 
+    toggleImageGeneration = async (allowed: boolean) => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        // Optimistic update
+        this.setState({ imageGenerationAllowed: allowed });
+
+        try {
+            await fetch(`/api/sessions/${activeSessionId}/settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageGenerationAllowed: allowed }),
+            });
+        } catch (error) {
+            console.error('Failed to update session settings', error);
+            // Revert on failure? 
+            // For now, let's assume it works or next fetch corrects it.
+        }
+    };
+
     render() {
         const {
             sessions,
@@ -538,6 +562,8 @@ export default class App extends React.Component<AppProps, AppState> {
                                 activeVersion={this.state.activeVersion}
                                 onPreviewVersion={this.previewVersion}
                                 disabled={!activeSessionId}
+                                imageGenerationAllowed={this.state.imageGenerationAllowed}
+                                onToggleImageGeneration={this.toggleImageGeneration}
                             />
 
                             <Preview

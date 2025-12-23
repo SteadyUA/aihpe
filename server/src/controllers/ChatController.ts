@@ -132,6 +132,7 @@ export class ChatController {
             history: [],
             files: {}, // Empty/Minimal files for client compliance if needed
             updatedAt: new Date().toISOString(),
+            imageGenerationAllowed: true, // Default
         });
     }
 
@@ -163,6 +164,27 @@ export class ChatController {
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
+            imageGenerationAllowed: snapshot.imageGenerationAllowed ?? true,
+        };
+    }
+
+    @Post('/api/sessions/:sessionId/settings')
+    updateSettings(
+        @Param('sessionId') sessionId: string,
+        @Body() body: { imageGenerationAllowed: boolean },
+    ) {
+        const updated = this.sessionStore.updateImageGenerationAllowed(
+            sessionId,
+            body.imageGenerationAllowed,
+        );
+        return {
+            id: updated.id,
+            files: updated.files,
+            history: updated.history,
+            updatedAt: updated.updatedAt.toISOString(),
+            group: updated.group,
+            currentVersion: updated.currentVersion,
+            imageGenerationAllowed: updated.imageGenerationAllowed,
         };
     }
 
