@@ -177,12 +177,12 @@ export class AiSdkClient implements LlmClient {
             }),
             summary: tool({
                 description:
-                    'Call this when you are done making changes to provide a summary of what you did to the user.',
+                    'Call this when you are done making changes to provide a summary of what you did to the user. You can use Markdown to format the message.',
                 inputSchema: z.object({
                     message: z
                         .string()
                         .describe(
-                            'The summary message to display to the user.',
+                            'The summary message to display to the user. Use Markdown formatting (bold, italic, lists) to make it more readable.',
                         ),
                 }),
                 execute: async ({ message }: { message: string }) => {
@@ -357,8 +357,38 @@ export class AiSdkClient implements LlmClient {
                 console.log('---------------------------------\n');
 
                 const response = await result.response;
-                // These are the messages generated in this step (usually just one assistant message with text/toolCalls)
+                // These are the messages generated in this step
                 const stepMessages = response.messages;
+
+                // --- FIX: Sort tool results if they were auto-executed or provided by the model ---
+                // We check if stepMessages contains an assistant message with tool-calls AND a tool message with results.
+                // If so, we sort the results in the tool message to match the order of calls.
+                const assistantMsgWithCalls = stepMessages.find(m => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((c: any) => c.type === 'tool-call'));
+                const toolMsgWithResults = stepMessages.find(m => m.role === 'tool' && Array.isArray(m.content));
+
+                if (assistantMsgWithCalls && toolMsgWithResults && Array.isArray(assistantMsgWithCalls.content) && Array.isArray(toolMsgWithResults.content)) {
+                    const callOrder = assistantMsgWithCalls.content
+                        .filter((c: any) => c.type === 'tool-call')
+                        .map((c: any) => c.toolCallId);
+
+                    if (callOrder.length > 0) {
+                        const results = toolMsgWithResults.content as any[];
+                        // Check if we need to sort
+                        // We only sort if all callIds are present to avoid dataloss
+                        const resultIds = results.map(r => r.toolCallId);
+
+                        // Simple check: do we have results for these calls?
+                        // Note: resultIds might contain more or fewer if something is weird, but usually 1:1.
+
+                        results.sort((a, b) => {
+                            const idxA = callOrder.indexOf(a.toolCallId);
+                            const idxB = callOrder.indexOf(b.toolCallId);
+                            // Place known items in order, unknown items at end
+                            return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                        });
+                    }
+                }
+                // ---------------------------------------------------------------------------------
 
                 // Add step messages to current history and collection
                 for (const m of stepMessages) {
@@ -401,126 +431,18 @@ export class AiSdkClient implements LlmClient {
                             ),
                     );
 
-                    // Filter out tool calls that were already executed
-                    const pendingToolCalls = toolCalls.filter(
-                        (tc) => !executedToolCallIds.has(tc.toolCallId),
-                    );
-
-                    if (pendingToolCalls.length > 0) {
-                        // Report tool usage
-                        if (request.onProgress) {
-                            const prog = request.onProgress;
-                            pendingToolCalls.forEach((tc) => {
-                                // Try to extract summary from args
-                                let summaryInfo = `Tool call: ${tc.toolName}`;
-                                try {
-                                    // Check if args is an object and has summary
-                                    const args = (tc as any).args;
-                                    if (
-                                        args &&
-                                        typeof args === 'object' &&
-                                        args.summary
-                                    ) {
-                                        summaryInfo = args.summary;
-                                    }
-                                } catch (e) {
-                                    // ignore
-                                }
-                                prog(summaryInfo + '\n');
-                            });
-                        }
-
-                        const toolResults = await Promise.all(
-                            pendingToolCalls.map(async (tc) => {
-                                const tool = tools[tc.toolName];
-                                if (tool && tool.execute) {
-                                    try {
-                                        // Access input property, fallback to args if input is missing (for safety)
-                                        const input =
-                                            (tc as any).input ||
-                                            (tc as any).args;
-                                        if (!input) {
-                                            throw new Error(
-                                                `No input provided for tool ${tc.toolName}`,
-                                            );
-                                        }
-
-                                        const executionResult =
-                                            await tool.execute(input);
-
-                                        // Ensure output is compliant with LanguageModelV2ToolResultOutput
-                                        let output: any;
-
-                                        if (
-                                            typeof executionResult === 'string'
-                                        ) {
-                                            output = {
-                                                type: 'text',
-                                                value: executionResult,
-                                            };
-                                        } else {
-                                            output = {
-                                                type: 'json',
-                                                value: executionResult,
-                                            };
-                                        }
-
-                                        return {
-                                            type: 'tool-result' as const,
-                                            toolCallId: tc.toolCallId,
-                                            toolName: tc.toolName,
-                                            output: output,
-                                        };
-                                    } catch (e: any) {
-                                        return {
-                                            type: 'tool-result' as const,
-                                            toolCallId: tc.toolCallId,
-                                            toolName: tc.toolName,
-                                            output: {
-                                                type: 'error-text',
-                                                value: e.message || String(e),
-                                            },
-                                        };
-                                    }
-                                }
-                                return {
-                                    type: 'tool-result' as const,
-                                    toolCallId: tc.toolCallId,
-                                    toolName: tc.toolName,
-                                    output: {
-                                        type: 'error-text',
-                                        value: 'Tool not found',
-                                    },
-                                };
-                            }),
-                        );
-
-                        // Construct tool message
-                        const toolMessage: ModelMessage = {
-                            role: 'tool',
-                            content: toolResults,
-                        };
-
-                        currentMessages.push(toolMessage);
-                        collectedNewMessages.push(toolMessage);
-
-                        // Check if summary or variants was called, if so, we might want to stop
-                        const summaryCalled = pendingToolCalls.some(
-                            (tc) => tc.toolName === 'summary',
-                        );
-                        const variantsCalled = pendingToolCalls.some(
-                            (tc) => tc.toolName === 'generate_variants',
-                        );
-
-                        if (summaryCalled || variantsCalled) {
-                            break;
-                        }
-                    } else {
-                        // All tools were executed by provider. Check if we should stop.
+                    if (toolCalls.length > 0) {
+                        // All tools were executed by provider (or we processed results in stepMessages above).
+                        // Check if we should stop loop based on executed tools.
                         const summaryExecuted = toolCalls.some(
                             (tc) => tc.toolName === 'summary',
                         );
-                        if (summaryExecuted) {
+                        // Also stop if variants were generated
+                        const variantsExecuted = toolCalls.some(
+                            (tc) => tc.toolName === 'generate_variants',
+                        );
+
+                        if (summaryExecuted || variantsExecuted) {
                             break;
                         }
                     }

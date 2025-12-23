@@ -3,9 +3,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
 import { ChatMessage, SessionData, SessionFiles } from '../../types/chat';
+import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'updatedAt'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -15,7 +16,6 @@ type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
 type PersistedSession = {
     id: string;
     updatedAt: string;
-    history: PersistedHistoryEntry[];
     group?: number;
     currentVersion?: number;
 };
@@ -102,6 +102,7 @@ export class SessionStore {
             id: newId,
             updatedAt: new Date(),
             history: source.history.map((h) => ({ ...h })),
+            context: source.context.map((c) => ({ ...c })),
             files: { ...source.files },
             // Group is inherited from source
             group: source.group,
@@ -129,6 +130,7 @@ export class SessionStore {
             id: id,
             updatedAt: new Date(),
             history: source.history.map((h) => ({ ...h })),
+            context: source.context.map((c) => ({ ...c })),
             files: { ...source.files },
             group: source.group,
             currentVersion: source.currentVersion,
@@ -191,11 +193,32 @@ export class SessionStore {
             throw new Error(`Files for version ${normalizedVersion} not found`);
         }
 
+        // Load context for that version from disk
+        let contextSnapshot: ChatMessage[] = [];
+        if (normalizedVersion === source.currentVersion) {
+            contextSnapshot = source.context.map(c => ({ ...c }));
+        } else {
+            const versionDir = resolveVersionDir(sourceId, normalizedVersion);
+            const contextPath = path.join(versionDir, 'context.json');
+            if (fs.existsSync(contextPath)) {
+                try {
+                    const raw = fs.readFileSync(contextPath, 'utf-8');
+                    contextSnapshot = JSON.parse(raw).map((entry: any) => ({
+                        ...entry,
+                        createdAt: new Date(entry.createdAt),
+                    }));
+                } catch (e) {
+                    console.error(`Failed to read context for ${sourceId} v${normalizedVersion}`, e);
+                }
+            }
+        }
+
         const newId = randomUUID();
         const newSession: SessionData = {
             id: newId,
             files: { ...snapshot },
             history: truncatedHistory,
+            context: contextSnapshot,
             updatedAt: new Date(),
             group: source.group,
             currentVersion: normalizedVersion,
@@ -258,10 +281,31 @@ export class SessionStore {
             throw new Error(`Files for version ${normalizedVersion} not found`);
         }
 
+        // Load context for that version from disk
+        let contextSnapshot: ChatMessage[] = [];
+        if (normalizedVersion === source.currentVersion) {
+            contextSnapshot = source.context.map(c => ({ ...c }));
+        } else {
+            const versionDir = resolveVersionDir(sourceId, normalizedVersion);
+            const contextPath = path.join(versionDir, 'context.json');
+            if (fs.existsSync(contextPath)) {
+                try {
+                    const raw = fs.readFileSync(contextPath, 'utf-8');
+                    contextSnapshot = JSON.parse(raw).map((entry: any) => ({
+                        ...entry,
+                        createdAt: new Date(entry.createdAt),
+                    }));
+                } catch (e) {
+                    console.error(`Failed to read context for ${sourceId} v${normalizedVersion}`, e);
+                }
+            }
+        }
+
         const newSession: SessionData = {
             id: id,
             files: { ...snapshot },
             history: truncatedHistory,
+            context: contextSnapshot,
             updatedAt: new Date(),
             group: source.group,
             currentVersion: normalizedVersion,
@@ -280,6 +324,7 @@ export class SessionStore {
             id: sessionId,
             files: { ...EMPTY_FILES },
             history: [],
+            context: [],
             updatedAt: new Date(),
             group: group ?? Math.floor(Math.random() * 32),
             currentVersion: 0,
@@ -495,7 +540,9 @@ export class SessionStore {
             ...session,
             ...update,
             files: update.files ?? session.files,
+
             history: update.history ?? session.history,
+            context: update.context ?? session.context,
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
         };
@@ -538,38 +585,43 @@ export class SessionStore {
                 ),
             };
 
-            const history = Array.isArray(parsed.history)
-                ? parsed.history.map((entry) => ({
-                    role: entry.role,
-                    content: entry.content,
-                    selection: entry.selection,
-                    version:
-                        typeof entry.version === 'number'
-                            ? entry.version
-                            : undefined,
-                    createdAt: new Date(entry.createdAt),
-                }))
-                : [];
-
             const session: SessionData = {
                 id: parsed.id || sessionId,
                 files,
-                history,
+                history: [],
+                context: [],
                 updatedAt: parsed.updatedAt
                     ? new Date(parsed.updatedAt)
                     : new Date(),
-                // Default to a random group if missing (legacy sessions) or maybe 0?
-                // Let's use a deterministic hash of ID for consistency if missing?
-                // Or just random. Random is fine but changes every reload if not saved.
-                // We should save it back? For now, let's just use 0 or random.
-                // Requirement: "if missing... assign random" implied for new, but for legacy?
-                // Let's assign 0 for legacy to be safe/stable.
                 group: parsed.group ?? 0,
-                currentVersion:
-                    typeof parsed.currentVersion === 'number'
-                        ? parsed.currentVersion
-                        : 0,
+                currentVersion,
             };
+
+            // Attempt to load messages.json and context.json from version dir
+            const messagesPath = path.join(versionDir, 'messages.json');
+            const contextPath = path.join(versionDir, 'context.json');
+
+            if (fs.existsSync(messagesPath)) {
+                try {
+                    const rawMessages = fs.readFileSync(messagesPath, 'utf-8');
+                    const rawHistory = JSON.parse(rawMessages);
+                    session.history = sanitizeHistoryForUi(rawHistory);
+                } catch (e) {
+                    console.error(`Failed to parse messages.json for ${sessionId}`, e);
+                }
+            }
+
+            if (fs.existsSync(contextPath)) {
+                try {
+                    const rawContext = fs.readFileSync(contextPath, 'utf-8');
+                    session.context = JSON.parse(rawContext).map((entry: any) => ({
+                        ...entry,
+                        createdAt: new Date(entry.createdAt),
+                    }));
+                } catch (e) {
+                    console.error(`Failed to parse context.json for ${sessionId}`, e);
+                }
+            }
 
             ensureVersionSnapshot(
                 session.id,
@@ -600,19 +652,25 @@ export class SessionStore {
                 updatedAt: session.updatedAt.toISOString(),
                 group: session.group,
                 currentVersion: session.currentVersion,
-                history: session.history.map((message) => ({
-                    role: message.role,
-                    content: message.content,
-                    selection: message.selection
-                        ? { selector: message.selection.selector }
-                        : undefined,
-                    version:
-                        typeof message.version === 'number'
-                            ? message.version
-                            : undefined,
-                    createdAt: message.createdAt.toISOString(),
-                })),
+                // store legacy history only if migration needed or backup? 
+                // We can stop writing strictly if we trust messages.json. 
+                // Let's write empty or stop writing it to save space.
+                // But to be safe initially, maybe we shouldn't delete it yet?
+                // User requirement: "split these duties". 
+                // Let's remove it from here to force usage of messages.json
             };
+
+            fs.writeFileSync(
+                path.join(versionDir, 'messages.json'),
+                JSON.stringify(session.history, null, 2),
+                'utf-8'
+            );
+
+            fs.writeFileSync(
+                path.join(versionDir, 'context.json'),
+                JSON.stringify(session.context, null, 2),
+                'utf-8'
+            );
 
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -832,6 +890,17 @@ function cloneSession(session: SessionData): SessionData {
         id: session.id,
         files: { ...session.files },
         history: session.history.map((message) => ({
+            ...message,
+            createdAt: new Date(message.createdAt),
+            selection: message.selection
+                ? { selector: message.selection.selector }
+                : undefined,
+            version:
+                typeof message.version === 'number'
+                    ? message.version
+                    : undefined,
+        })),
+        context: session.context.map((message) => ({
             ...message,
             createdAt: new Date(message.createdAt),
             selection: message.selection

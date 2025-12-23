@@ -18,6 +18,7 @@ export interface SessionData {
     id: string;
     files: SessionFiles;
     history: ChatMessage[];
+    context: ChatMessage[];
     updatedAt: Date;
     group: number;
     currentVersion: number;

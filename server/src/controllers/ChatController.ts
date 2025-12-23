@@ -93,33 +93,7 @@ export class ChatController {
 
 
 
-    private formatHistory(history: any[]) {
-        return history
-            .map((entry) => ({
-                role: entry.role,
-                content: this.formatContent(entry.content),
-                selection: entry.selection,
-                version: entry.version,
-                createdAt: entry.createdAt.toISOString(),
-            }))
-            .filter((entry) => {
-                // Filter out empty messages (usually tool calls/results hidden from UI)
-                // But always keep user messages to avoid confusion
-                if (entry.role === 'user') return true;
-                return entry.content.trim().length > 0;
-            });
-    }
 
-    private formatContent(content: any): string {
-        if (typeof content === 'string') return content;
-        if (Array.isArray(content)) {
-            return content
-                .filter((part) => part.type === 'text')
-                .map((part) => part.text)
-                .join('\n');
-        }
-        return ''; // Fallback for unknown objects to empty string (hidden)
-    }
 
     @Get('/api/sse')
     stream(@Req() request: Request, @Res() response: Response): Response {
@@ -185,7 +159,7 @@ export class ChatController {
         return {
             id: snapshot.id,
             files: snapshot.files,
-            history: this.formatHistory(snapshot.history),
+            history: snapshot.history,
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,

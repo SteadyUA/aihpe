@@ -3,6 +3,7 @@ import { ChatAttachment, ChatMessage, SessionData } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
+import { formatContentForUi } from '../utils/chat';
 
 interface ChatResult {
     message: string;
@@ -57,22 +58,26 @@ export class ChatService {
             selection,
             version: session.currentVersion,
         };
-        this.sessionStore.appendMessage(sessionId, userMessageEntry);
+
+        const contextEntry: ChatMessage = {
+            role: 'user',
+            content: this.enrichContentWithSelection(userContentForHistory, selection),
+            createdAt: now,
+            selection,
+            version: session.currentVersion,
+        };
+
+        this.sessionStore.upsert(sessionId, {
+            history: [...session.history, userMessageEntry],
+            context: [...session.context, contextEntry],
+        });
 
         this.notifyStatus(sessionId, 'started', 'Thinking...');
 
         // 2. Prepare conversation history for prompt
-        // Exclude the message we just added (the last one) so GPT treats it as "instruction" not "previous conversation"
-        const currentHistory = this.sessionStore.getOrCreate(sessionId).history;
-        const historyForPrompt = currentHistory.slice(0, -1);
-
-        const conversation = historyForPrompt.map((item) => ({
-            ...item,
-            content: this.enrichContentWithSelection(
-                item.content,
-                item.selection,
-            ),
-        }));
+        // Use separate context list. Exclude the last message (just added) as it's the instruction.
+        const currentContext = this.sessionStore.getOrCreate(sessionId).context;
+        const conversation = currentContext.slice(0, -1);
 
         const selectorsSummary = normalizedAttachments
             .map((attachment) => attachment.selector)
@@ -104,45 +109,10 @@ export class ChatService {
                 currentVersion: session.currentVersion,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
-                    // Chunk usually comes as tokens or lines.
-                    // We need to identify specific events.
-
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
-                        // Crucial event: emit immediately as a standalone message
-                        // Also flush any pending thoughts first if needed? 
-                        // Actually, 'utilMessages' on client is a list.
-                        // Ideally we append "thoughts" as items too.
-                        // But thoughts are streaming.
-                        // Let's compromise: If we hit a tool call, we emit it.
-                        // Thoughts are tricky with the new "list" requirements.
-                        // If "Generating..." is one item, and we update it, that works.
-                        // But the requirement says "client adds elements as new events arrive".
-                        // So we should emit completed thoughts or distinct steps.
-
                         this.notifyStatus(sessionId, 'generating', chunk);
                     } else {
                         // Text stream (thoughts)
-                        // In the old logic we concatenated. 
-                        // In the new logic, maybe we want to show thoughts?
-                        // Or just "Thinking..."? 
-                        // The user said "Thinking..." is the start.
-                        // Then "generating" events are added to the list.
-                        // If we emit every token, the list will explode.
-                        // So we should probably accumulate thoughts and emit lines?
-                        // Or maybe we ignore raw tokens and only emit specific log lines from the LLM wrapper?
-                        // The `chunk` here comes from `LlmClient` which might already be doing some processing.
-                        // Let's look at `LlmClient`... wait I can't look at it easily now without tool call.
-                        // Assuming `chunk` is a token string.
-
-                        // If we just want to show "Tool calls", then we might ignore raw text if it's just "I will now..."
-                        // UNLESS the user wants to see the thoughts.
-                        // Let's assume we maintain a "Processing..." item that updates? 
-                        // No, the user said "adds elements".
-                        // So we should emit only SIGNIFICANT events.
-                        // Tool calls and Steps are significant.
-                        // Random text generation might be too noisy.
-                        // Let's try buffering lines.
-
                         thoughtBuffer += chunk;
                         if (thoughtBuffer.includes('\n')) {
                             const lines = thoughtBuffer.split('\n');
@@ -151,9 +121,6 @@ export class ChatService {
                             for (const line of lines) {
                                 const trimmedLine = line.trim();
                                 if (trimmedLine.length > 0) {
-                                    // Check if it looks like a log or just text
-                                    // If we emit every line of thought, it might be okay?
-                                    // Let's emit it.
                                     this.notifyStatus(sessionId, 'generating', trimmedLine);
                                 }
                             }
@@ -181,8 +148,10 @@ export class ChatService {
                     // Remove the last message from the new session (which is the prompt that triggered this variant generation)
                     if (newSession.history.length > 0) {
                         const newHistory = newSession.history.slice(0, -1);
+                        const newContext = newSession.context.slice(0, -1);
                         this.sessionStore.upsert(newSession.id, {
                             history: newHistory,
+                            context: newContext,
                             group: variantGroup,
                         });
                     } else {
@@ -220,6 +189,7 @@ export class ChatService {
                     sessionId,
                     summary,
                     session.currentVersion,
+                    false, // Do not add to context
                 );
 
                 return {
@@ -236,9 +206,6 @@ export class ChatService {
                 );
             } else {
                 // No changes to files/version, just append messages
-                // We might want to ensure 'updated' variable is present or handle it?
-                // Wait, 'updated' is used below.
-                // If no update, we just fetch current session.
             }
 
             // Re-fetch strict session state
@@ -246,6 +213,9 @@ export class ChatService {
 
             if (generation.newMessages && generation.newMessages.length > 0) {
                 for (const msg of generation.newMessages) {
+                    // Optimized content for UI, full content for Context
+                    const uiContent = formatContentForUi(msg.content);
+
                     // Create a clean message object to ensure all required fields are present
                     const cleanMsg: ChatMessage = {
                         role: msg.role,
@@ -254,46 +224,56 @@ export class ChatService {
                         version: updated.currentVersion,
                         selection: msg.selection,
                     };
-                    this.sessionStore.appendMessage(sessionId, cleanMsg);
-                }
 
-                // Check if we need to append the summary explicitly.
-                // If the last message was a tool execution (role='tool') or an assistant call without text response,
-                // we should append the summary so the user sees it.
-                const lastMsg =
-                    generation.newMessages[generation.newMessages.length - 1];
-                let hasVisibleResponse = false;
+                    const sessionParams = this.sessionStore.getOrCreate(sessionId);
 
-                if (lastMsg.role === 'assistant') {
-                    if (
-                        typeof lastMsg.content === 'string' &&
-                        lastMsg.content.trim().length > 0
-                    ) {
-                        hasVisibleResponse = true;
-                    } else if (Array.isArray(lastMsg.content)) {
-                        // Check if there is any text part with content
-                        const textPart = lastMsg.content.find(
-                            (p: any) =>
-                                p.type === 'text' &&
-                                p.text &&
-                                p.text.trim().length > 0,
-                        );
-                        if (textPart) hasVisibleResponse = true;
+                    // Filter logic: User always in, others only if non-empty string
+                    const shouldAddToHistory = msg.role === 'user' || uiContent.trim().length > 0;
+
+                    // Update lists
+                    let newHistory = sessionParams.history;
+                    if (shouldAddToHistory) {
+                        newHistory = [...newHistory, { ...cleanMsg, content: uiContent }];
                     }
-                }
 
-                if (!hasVisibleResponse && generation.summary) {
-                    this.appendAssistantMessage(
-                        sessionId,
-                        generation.summary,
-                        updated.currentVersion,
-                    );
+                    this.sessionStore.upsert(sessionId, {
+                        history: newHistory,
+                        context: [...sessionParams.context, cleanMsg],
+                    });
                 }
-            } else {
+            }
+
+            // Check if we need to append the summary explicitly.
+            // If the last message was a tool execution (role='tool') or an assistant call without text response,
+            // we should append the summary so the user sees it.
+            const lastMsg =
+                generation.newMessages?.[generation.newMessages.length - 1];
+            let hasVisibleResponse = false;
+
+            if (lastMsg && lastMsg.role === 'assistant') {
+                if (
+                    typeof lastMsg.content === 'string' &&
+                    lastMsg.content.trim().length > 0
+                ) {
+                    hasVisibleResponse = true;
+                } else if (Array.isArray(lastMsg.content)) {
+                    // Check if there is any text part with content
+                    const textPart = lastMsg.content.find(
+                        (p: any) =>
+                            p.type === 'text' &&
+                            p.text &&
+                            p.text.trim().length > 0,
+                    );
+                    if (textPart) hasVisibleResponse = true;
+                }
+            }
+
+            if (!hasVisibleResponse && generation.summary) {
                 this.appendAssistantMessage(
                     sessionId,
                     generation.summary,
                     updated.currentVersion,
+                    false, // Do not add to context
                 );
             }
 
@@ -394,14 +374,35 @@ export class ChatService {
         sessionId: string,
         content: any,
         version?: number,
+        addToContext: boolean = true,
     ): void {
+        const uiContent = formatContentForUi(content);
+
         const assistantMessage: ChatMessage = {
             role: 'assistant',
             content: content,
             createdAt: new Date(),
             version,
         };
-        this.sessionStore.appendMessage(sessionId, assistantMessage);
+        const session = this.sessionStore.getOrCreate(sessionId);
+
+        // Filter logic for HISTORY (UI)
+        const shouldAddToHistory = uiContent.trim().length > 0;
+        let newHistory = session.history;
+        if (shouldAddToHistory) {
+            newHistory = [...newHistory, { ...assistantMessage, content: uiContent }];
+        }
+
+        // Context logic
+        let newContext = session.context;
+        if (addToContext) {
+            newContext = [...newContext, assistantMessage];
+        }
+
+        this.sessionStore.upsert(sessionId, {
+            history: newHistory,
+            context: newContext,
+        });
     }
 
     private enrichContentWithSelection(
