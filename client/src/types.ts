@@ -8,7 +8,7 @@ export interface MessageData {
 
 export interface Session {
     id: string;
-    status: 'idle' | 'pending' | 'busy' | 'error';
+    status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
     messages: MessageData[];
     statusMessages: string[];
     requestStartTime: number | null;

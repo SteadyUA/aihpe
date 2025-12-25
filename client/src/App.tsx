@@ -48,7 +48,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 sessionIds.forEach(id => {
                     sessionsMap[id] = {
                         id,
-                        status: 'idle',
+                        status: 'unloaded',
                         messages: [],
                         statusMessages: [],
                         requestStartTime: null,
@@ -300,8 +300,8 @@ export default class App extends React.Component<AppProps, AppState> {
                             messages: history,
                             currentTurn: lastTurn,
                             imageGenerationAllowed: data.imageGenerationAllowed ?? true,
-                            // If status was pending, now it is definitively idle/ready
-                            status: session.status === 'pending' ? 'idle' : session.status,
+                            // If status was pending or unloaded, now it is definitively idle/ready
+                            status: (session.status === 'pending' || session.status === 'unloaded') ? 'idle' : session.status,
                             // Set pendingRefreshTurn only if completion triggered this fetch
                             pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn
                         }

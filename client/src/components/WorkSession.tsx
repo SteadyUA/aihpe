@@ -139,7 +139,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onUndo
         } = this.props;
 
-        if (session.status === 'pending') {
+        if (session.status === 'pending' || session.status === 'unloaded') {
             return (
                 <div style={{
                     display: isVisible ? 'flex' : 'none',
@@ -147,7 +147,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: '#666'
+                    color: '#666',
+                    gridColumn: '1 / -1' // Span all columns to center in the full view
                 }}>
                     <div className="loader">Loading...</div>
                     <style>{`
