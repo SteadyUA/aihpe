@@ -1,8 +1,8 @@
 export interface MessageData {
     role: 'user' | 'assistant' | 'system';
     content: string;
-    version?: number;
-    createdAt?: string; // Appears to be used in App.tsx for maxDate logic, though we removed maxDate, keeping it for correctness if needed
+    turn: number;
+    createdAt?: string;
     selection?: { selector: string };
 }
 
@@ -13,10 +13,11 @@ export interface Session {
     statusMessages: string[];
     requestStartTime: number | null;
 
-    currentVersion: number;
-    activeVersion: number | null;
+    currentTurn: number;
+    activeTurn: number | null;
 
     imageGenerationAllowed: boolean;
+    pendingRefreshTurn: number | null;
 
     // UI selections per session
     selection: string | null;

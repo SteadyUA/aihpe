@@ -251,7 +251,7 @@ export class AiSdkClient implements LlmClient {
         if (request.allowVariants) {
             tools.generate_variants = tool({
                 description:
-                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose.',
+                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state.',
                 inputSchema: z.object({
                     count: z
                         .number()
@@ -261,7 +261,7 @@ export class AiSdkClient implements LlmClient {
                     instructions: z
                         .array(z.string())
                         .describe(
-                            'Specific instructions for each variant. Must match the count.',
+                            'Specific, actionable instructions for each variant.  Do NOT include "Variant 1", "Variant 2", etc. prefixes. focused on WHAT to change (e.g., "Change background to blue...", "Update font to...").',
                         ),
                 }),
                 execute: async (args: {
@@ -277,7 +277,7 @@ export class AiSdkClient implements LlmClient {
         try {
             let currentMessages = [...initialMessages];
             let steps = 0;
-            const maxSteps = 15;
+            const maxSteps = 30;
             let fullText = '';
 
             // We'll collect new messages here to return them
@@ -465,6 +465,8 @@ export class AiSdkClient implements LlmClient {
                     role: m.role as any,
                     content: m.content,
                     createdAt: new Date(),
+                    version: request.currentVersion,
+                    turn: 0, // Placeholder, will be assigned by ChatService
                 }),
             );
 

@@ -10,7 +10,8 @@ export interface ChatMessage {
     role: ChatRole;
     content: any;
     selection?: { selector: string };
-    version?: number;
+    version: number;
+    turn: number;
     createdAt: Date;
 }
 
@@ -22,6 +23,7 @@ export interface SessionData {
     updatedAt: Date;
     group: number;
     currentVersion: number;
+    lastTurn?: number;
     imageGenerationAllowed?: boolean;
 }
 

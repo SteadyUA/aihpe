@@ -51,7 +51,7 @@ export class SessionBar extends React.Component<
                         // Access dynamic group class from styles module
                         const groupClass =
                             groupId !== undefined
-                                ? styles[`sessionGroup${groupId}`]
+                                ? styles[`sessionGroup${groupId % 12}`]
                                 : undefined;
 
                         return (

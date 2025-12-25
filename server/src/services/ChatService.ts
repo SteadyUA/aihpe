@@ -51,12 +51,17 @@ export class ChatService {
             normalizedAttachments,
         );
         const now = new Date();
+        // Determine turn: User message starts a new turn
+        const currentTurn = session.lastTurn ?? 0;
+        const newTurn = currentTurn + 1;
+
         const userMessageEntry: ChatMessage = {
             role: 'user',
             content: userContentForHistory,
             createdAt: now,
             selection,
             version: session.currentVersion,
+            turn: newTurn,
         };
 
         const contextEntry: ChatMessage = {
@@ -65,11 +70,14 @@ export class ChatService {
             createdAt: now,
             selection,
             version: session.currentVersion,
+            turn: newTurn,
         };
 
         this.sessionStore.upsert(sessionId, {
             history: [...session.history, userMessageEntry],
             context: [...session.context, contextEntry],
+            lastTurn: newTurn, // Update lastTurn
+            updatedAt: now,
         });
 
         this.notifyStatus(sessionId, 'started', 'Thinking...');
@@ -134,6 +142,16 @@ export class ChatService {
                 const { count, instructions } = generation.variantRequest;
                 const variantsCreated = [];
 
+                // Remove the user message from context as per requirements
+                // We do not want to influence the context with the variant generation request
+                const currentSession = this.sessionStore.getOrCreate(sessionId);
+                const cleanedContext = currentSession.context.filter(
+                    (msg) => !(msg.role === 'user' && msg.turn === newTurn),
+                );
+                this.sessionStore.upsert(sessionId, {
+                    context: cleanedContext,
+                });
+
                 this.notifyStatus(
                     sessionId,
                     'completed',
@@ -141,25 +159,19 @@ export class ChatService {
                 );
 
                 for (let i = 0; i < count; i++) {
-                    const newSession = this.sessionStore.clone(sessionId);
+                    const sessionData = this.sessionStore.getOrCreate(sessionId);
+                    const currentTurn = sessionData.lastTurn ?? 0;
+                    const targetTurn = Math.max(0, currentTurn - 1);
 
-                    // Generate a random group for each variant to distinguish them visually
+                    const { id: variantId } = this.sessionStore.prepareClone(sessionId);
                     const variantGroup = Math.floor(Math.random() * 32);
 
-                    // Remove the last message from the new session (which is the prompt that triggered this variant generation)
-                    if (newSession.history.length > 0) {
-                        const newHistory = newSession.history.slice(0, -1);
-                        const newContext = newSession.context.slice(0, -1);
-                        this.sessionStore.upsert(newSession.id, {
-                            history: newHistory,
-                            context: newContext,
-                            group: variantGroup,
-                        });
-                    } else {
-                        this.sessionStore.upsert(newSession.id, {
-                            group: variantGroup,
-                        });
-                    }
+                    const newSession = await this.sessionStore.executeCloneAtTurn(variantId, sessionId, targetTurn);
+
+                    // Update group to be random as requested
+                    this.sessionStore.upsert(newSession.id, {
+                        group: variantGroup,
+                    });
 
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
@@ -224,6 +236,7 @@ export class ChatService {
                         createdAt: new Date(),
                         version: updated.currentVersion,
                         selection: msg.selection,
+                        turn: updated.lastTurn ?? 0, // Use current turn (which was updated by user message)
                     };
 
                     const sessionParams = this.sessionStore.getOrCreate(sessionId);
@@ -379,13 +392,15 @@ export class ChatService {
     ): void {
         const uiContent = formatContentForUi(content);
 
+        const session = this.sessionStore.getOrCreate(sessionId);
+
         const assistantMessage: ChatMessage = {
             role: 'assistant',
             content: content,
             createdAt: new Date(),
-            version,
+            version: version ?? 0,
+            turn: session.lastTurn ?? 0, // Associate with current turn
         };
-        const session = this.sessionStore.getOrCreate(sessionId);
 
         // Filter logic for HISTORY (UI)
         const shouldAddToHistory = uiContent.trim().length > 0;

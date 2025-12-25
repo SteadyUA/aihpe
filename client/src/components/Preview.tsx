@@ -11,7 +11,7 @@ interface IDisposable {
 
 interface PreviewProps {
     sessionId: string | null;
-    version: number;
+    turn: number;
     onTabChange?: (tab: TabType) => void;
 }
 
@@ -51,7 +51,8 @@ interface PreviewState {
     deviceIndex: number;
     activeTab: TabType;
     iframeKey: number;
-    fileCache: Record<AssetType, string | null>;
+    // Cache per turn: turnId -> { html: ..., css: ... }
+    turnCache: Record<number, Record<AssetType, string | null>>;
     loading: Record<AssetType, boolean> & { images: boolean };
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
@@ -69,7 +70,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             deviceIndex: 0,
             activeTab: 'preview',
             iframeKey: 0,
-            fileCache: { html: null, css: null, js: null },
+            turnCache: {}, // Initialize empty
             loading: { html: false, css: false, js: false, images: false },
             unsavedContent: { html: null, css: null, js: null },
             isSaving: false,
@@ -84,7 +85,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         // If we are about to switch version within the same session
         if (
             prevProps.sessionId === this.props.sessionId &&
-            prevProps.version !== this.props.version &&
+            prevProps.turn !== this.props.turn &&
             prevState.activeTab === 'preview'
         ) {
             const iframe = this.iframeRef.current;
@@ -111,21 +112,26 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     ) {
         if (
             prevProps.sessionId !== this.props.sessionId ||
-            prevProps.version !== this.props.version
+            prevProps.turn !== this.props.turn
         ) {
             const isSessionSwitch = prevProps.sessionId !== this.props.sessionId;
             const nextActiveTab = isSessionSwitch ? 'preview' : this.state.activeTab;
 
-            // Reset cache when session or version changes
+            // When switching turn, we should:
+            // 1. Clear unsaved content (as we moved away)
+            // 2. Not clear cache (we keep it)
+            // 3. Start fetching if we are on a code tab and missing cache for new turn
+
             this.setState(
                 {
-                    fileCache: { html: null, css: null, js: null },
-                    loading: { html: false, css: false, js: false, images: false },
+                    loading: { html: false, css: false, js: false, images: false }, // Reset loading only
                     unsavedContent: { html: null, css: null, js: null },
                     activeTab: nextActiveTab,
+                    iframeKey: this.state.iframeKey + 1,
                 },
                 () => {
                     // Fetch content for the new version if we stayed on a non-preview tab
+                    // And only if missing from cache (handled by fetchFile)
                     if (!isSessionSwitch && nextActiveTab !== 'preview') {
                         if (nextActiveTab === 'images') {
                             this.fetchImages();
@@ -167,12 +173,39 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.monacoConfigured = false;
     }
 
+    public clearCache = (turn: number) => {
+        this.setState(prev => {
+            const newCache = { ...prev.turnCache };
+            delete newCache[turn];
+            return {
+                turnCache: newCache,
+                // If we are currently viewing this turn, we might want to trigger a reload?
+                // If active turn == cleared turn, and active tab != preview, we should re-fetch.
+                // But simplified: next interaction/render will fetch if missing.
+                iframeKey: prev.iframeKey + 1 // Force iframe refresh just in case
+            };
+        }, () => {
+            // Re-fetch if current
+            const { turn, sessionId } = this.props;
+            const { activeTab } = this.state;
+            if (turn === turn && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
+                this.fetchFile(activeTab as AssetType);
+            }
+        });
+    }
+
     fetchFile = async (type: AssetType) => {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         if (!sessionId) return;
 
-        // Check if already loaded or loading
-        if (this.state.fileCache[type] !== null || this.state.loading[type]) {
+        // Check cache for THIS turn
+        const currentTurnCache = this.state.turnCache[turn];
+        if (currentTurnCache && currentTurnCache[type] !== null && currentTurnCache[type] !== undefined) {
+            return;
+        }
+
+        // Check loading
+        if (this.state.loading[type]) {
             return;
         }
 
@@ -184,38 +217,45 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         try {
             const res = await fetch(
-                `/api/sessions/${sessionId}/versions/${version}/static/${filenameMap[type]}`,
+                `/api/sessions/${sessionId}/turns/${turn}/static/${filenameMap[type]}`,
             );
             if (!res.ok) throw new Error('Failed to fetch file');
             const text = await res.text();
-            this.setState((prev) => ({
-                fileCache: { ...prev.fileCache, [type]: text },
-                loading: { ...prev.loading, [type]: false },
-            }));
+
+            this.setState((prev) => {
+                const turnCache = prev.turnCache[turn] || { html: null, css: null, js: null };
+                return {
+                    turnCache: {
+                        ...prev.turnCache,
+                        [turn]: { ...turnCache, [type]: text }
+                    },
+                    loading: { ...prev.loading, [type]: false },
+                };
+            });
         } catch (error) {
             console.error(`Failed to load ${type}`, error);
-            this.setState((prev) => ({
-                fileCache: {
-                    ...prev.fileCache,
-                    [type]: 'Error loading content',
-                },
-                loading: { ...prev.loading, [type]: false },
-            }));
+            this.setState((prev) => {
+                const turnCache = prev.turnCache[turn] || { html: null, css: null, js: null };
+                return {
+                    turnCache: {
+                        ...prev.turnCache,
+                        [turn]: { ...turnCache, [type]: 'Error loading content' },
+                    },
+                    loading: { ...prev.loading, [type]: false },
+                };
+            });
         }
     };
 
     fetchImages = async () => {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         if (!sessionId) return;
 
-        // If already loaded successfully (and session/version hasn't changed), return
-        // We reset images to [] on update (via parent? No, local state).
-        // Actually componentDidUpdate above doesn't clear images explicitly in the generic reset, 
-        // but it clears loading state. Let's ensure visuals are consistent.
-        // The original code reset images to [] in logic that was removed? 
-        // Ah, in the original componentDidUpdate it wasn't clearing images explicitly, 
-        // but it was setting loading.images to false.
-        // Let's rely on loading flag.
+        // Images are not cached in turnCache for now (as user asked for file cache specifically?)
+        // Or should we? The existing code had `images: ImageMetadata[]` in state.
+        // Let's keep images ephemeral per turn for simplicity unless needed.
+        // Or we can cache them too, but state structure is different.
+        // Existing logic: checks loading.
 
         if (this.state.loading.images) return;
 
@@ -225,7 +265,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         try {
             const res = await fetch(
-                `/api/sessions/${sessionId}/versions/${version}/images`,
+                `/api/sessions/${sessionId}/turns/${turn}/images`,
             );
             if (!res.ok) throw new Error('Failed to fetch images');
             const images = await res.json();
@@ -272,7 +312,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleSave = async (targetType?: AssetType) => {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         const { activeTab, unsavedContent } = this.state;
 
         // Use targetType if provided, otherwise activeTab
@@ -291,7 +331,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             const filename = filenameMap[typeToSave as AssetType];
 
             const res = await fetch(
-                `/api/sessions/${sessionId}/versions/${version}/static/${filename}`,
+                `/api/sessions/${sessionId}/turns/${turn}/static/${filename}`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
@@ -312,18 +352,21 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             }
 
             // Update cache with saved content and clear unsaved state
-            this.setState((prev) => ({
-                fileCache: {
-                    ...prev.fileCache,
-                    [typeToSave]: content,
-                },
-                unsavedContent: {
-                    ...prev.unsavedContent,
-                    [typeToSave]: null,
-                },
-                isSaving: false,
-                iframeKey: prev.iframeKey + 1, // Force iframe reload
-            }));
+            this.setState((prev) => {
+                const turnCache = prev.turnCache[turn] || { html: null, css: null, js: null };
+                return {
+                    turnCache: {
+                        ...prev.turnCache,
+                        [turn]: { ...turnCache, [typeToSave]: content }
+                    },
+                    unsavedContent: {
+                        ...prev.unsavedContent,
+                        [typeToSave]: null,
+                    },
+                    isSaving: false,
+                    iframeKey: prev.iframeKey + 1, // Force iframe reload
+                };
+            });
         } catch (error) {
             console.error('Failed to save', error);
             this.setState({ isSaving: false });
@@ -344,12 +387,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleDownload = async () => {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         if (!sessionId) return;
 
         try {
             const response = await fetch(
-                `/api/sessions/${encodeURIComponent(sessionId)}/versions/${version}/archive`,
+                `/api/sessions/${encodeURIComponent(sessionId)}/turns/${turn}/archive`,
             );
             if (!response.ok) throw new Error('Failed to download');
 
@@ -357,7 +400,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `session-${sessionId.slice(0, 8)}-v${version}.zip`;
+            a.download = `session-${sessionId.slice(0, 8)}-turn-${turn}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -368,10 +411,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleNewWindow = () => {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         if (!sessionId) return;
 
-        const url = `/api/sessions/${sessionId}/versions/${version}/static/index.html`;
+        const url = `/api/sessions/${sessionId}/turns/${turn}/static/index.html`;
         window.open(url, '_blank');
     };
 
@@ -422,9 +465,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     }
 
                     // Get CSS content
+                    // Need to check CACHE for css?
+                    // We need active turn.
+                    const currTurn = this.props.turn;
+                    const cache = this.state.turnCache[currTurn];
+
                     const cssContent =
                         this.state.unsavedContent?.css ??
-                        this.state.fileCache?.css ??
+                        cache?.css ??
                         '';
                     // Extract classes
                     const classRegex = /\.([a-zA-Z0-9-_]+)/g;
@@ -451,9 +499,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             monaco.languages.registerCompletionItemProvider('javascript', {
                 provideCompletionItems: (_model: any, _position: any) => {
                     // Start simple: always suggest known IDs and classes
+                    const currTurn = this.props.turn;
+                    const cache = this.state.turnCache[currTurn];
+
                     const htmlContent =
                         this.state.unsavedContent?.html ??
-                        this.state.fileCache?.html ??
+                        cache?.html ??
                         '';
 
                     const suggestions: any[] = [];
@@ -499,12 +550,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     render() {
-        const { sessionId, version } = this.props;
+        const { sessionId, turn } = this.props;
         const {
             isMobile,
             deviceIndex,
             activeTab,
-            fileCache,
+            turnCache,
             loading,
             unsavedContent,
             iframeKey,
@@ -513,11 +564,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         const isCodeView = activeTab !== 'preview' && activeTab !== 'images';
 
         const previewUrl =
-            sessionId && typeof version === 'number'
-                ? `/api/sessions/${sessionId}/versions/${version}/static/index.html`
+            sessionId && typeof turn === 'number'
+                ? `/api/sessions/${sessionId}/turns/${turn}/static/index.html`
                 : 'about:blank';
 
         const visibleImages = this.state.images;
+
+        // Resolve content for current turn
+        const currentFiles = turnCache[turn] || { html: null, css: null, js: null };
 
         return (
             <div
@@ -573,7 +627,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                     className={styles.imageTile}
                                 >
                                     <img
-                                        src={`/api/sessions/${sessionId}/versions/${version}/static/${img.filename}`}
+                                        src={`/api/sessions/${sessionId}/turns/${turn}/static/${img.filename}`}
                                         alt={img.description}
                                         className={styles.imageThumb}
                                     />
@@ -678,7 +732,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
                 {/* EDITORS (Persistent) */}
                 {(['html', 'css', 'js'] as const).map(type => {
-                    const content = unsavedContent[type] ?? fileCache[type] ?? '';
+                    const content = unsavedContent[type] ?? currentFiles[type] ?? '';
                     const language = this.getEditorLanguage(type);
 
                     return (

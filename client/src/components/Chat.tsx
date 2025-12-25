@@ -4,6 +4,7 @@ import classNames from 'classnames';
 import { ElementPicker } from './ElementPicker';
 import { UiCheckbox } from './UiCheckbox';
 import styles from './Chat.module.css';
+import { ConfirmationModal } from './ConfirmationModal';
 
 marked.setOptions({ breaks: true });
 
@@ -12,34 +13,47 @@ import { MessageData } from '../types';
 interface MessageProps {
     msg: MessageData;
     onSelectChip?: (selector: string) => void;
-    onCloneVersion?: (version: number) => void;
-    onPreviewVersion?: (version: number) => void;
-    isActiveVersion?: boolean;
+    onCloneTurn?: (turn: number) => void;
+    onPreviewTurn?: (turn: number) => void;
+    isActiveTurn?: boolean;
     isDimmed?: boolean;
+    isLastAssistant?: boolean;
+    status?: string;
+    onUndo?: () => void;
 }
+
+const formatTime = (dateString?: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+};
 
 class Message extends React.Component<MessageProps> {
     render() {
         const {
             msg,
             onSelectChip,
-            onCloneVersion,
-            onPreviewVersion,
-            isActiveVersion,
+            onCloneTurn,
+            onPreviewTurn,
+            isActiveTurn,
             isDimmed,
+            isLastAssistant,
+            status,
+            onUndo,
         } = this.props;
         const isUser = msg.role === 'user';
         const isAssistant = msg.role === 'assistant';
         const isSystem = msg.role === 'system';
 
-        const hasVersion = isAssistant && typeof msg.version === 'number';
+        const hasTurn = isAssistant && typeof msg.turn === 'number';
 
         const messageClass = classNames(styles.message, {
             [styles.user]: isUser,
             [styles.assistant]: isAssistant,
             [styles.system]: isSystem,
-            [styles.hasVersion]: hasVersion,
-            [styles.activeVersion]: isActiveVersion,
+            [styles.hasVersion]: hasTurn, // Keep class name for CSS compatibility or rename? styles.hasVersion likely refers to appearance
+            [styles.activeVersion]: isActiveTurn,
             [styles.dimmed]: isDimmed,
         });
 
@@ -47,8 +61,8 @@ class Message extends React.Component<MessageProps> {
             <div
                 className={messageClass}
                 onClick={
-                    hasVersion && onPreviewVersion
-                        ? () => onPreviewVersion(msg.version!)
+                    hasTurn && onPreviewTurn
+                        ? () => onPreviewTurn(msg.turn!)
                         : undefined
                 }
             >
@@ -76,18 +90,51 @@ class Message extends React.Component<MessageProps> {
                     )}
 
                 </div>
-                {/* Clone Version Button for Assistant Messages */}
-                {isAssistant &&
-                    msg.version !== undefined &&
-                    onCloneVersion && (
-                        <div className={styles.messageActions}>
+                {/* Message Actions */}
+                <div className={styles.messageActions}>
+                    {/* Timestamp for user messages */}
+                    {isUser && msg.createdAt && (
+                        <div className={styles.messageMeta}>
+                            {formatTime(msg.createdAt)}
+                        </div>
+                    )}
+                    {/* Undo Button for Last Assistant Message */}
+                    {isAssistant && isLastAssistant && status !== 'busy' && (
+                        <button
+                            className={styles.undoButton}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (onUndo) onUndo();
+                            }}
+                            title="Undo this changes"
+                        >
+                            <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <path d="M9 14 4 9l5-5" />
+                                <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" />
+                            </svg>
+                        </button>
+                    )}
+
+                    {/* Clone Turn Button for Assistant Messages */}
+                    {isAssistant &&
+                        msg.turn !== undefined &&
+                        onCloneTurn && (
                             <button
                                 className={styles.cloneButton}
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onCloneVersion(msg.version!);
+                                    onCloneTurn(msg.turn!);
                                 }}
-                                title={`Clone from version ${msg.version}`}
+                                title={`Clone from turn ${msg.turn}`}
                             >
                                 <svg
                                     width="14"
@@ -110,8 +157,8 @@ class Message extends React.Component<MessageProps> {
                                     <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
                                 </svg>
                             </button>
-                        </div>
-                    )}
+                        )}
+                </div>
             </div>
         );
     }
@@ -130,17 +177,19 @@ interface ChatProps {
     isPicking?: boolean;
     onClearSelection?: () => void;
     onSelectChip?: (selector: string) => void;
-    onCloneVersion?: (version: number) => void;
-    onPreviewVersion?: (version: number) => void;
-    activeVersion?: number | null;
+    onCloneTurn?: (turn: number) => void;
+    onPreviewTurn?: (turn: number) => void;
+    activeTurn?: number | null;
     disabled?: boolean;
     imageGenerationAllowed?: boolean;
     onToggleImageGeneration?: (allowed: boolean) => void;
+    onUndo?: () => Promise<{ restoredInput?: string } | void>;
 }
 
 interface ChatState {
     input: string;
     elapsedSeconds: number;
+    showUndoConfirmation: boolean;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
@@ -152,6 +201,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.state = {
             input: '',
             elapsedSeconds: 0,
+            showUndoConfirmation: false,
         };
         this.messagesEndRef = React.createRef();
     }
@@ -196,6 +246,25 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     }
 
+
+    handleUndo = () => {
+        this.setState({ showUndoConfirmation: true });
+    };
+
+    confirmUndo = async () => {
+        this.setState({ showUndoConfirmation: false });
+        if (this.props.onUndo) {
+            const result = await this.props.onUndo();
+            if (result && typeof result.restoredInput === 'string') {
+                this.setState({ input: result.restoredInput });
+            }
+        }
+    };
+
+    cancelUndo = () => {
+        this.setState({ showUndoConfirmation: false });
+    };
+
     scrollToBottom = () => {
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
@@ -223,25 +292,25 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             isPicking,
             onClearSelection,
             onSelectChip,
-            onCloneVersion,
-            activeVersion,
-            onPreviewVersion,
+            onCloneTurn,
+            activeTurn,
+            onPreviewTurn,
             disabled,
             imageGenerationAllowed,
-            onToggleImageGeneration,
+            onToggleImageGeneration
         } = this.props;
         const { input, elapsedSeconds } = this.state;
 
         // Logic to determine dimmed state
-        let effectiveActiveVersion = activeVersion;
+        let effectiveActiveTurn = activeTurn;
         if (
-            effectiveActiveVersion === null ||
-            effectiveActiveVersion === undefined
+            effectiveActiveTurn === null ||
+            effectiveActiveTurn === undefined
         ) {
-            // Find last message with a version
+            // Find last message with a turn
             for (let i = messages.length - 1; i >= 0; i--) {
-                if (typeof messages[i].version === 'number') {
-                    effectiveActiveVersion = messages[i].version;
+                if (typeof messages[i].turn === 'number') {
+                    effectiveActiveTurn = messages[i].turn;
                     break;
                 }
             }
@@ -249,30 +318,41 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         let foundActive = false;
 
+        // Find the index of the last assistant message
+        let lastAssistantIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') {
+                lastAssistantIndex = i;
+                break;
+            }
+        }
+
         return (
             <div className={styles.chatPanel}>
                 <div className={styles.messages} id="messages">
                     {messages.map((m, i) => {
                         // Use strict equality for safely finding the match
                         // Ensure ONLY assistant messages are marked active
-                        const isVersionMatch =
+                        const isTurnMatch =
                             m.role === 'assistant' &&
-                            typeof m.version === 'number' &&
-                            m.version === effectiveActiveVersion;
+                            typeof m.turn === 'number' &&
+                            m.turn === effectiveActiveTurn;
 
                         // Dimming logic
-                        if (isVersionMatch) foundActive = true;
-                        const shouldDim = foundActive && !isVersionMatch;
+                        if (isTurnMatch) foundActive = true;
+                        const shouldDim = foundActive && !isTurnMatch;
 
                         return (
                             <Message
                                 key={i}
                                 msg={m}
                                 onSelectChip={onSelectChip}
-                                onCloneVersion={onCloneVersion}
-                                onPreviewVersion={onPreviewVersion}
-                                isActiveVersion={isVersionMatch}
+                                onCloneTurn={onCloneTurn}
+                                onPreviewTurn={onPreviewTurn}
+                                isActiveTurn={isTurnMatch}
                                 isDimmed={shouldDim}
+                                isLastAssistant={i === lastAssistantIndex}
+                                onUndo={this.handleUndo}
                             />
                         );
                     })}
@@ -359,6 +439,15 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         </button>
                     </div>
                 </form>
+
+                <ConfirmationModal
+                    isOpen={this.state.showUndoConfirmation}
+                    title="Undo Changes"
+                    message="Are you sure you want to undo the last change? This will revert the conversation and files to the previous state."
+                    onConfirm={this.confirmUndo}
+                    onCancel={this.cancelUndo}
+                />
+
             </div>
         );
     }

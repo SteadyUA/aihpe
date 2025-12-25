@@ -125,7 +125,7 @@
     gap: 0.5rem;
 }
 
-/* Session Groups */
+/* Session Groups - 12 Distinct Colors (30deg steps) */
 .sessionGroup0 {
     --group-color: hsl(0, 70%, 45%);
     border-left: 4px solid var(--group-color);
@@ -147,14 +147,14 @@
 }
 
 .sessionGroup1 {
-    --group-color: hsl(11, 70%, 45%);
+    --group-color: hsl(30, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup1 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(11, 70%, 96%);
+    background: hsl(30, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup1 .sessionTabStatus {
@@ -167,14 +167,14 @@
 }
 
 .sessionGroup2 {
-    --group-color: hsl(22, 70%, 45%);
+    --group-color: hsl(60, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup2 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(22, 70%, 96%);
+    background: hsl(60, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup2 .sessionTabStatus {
@@ -187,14 +187,14 @@
 }
 
 .sessionGroup3 {
-    --group-color: hsl(33, 70%, 45%);
+    --group-color: hsl(90, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup3 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(33, 70%, 96%);
+    background: hsl(90, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup3 .sessionTabStatus {
@@ -207,14 +207,14 @@
 }
 
 .sessionGroup4 {
-    --group-color: hsl(45, 70%, 45%);
+    --group-color: hsl(120, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup4 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(45, 70%, 96%);
+    background: hsl(120, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup4 .sessionTabStatus {
@@ -227,14 +227,14 @@
 }
 
 .sessionGroup5 {
-    --group-color: hsl(56, 70%, 45%);
+    --group-color: hsl(150, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup5 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(56, 70%, 96%);
+    background: hsl(150, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup5 .sessionTabStatus {
@@ -247,14 +247,14 @@
 }
 
 .sessionGroup6 {
-    --group-color: hsl(67, 70%, 45%);
+    --group-color: hsl(180, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup6 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(67, 70%, 96%);
+    background: hsl(180, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup6 .sessionTabStatus {
@@ -267,14 +267,14 @@
 }
 
 .sessionGroup7 {
-    --group-color: hsl(78, 70%, 45%);
+    --group-color: hsl(210, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup7 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(78, 70%, 96%);
+    background: hsl(210, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup7 .sessionTabStatus {
@@ -287,14 +287,14 @@
 }
 
 .sessionGroup8 {
-    --group-color: hsl(90, 70%, 45%);
+    --group-color: hsl(240, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup8 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(90, 70%, 96%);
+    background: hsl(240, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup8 .sessionTabStatus {
@@ -307,14 +307,14 @@
 }
 
 .sessionGroup9 {
-    --group-color: hsl(101, 70%, 45%);
+    --group-color: hsl(270, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup9 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(101, 70%, 96%);
+    background: hsl(270, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup9 .sessionTabStatus {
@@ -327,14 +327,14 @@
 }
 
 .sessionGroup10 {
-    --group-color: hsl(112, 70%, 45%);
+    --group-color: hsl(300, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup10 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(112, 70%, 96%);
+    background: hsl(300, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup10 .sessionTabStatus {
@@ -347,14 +347,14 @@
 }
 
 .sessionGroup11 {
-    --group-color: hsl(123, 70%, 45%);
+    --group-color: hsl(330, 70%, 45%);
     border-left: 4px solid var(--group-color);
 }
 
 .sessionTab.active.sessionGroup11 {
     border-color: var(--group-color);
     color: var(--group-color);
-    background: hsl(123, 70%, 96%);
+    background: hsl(330, 70%, 96%);
 }
 
 .sessionTab.active.sessionGroup11 .sessionTabStatus {
@@ -362,406 +362,6 @@
 }
 
 .sessionTab.active.sessionGroup11 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup12 {
-    --group-color: hsl(135, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup12 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(135, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup12 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup12 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup13 {
-    --group-color: hsl(146, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup13 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(146, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup13 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup13 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup14 {
-    --group-color: hsl(157, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup14 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(157, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup14 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup14 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup15 {
-    --group-color: hsl(168, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup15 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(168, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup15 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup15 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup16 {
-    --group-color: hsl(180, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup16 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(180, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup16 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup16 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup17 {
-    --group-color: hsl(191, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup17 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(191, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup17 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup17 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup18 {
-    --group-color: hsl(202, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup18 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(202, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup18 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup18 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup19 {
-    --group-color: hsl(213, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup19 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(213, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup19 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup19 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup20 {
-    --group-color: hsl(225, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup20 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(225, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup20 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup20 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup21 {
-    --group-color: hsl(236, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup21 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(236, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup21 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup21 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup22 {
-    --group-color: hsl(247, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup22 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(247, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup22 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup22 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup23 {
-    --group-color: hsl(258, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup23 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(258, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup23 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup23 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup24 {
-    --group-color: hsl(270, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup24 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(270, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup24 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup24 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup25 {
-    --group-color: hsl(281, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup25 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(281, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup25 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup25 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup26 {
-    --group-color: hsl(292, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup26 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(292, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup26 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup26 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup27 {
-    --group-color: hsl(303, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup27 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(303, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup27 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup27 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup28 {
-    --group-color: hsl(315, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup28 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(315, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup28 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup28 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup29 {
-    --group-color: hsl(326, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup29 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(326, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup29 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup29 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup30 {
-    --group-color: hsl(337, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup30 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(337, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup30 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup30 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
-
-.sessionGroup31 {
-    --group-color: hsl(348, 70%, 45%);
-    border-left: 4px solid var(--group-color);
-}
-
-.sessionTab.active.sessionGroup31 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    background: hsl(348, 70%, 96%);
-}
-
-.sessionTab.active.sessionGroup31 .sessionTabStatus {
-    color: var(--group-color);
-}
-
-.sessionTab.active.sessionGroup31 .sessionTabStatus.busy {
     border-color: var(--group-color);
     border-top-color: transparent;
 }

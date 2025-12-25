@@ -192,7 +192,7 @@ export class ElementPicker {
                 ).filter((c) => c.tagName === current!.tagName);
                 if (siblings.length > 1) {
                     const index = siblings.indexOf(current) + 1;
-                    selector += `:nth-child(${index})`;
+                    selector += `:nth-of-type(${index})`;
                 }
             }
 

@@ -17,6 +17,8 @@ export function sanitizeHistoryForUi(history: any[]): ChatMessage[] {
             ...entry,
             content: formatContentForUi(entry.content),
             createdAt: new Date(entry.createdAt),
+            version: typeof entry.version === 'number' ? entry.version : 0,
+            turn: typeof entry.turn === 'number' ? entry.turn : 0,
         }))
         .filter((entry) => {
             // Filter out empty messages (usually tool calls/results hidden from UI)

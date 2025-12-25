@@ -5,6 +5,7 @@ import { SessionBar } from './components/SessionBar';
 import { WorkSession } from './components/WorkSession';
 
 import { SessionStore } from './store/SessionStore';
+import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
 interface AppProps { }
@@ -16,6 +17,7 @@ interface AppState {
     sessionOrder: string[]; // To maintain list order
     activeSessionId: string | null;
     isConnected: boolean;
+    sessionToDelete: string | null;
 }
 
 export default class App extends React.Component<AppProps, AppState> {
@@ -28,6 +30,7 @@ export default class App extends React.Component<AppProps, AppState> {
             sessionOrder: [],
             activeSessionId: null,
             isConnected: false,
+            sessionToDelete: null,
         };
 
     }
@@ -49,11 +52,12 @@ export default class App extends React.Component<AppProps, AppState> {
                         messages: [],
                         statusMessages: [],
                         requestStartTime: null,
-                        currentVersion: 0,
-                        activeVersion: null,
+                        currentTurn: 0,
+                        activeTurn: null,
                         imageGenerationAllowed: true,
                         selection: null,
                         isPicking: false,
+                        pendingRefreshTurn: null,
                         group: groups[id] ?? 0 // Default to 0 if missing from store
                     };
                 });
@@ -129,10 +133,10 @@ export default class App extends React.Component<AppProps, AppState> {
 
         // Fetch session data
         this.fetchSession(newId).then(() => {
-            // If there is an active version restored/persisted in the object, load ITS files
+            // If there is an active turn restored/persisted in the object, load ITS files
             const session = this.state.sessions[newId];
-            if (session && session.activeVersion !== null) {
-                this.previewVersion(session.activeVersion);
+            if (session && session.activeTurn !== null) {
+                this.previewTurn(session.activeTurn);
             }
         });
     };
@@ -181,8 +185,9 @@ export default class App extends React.Component<AppProps, AppState> {
                 } else if (data.status === 'completed') {
                     updatedSession.status = 'idle';
                     updatedSession.requestStartTime = null;
-                    // Trigger fetch to get latest messages/version
-                    setTimeout(() => this.fetchSession(sessionId), 0);
+                    updatedSession.requestStartTime = null;
+                    // Trigger fetch to get latest messages/turn
+                    setTimeout(() => this.fetchSession(sessionId, true), 0);
                 } else if (data.status === 'error') {
                     updatedSession.status = 'error';
                     updatedSession.statusMessages = [...updatedSession.statusMessages, data.message || 'Error occurred'];
@@ -224,12 +229,13 @@ export default class App extends React.Component<AppProps, AppState> {
                     messages: [],
                     statusMessages: [],
                     requestStartTime: null,
-                    currentVersion: 0,
-                    activeVersion: null,
+                    currentTurn: 0,
+                    activeTurn: null,
                     imageGenerationAllowed: true,
                     selection: null,
                     isPicking: false,
-                    group: data.group ?? 0
+                    group: data.group ?? 0,
+                    pendingRefreshTurn: null
                 };
 
                 // Calculate new order
@@ -261,24 +267,30 @@ export default class App extends React.Component<AppProps, AppState> {
         });
     };
 
-    fetchSession = async (id: string) => {
+    fetchSession = async (id: string, isCompletion: boolean = false) => {
         try {
             const res = await fetch(`/api/sessions/${id}`);
             const data = await res.json();
 
             // Fetch history separately
-            const currentVersion = data.currentVersion ?? 0;
-            const historyRes = await fetch(`/api/sessions/${id}/versions/${currentVersion}/history`);
+            // New API always returns full history, no version needed
+            const historyRes = await fetch(`/api/sessions/${id}/history`);
             let history = [];
+            // Use currentTurn directly from API
+            const lastTurn = data.currentTurn ?? 0;
+
             if (historyRes.ok) {
                 history = await historyRes.json();
             } else {
-                console.warn(`Failed to fetch history for session ${id} v${currentVersion}`);
+                console.warn(`Failed to fetch history for session ${id}`);
             }
 
             this.setState(prevState => {
                 const session = prevState.sessions[id];
                 if (!session) return null; // Should probably create it if missing? For now stick to strict.
+
+                // Only update if turn changed (to update lastUpdate? No, lastUpdate is mainly event driven)
+                // But if we fetched new turn, we should probably ensure UI reflects it.
 
                 return {
                     sessions: {
@@ -286,10 +298,12 @@ export default class App extends React.Component<AppProps, AppState> {
                         [id]: {
                             ...session,
                             messages: history,
-                            currentVersion: currentVersion,
+                            currentTurn: lastTurn,
                             imageGenerationAllowed: data.imageGenerationAllowed ?? true,
                             // If status was pending, now it is definitively idle/ready
-                            status: session.status === 'pending' ? 'idle' : session.status
+                            status: session.status === 'pending' ? 'idle' : session.status,
+                            // Set pendingRefreshTurn only if completion triggered this fetch
+                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn
                         }
                     }
                 };
@@ -346,12 +360,13 @@ export default class App extends React.Component<AppProps, AppState> {
                 messages: [],
                 statusMessages: [],
                 requestStartTime: null,
-                currentVersion: sessionData.currentVersion ?? 0,
-                activeVersion: null,
+                currentTurn: sessionData.currentTurn ?? 0,
+                activeTurn: null,
                 imageGenerationAllowed: sessionData.imageGenerationAllowed ?? true,
                 selection: null,
                 isPicking: false,
-                group: sessionData.group ?? 0
+                group: sessionData.group ?? 0,
+                pendingRefreshTurn: null
             };
 
             // Calculate new order
@@ -381,31 +396,31 @@ export default class App extends React.Component<AppProps, AppState> {
     };
 
 
-    cloneVersion = async (version: number) => {
+    cloneTurn = async (turn: number) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
         try {
             const res = await fetch(
-                `/api/sessions/${activeSessionId}/versions/${version}/clone`,
+                `/api/sessions/${activeSessionId}/turns/${turn}/clone`,
                 { method: 'POST' },
             );
-            if (!res.ok) throw new Error('Clone version failed');
+            if (!res.ok) throw new Error('Clone turn failed');
             const session = await res.json();
             // Pass the activeSessionId as the source
             this.handleSessionCreated(session, activeSessionId);
         } catch (error) {
-            console.error('Failed to clone version', error);
+            console.error('Failed to clone turn', error);
         }
     };
 
-    previewVersion = async (version: number) => {
+    previewTurn = async (turn: number) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
         // Optimistic update
         this.updateSession(activeSessionId, {
-            activeVersion: version,
+            activeTurn: turn,
             // status? Preview doesn't really block interaction, but maybe show loading?
             // Previous code set utilStatus='busy' then 'idle'. 
         });
@@ -420,6 +435,43 @@ export default class App extends React.Component<AppProps, AppState> {
         }));
     }
 
+    handleUndo = async () => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        try {
+            const res = await fetch(`/api/sessions/${activeSessionId}/undo`, { method: 'POST' });
+            if (!res.ok) throw new Error('Undo failed');
+            const data = await res.json();
+
+            if (data.success) {
+                // If there's a selection restored, update it locally immediately so UI reflects it
+                if (data.restoredSelection) {
+                    this.updateSession(activeSessionId, { selection: data.restoredSelection.selector });
+                }
+
+                // Fetch updated session state (history, versions, etc.)
+                await this.fetchSession(activeSessionId);
+
+                // Explicitly reset activeTurn to null (HEAD) so the UI shows the new latest turn
+                // as the current active one. If we don't do this, and we were previously time-travelling
+                // or just had a stale state, it might not update correctly.
+                this.updateSession(activeSessionId, { activeTurn: null });
+
+                // If we went back a turn, we might want to refresh preview?
+                // `fetchSession` updates `currentTurn`. `WorkSession` detects turn change and might refresh?
+                // If `activeTurn` was null (HEAD), it becomes the new HEAD turn.
+                // If `activeTurn` was set, we might need to reset it or keep it?
+                // Usually undo means we go back to HEAD logic.
+                // Let's force a preview refresh by ensuring activeTurn aligns.
+
+                return { restoredInput: data.restoredInput };
+            }
+        } catch (error) {
+            console.error('Failed to undo', error);
+        }
+    };
+
     switchSession = (id: string) => {
         this.setState({ activeSessionId: id }, () => {
             this.handleSessionChange(id);
@@ -427,7 +479,22 @@ export default class App extends React.Component<AppProps, AppState> {
     };
 
     removeSession = (id: string) => {
-        const wasActive = this.state.activeSessionId === id;
+        this.setState({ sessionToDelete: id });
+    };
+
+    cancelDeleteSession = () => {
+        this.setState({ sessionToDelete: null });
+    };
+
+    confirmDeleteSession = () => {
+        const id = this.state.sessionToDelete;
+        if (!id) return;
+
+        // 1. Delete from server
+        fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+            .catch(err => console.error('Failed to delete session on server', err));
+
+        // 2. Remove from UI
         this.setState((prevState) => {
             const index = prevState.sessionOrder.indexOf(id);
             if (index === -1) return null;
@@ -452,10 +519,12 @@ export default class App extends React.Component<AppProps, AppState> {
                 sessions: newSessions,
                 sessionOrder: newOrder,
                 activeSessionId: newActiveId,
+                sessionToDelete: null
             };
         }, () => {
-            if (wasActive && this.state.activeSessionId) {
-                this.handleSessionChange(this.state.activeSessionId);
+            const { activeSessionId } = this.state;
+            if (activeSessionId) {
+                this.handleSessionChange(activeSessionId);
             }
         });
     };
@@ -473,10 +542,10 @@ export default class App extends React.Component<AppProps, AppState> {
             status: 'busy',
             messages: [
                 ...session.messages,
-                { role: 'user', content: text, selection: selectionData }
+                { role: 'user', content: text, selection: selectionData, turn: session.currentTurn + 1 }
             ],
             selection: null, // Clear selection
-            activeVersion: null // Reset time travel
+            activeTurn: null // Reset time travel
         });
 
         try {
@@ -512,14 +581,16 @@ export default class App extends React.Component<AppProps, AppState> {
 
 
 
+
+
     render() {
         const {
             sessions,
             sessionOrder,
             activeSessionId,
-            isConnected
+            isConnected,
+            sessionToDelete
         } = this.state;
-
 
 
         // Derive props for SessionBar
@@ -537,11 +608,15 @@ export default class App extends React.Component<AppProps, AppState> {
         });
 
 
-
-
-
         return (
             <div className={styles.app}>
+                <ConfirmationModal
+                    isOpen={!!sessionToDelete}
+                    title="Close Session"
+                    message="Are you sure you want to close this session? This will permanently delete the session and all its files from the server."
+                    onConfirm={this.confirmDeleteSession}
+                    onCancel={this.cancelDeleteSession}
+                />
                 <div className={styles.sessionBarWrapper}>
                     <SessionBar
                         sessions={sessionOrder}
@@ -569,9 +644,10 @@ export default class App extends React.Component<AppProps, AppState> {
                                 isVisible={isVisible}
                                 onSend={this.sendMessage}
                                 onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
-                                onCloneVersion={this.cloneVersion}
-                                onPreviewVersion={this.previewVersion}
+                                onCloneTurn={this.cloneTurn}
+                                onPreviewTurn={this.previewTurn}
                                 onToggleImageGeneration={this.toggleImageGeneration}
+                                onUndo={this.handleUndo}
                             />
                         );
                     })

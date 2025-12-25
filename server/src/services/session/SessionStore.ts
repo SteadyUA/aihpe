@@ -6,7 +6,7 @@ import { ChatMessage, SessionData, SessionFiles } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -18,6 +18,7 @@ type PersistedSession = {
     updatedAt: string;
     group?: number;
     currentVersion?: number;
+    lastTurn?: number;
     imageGenerationAllowed?: boolean;
 };
 
@@ -74,6 +75,36 @@ export class SessionStore {
         ensureDirectory(SESSION_ROOT);
     }
 
+    getVersionForTurn(sessionId: string, turn: number): number | undefined {
+        const session = this.getOrCreate(sessionId);
+        // Find the last version used in or before this turn.
+        // We look at history up to this turn.
+
+        // Optimize: look backwards from end of history?
+        // Or filter history by turn <= targetTurn.
+        // Then find the max version.
+
+        // Actually, we want the version that represents the state AT THE END of that turn.
+        // The last message in that turn (or previous turns) that has a version.
+
+        const relevantHistory = session.history.filter(m => typeof m.turn === 'number' && m.turn <= turn);
+        if (relevantHistory.length === 0) {
+            // If turn is 0 or no history, maybe 0?
+            // If turn 0, version 0.
+            return 0;
+        }
+
+        // Iterate backwards to find first message with version
+        for (let i = relevantHistory.length - 1; i >= 0; i--) {
+            const msg = relevantHistory[i];
+            if (typeof msg.version === 'number') {
+                return msg.version;
+            }
+        }
+
+        return 0;
+    }
+
     create(): SessionData {
         const id = randomUUID();
         const session = this.createFreshSession(id);
@@ -84,7 +115,7 @@ export class SessionStore {
 
     prepareCreate(): { id: string; group: number } {
         const id = randomUUID();
-        const group = Math.floor(Math.random() * 32);
+        const group = Math.floor(Math.random() * 12);
         return { id, group };
     }
 
@@ -96,26 +127,8 @@ export class SessionStore {
     }
 
     clone(sourceId: string): SessionData {
-        const source = this.getOrCreate(sourceId);
         const newId = randomUUID();
-        const newSession: SessionData = {
-            ...source,
-            id: newId,
-            updatedAt: new Date(),
-            history: source.history.map((h) => ({ ...h })),
-            context: source.context.map((c) => ({ ...c })),
-            files: { ...source.files },
-            // Group is inherited from source
-            group: source.group,
-            currentVersion: source.currentVersion,
-        };
-
-        clearPersistedSessionData(newId);
-        copyVersionHistory(sourceId, newId);
-
-        this.sessions.set(newId, newSession);
-        this.persistSession(newSession);
-        return cloneSession(newSession);
+        return this.performCloneSession(newId, sourceId);
     }
 
     prepareClone(sourceId: string): { id: string; group: number } {
@@ -124,56 +137,52 @@ export class SessionStore {
         return { id, group: source.group };
     }
 
-    async executeClone(id: string, sourceId: string): Promise<SessionData> {
+
+
+    private performCloneSession(targetId: string, sourceId: string): SessionData {
         const source = this.getOrCreate(sourceId);
         const newSession: SessionData = {
             ...source,
-            id: id,
+            id: targetId,
             updatedAt: new Date(),
             history: source.history.map((h) => ({ ...h })),
             context: source.context.map((c) => ({ ...c })),
             files: { ...source.files },
             group: source.group,
             currentVersion: source.currentVersion,
+            lastTurn: source.lastTurn,
             imageGenerationAllowed: source.imageGenerationAllowed,
         };
 
-        clearPersistedSessionData(id);
-        copyVersionHistory(sourceId, id);
+        clearPersistedSessionData(targetId);
+        copyVersionHistory(sourceId, targetId);
 
-        this.sessions.set(id, newSession);
+        this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
         return cloneSession(newSession);
     }
 
-    cloneAtVersion(sourceId: string, version: number): SessionData {
-        const normalizedVersion = Math.floor(version);
-        if (!Number.isFinite(normalizedVersion) || normalizedVersion < 0) {
-            throw new Error(`Invalid version ${version}`);
+    async executeCloneAtTurn(targetId: string, sourceId: string, turn: number): Promise<SessionData> {
+        const normalizedTurn = Math.floor(turn);
+        if (!Number.isFinite(normalizedTurn) || normalizedTurn < 0) {
+            throw new Error(`Invalid turn ${turn}`);
         }
 
         const source = this.getOrCreate(sourceId);
-        if (normalizedVersion > source.currentVersion) {
+        const currentTurn = source.lastTurn ?? 0;
+
+        if (normalizedTurn > currentTurn) {
             throw new Error(
-                `Version ${normalizedVersion} exceeds current session version`,
+                `Turn ${normalizedTurn} exceeds current session turn ${currentTurn}`,
             );
         }
 
-        const targetIndex = source.history.findIndex(
-            (entry) =>
-                entry.role === 'assistant' &&
-                typeof entry.version === 'number' &&
-                entry.version === normalizedVersion,
-        );
-
-        if (targetIndex === -1) {
-            throw new Error(
-                `Assistant message for version ${normalizedVersion} not found`,
-            );
-        }
-
+        // 1. Filter History
+        // We want all messages up to the end of the requested turn.
+        // A turn loosely includes a User message + subsequent Assistant messages.
+        // Let's assume we want to include ALL messages that have turn <= normalizedTurn.
         const truncatedHistory = source.history
-            .slice(0, targetIndex + 1)
+            .filter((entry) => typeof entry.turn === 'number' && entry.turn <= normalizedTurn)
             .map((entry) => ({
                 ...entry,
                 createdAt: new Date(entry.createdAt),
@@ -183,143 +192,175 @@ export class SessionStore {
                 version:
                     typeof entry.version === 'number'
                         ? entry.version
-                        : undefined,
+                        : 0,
+                turn: entry.turn,
             }));
 
-        const snapshot =
-            normalizedVersion === source.currentVersion
-                ? { ...source.files }
-                : readVersionFiles(sourceId, normalizedVersion);
+        // 2. Filter Context
+        // Same logic: include context items up to (and including) the requested turn.
+        const contextSnapshot: ChatMessage[] = source.context
+            .filter(m => typeof m.turn === 'number' && m.turn <= normalizedTurn)
+            .map(m => ({
+                ...m,
+                version: typeof m.version === 'number' ? m.version : 0,
+                turn: m.turn! // We filtered for number above
+            }));
 
-        if (!snapshot) {
-            throw new Error(`Files for version ${normalizedVersion} not found`);
-        }
-
-        // Load context for that version from disk
-        let contextSnapshot: ChatMessage[] = [];
-        if (normalizedVersion === source.currentVersion) {
-            contextSnapshot = source.context.map(c => ({ ...c }));
-        } else {
-            const versionDir = resolveVersionDir(sourceId, normalizedVersion);
-            const contextPath = path.join(versionDir, 'context.json');
-            if (fs.existsSync(contextPath)) {
-                try {
-                    const raw = fs.readFileSync(contextPath, 'utf-8');
-                    contextSnapshot = JSON.parse(raw).map((entry: any) => ({
-                        ...entry,
-                        createdAt: new Date(entry.createdAt),
-                    }));
-                } catch (e) {
-                    console.error(`Failed to read context for ${sourceId} v${normalizedVersion}`, e);
-                }
+        // 3. Determine File Version
+        // We need to find the MAX version that existed within the truncated history/context of this turn.
+        // Alternatively (and perhaps safer), we look at the very last message in the truncated history.
+        // If that message has a version, we use it. If not, we look back.
+        // If no version is found in the entire history, we default to 0.
+        let targetVersion = 0;
+        for (let i = truncatedHistory.length - 1; i >= 0; i--) {
+            const entry = truncatedHistory[i];
+            if (typeof entry.version === 'number') {
+                targetVersion = entry.version;
+                break;
             }
         }
 
-        const newId = randomUUID();
+        // Also check context, in case context has a later version (unlikely, but possible if context update happened after msg)
+        for (const ctx of contextSnapshot) {
+            if (typeof ctx.version === 'number' && ctx.version > targetVersion) {
+                targetVersion = ctx.version;
+            }
+        }
+
+        const snapshot =
+            targetVersion === source.currentVersion
+                ? { ...source.files }
+                : readVersionFiles(sourceId, targetVersion);
+
+        if (!snapshot) {
+            // Fallback or error? If version 0 and no files, maybe default files?
+            // But if we found a version number, we expect files.
+            throw new Error(`Files for version ${targetVersion} not found`);
+        }
+
         const newSession: SessionData = {
-            id: newId,
+            id: targetId,
             files: { ...snapshot },
             history: truncatedHistory,
             context: contextSnapshot,
             updatedAt: new Date(),
             group: source.group,
-            currentVersion: normalizedVersion,
+            currentVersion: targetVersion,
+            lastTurn: normalizedTurn,
+            imageGenerationAllowed: true, // Reset or copy? Resetting seems safer for a "fork".
         };
 
-        clearPersistedSessionData(newId);
-        copyVersionHistoryUpTo(sourceId, newId, normalizedVersion);
+        clearPersistedSessionData(targetId);
+        // We need to copy version history up to targetVersion.
+        copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
 
-        this.sessions.set(newId, newSession);
+        this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
         return cloneSession(newSession);
     }
 
-    async executeCloneAtVersion(id: string, sourceId: string, version: number): Promise<SessionData> {
-        const normalizedVersion = Math.floor(version);
-        if (!Number.isFinite(normalizedVersion) || normalizedVersion < 0) {
-            throw new Error(`Invalid version ${version}`);
+    undoLastTurn(sessionId: string): {
+        success: boolean;
+        restoredInput?: string;
+        restoredSelection?: { selector: string };
+        previousTurn?: number;
+    } {
+        const session = this.getOrCreate(sessionId);
+        const currentTurn = session.lastTurn ?? 0;
+
+        if (currentTurn <= 0) {
+            return { success: false };
         }
 
-        const source = this.getOrCreate(sourceId);
-        if (normalizedVersion > source.currentVersion) {
-            throw new Error(
-                `Version ${normalizedVersion} exceeds current session version`,
-            );
+        // 1. Identify items to remove
+        const messagesToRemove = session.history.filter(m => typeof m.turn === 'number' && m.turn === currentTurn);
+        if (messagesToRemove.length === 0) {
+            const updated: SessionData = {
+                ...session,
+                lastTurn: currentTurn - 1,
+                updatedAt: new Date(),
+            };
+            this.sessions.set(sessionId, updated);
+            this.persistSession(updated);
+            return { success: true, previousTurn: currentTurn - 1 };
         }
 
-        const targetIndex = source.history.findIndex(
-            (entry) =>
-                entry.role === 'assistant' &&
-                typeof entry.version === 'number' &&
-                entry.version === normalizedVersion,
-        );
+        // 2. Capture restoration data
+        const userMessage = messagesToRemove.find(m => m.role === 'user');
+        const restoredInput = userMessage?.content;
+        const restoredSelection = userMessage?.selection;
 
-        if (targetIndex === -1) {
-            throw new Error(
-                `Assistant message for version ${normalizedVersion} not found`,
-            );
+        // 3. New History & Context
+        const newHistory = session.history.filter(m => typeof m.turn !== 'number' || m.turn < currentTurn);
+        const newContext = session.context.filter(m => typeof m.turn !== 'number' || m.turn < currentTurn);
+
+        // 4. Determine Target Version
+        let targetVersion = 0;
+        for (let i = newHistory.length - 1; i >= 0; i--) {
+            if (typeof newHistory[i].version === 'number') {
+                targetVersion = newHistory[i].version!;
+                break;
+            }
         }
 
-        const truncatedHistory = source.history
-            .slice(0, targetIndex + 1)
-            .map((entry) => ({
-                ...entry,
-                createdAt: new Date(entry.createdAt),
-                selection: entry.selection
-                    ? { selector: entry.selection.selector }
-                    : undefined,
-                version:
-                    typeof entry.version === 'number'
-                        ? entry.version
-                        : undefined,
-            }));
-
-        const snapshot =
-            normalizedVersion === source.currentVersion
-                ? { ...source.files }
-                : readVersionFiles(sourceId, normalizedVersion);
-
-        if (!snapshot) {
-            throw new Error(`Files for version ${normalizedVersion} not found`);
+        for (const ctx of newContext) {
+            if (typeof ctx.version === 'number' && ctx.version > targetVersion) {
+                targetVersion = ctx.version;
+            }
         }
 
-        // Load context for that version from disk
-        let contextSnapshot: ChatMessage[] = [];
-        if (normalizedVersion === source.currentVersion) {
-            contextSnapshot = source.context.map(c => ({ ...c }));
-        } else {
-            const versionDir = resolveVersionDir(sourceId, normalizedVersion);
-            const contextPath = path.join(versionDir, 'context.json');
-            if (fs.existsSync(contextPath)) {
-                try {
-                    const raw = fs.readFileSync(contextPath, 'utf-8');
-                    contextSnapshot = JSON.parse(raw).map((entry: any) => ({
-                        ...entry,
-                        createdAt: new Date(entry.createdAt),
-                    }));
-                } catch (e) {
-                    console.error(`Failed to read context for ${sourceId} v${normalizedVersion}`, e);
+        // 5. Cleanup higher versions on disk
+        const versionRootDir = path.join(resolveSessionDir(sessionId), VERSION_DIRNAME);
+        if (fs.existsSync(versionRootDir)) {
+            const dirs = fs.readdirSync(versionRootDir);
+            for (const dir of dirs) {
+                const ver = Number.parseInt(dir, 10);
+                if (!Number.isNaN(ver) && ver > targetVersion) {
+                    removeDirectory(path.join(versionRootDir, dir));
                 }
             }
         }
 
-        const newSession: SessionData = {
-            id: id,
-            files: { ...snapshot },
-            history: truncatedHistory,
-            context: contextSnapshot,
+        // 6. Restore Files
+        const snapshot =
+            targetVersion === 0
+                ? { ...EMPTY_FILES }
+                : readVersionFiles(sessionId, targetVersion) || { ...EMPTY_FILES };
+
+        // 7. Update Session
+        const updated: SessionData = {
+            ...session,
+            history: newHistory,
+            context: newContext,
+            files: snapshot,
+            currentVersion: targetVersion,
+            lastTurn: currentTurn - 1,
             updatedAt: new Date(),
-            group: source.group,
-            currentVersion: normalizedVersion,
         };
 
-        clearPersistedSessionData(id);
-        copyVersionHistoryUpTo(sourceId, id, normalizedVersion);
+        this.sessions.set(sessionId, updated);
+        this.persistSession(updated);
 
-        this.sessions.set(id, newSession);
-        this.persistSession(newSession);
-        return cloneSession(newSession);
+        return {
+            success: true,
+            restoredInput,
+            restoredSelection: restoredSelection ? { selector: restoredSelection.selector } : undefined,
+            previousTurn: currentTurn - 1
+        };
     }
+
+    deleteSession(sessionId: string): void {
+        const sessionDir = resolveSessionDir(sessionId);
+
+        // 1. Remove from memory
+        this.sessions.delete(sessionId);
+
+        // 2. Remove from disk
+        if (fs.existsSync(sessionDir)) {
+            removeDirectory(sessionDir);
+        }
+    }
+
 
     private createFreshSession(sessionId: string, group?: number): SessionData {
         return {
@@ -328,8 +369,9 @@ export class SessionStore {
             history: [],
             context: [],
             updatedAt: new Date(),
-            group: group ?? Math.floor(Math.random() * 32),
+            group: group ?? Math.floor(Math.random() * 12),
             currentVersion: 0,
+            lastTurn: 0,
             imageGenerationAllowed: true,
         };
     }
@@ -367,10 +409,50 @@ export class SessionStore {
 
     appendMessage(sessionId: string, message: ChatMessage): SessionData {
         const session = this.getOrCreate(sessionId);
-        const nextHistory = [...session.history, message];
+
+        let currentTurn = session.lastTurn ?? 0;
+
+        // Logic to determine turn:
+        // If the message is from 'user', we generally start a new turn.
+        // However, we need to be careful. If this is the VERY first message, it's turn 1 (or 0?).
+        // Let's adopt a simple convention:
+        // The "Turn" increments when the user sends a message.
+        // If history is empty, user message starts Turn 1.
+        // If history exists, user message starts Turn N+1.
+        // System/Assistant/Tool messages belong to the SAME turn as the preceding User message.
+
+        // Wait, "lastTurn - номер последнего хода".
+        // If I create a fresh session, lastTurn = 0.
+        // First user message -> Turn 1?
+        // Let's assume 1-based turns if we want "turn - 1" to make sense for "previous turn".
+        // But "createFreshSession" sets lastTurn: 0.
+
+        let messageTurn = currentTurn;
+
+        if (message.role === 'user') {
+            messageTurn = currentTurn + 1;
+        } else {
+            // For assistant/system/tool, we stay on the current turn.
+            // Special case: if for some reason we have assistant message first (unlikely but possible in some setups),
+            // it should probably belong to turn 0 or 1.
+            // If lastTurn is 0, let's just keep it 0 or 1.
+            if (messageTurn === 0) {
+                // Maybe initialize to 1 if we have content? 
+                // Or keep 0 if it's setup.
+            }
+        }
+
+        if (messageTurn > currentTurn) {
+            currentTurn = messageTurn;
+        }
+
+        const msgWithTurn = { ...message, turn: messageTurn };
+        const nextHistory = [...session.history, msgWithTurn];
+
         const updated: SessionData = {
             ...session,
             history: nextHistory,
+            lastTurn: currentTurn,
             updatedAt: new Date(),
         };
 
@@ -531,38 +613,15 @@ export class SessionStore {
         return undefined;
     }
 
-    getHistory(sessionId: string, version: number): ChatMessage[] | undefined {
-        if (!Number.isInteger(version) || version < 0) {
-            return undefined;
-        }
-
+    getAllHistory(sessionId: string): ChatMessage[] | undefined {
         const session = this.getOrCreate(sessionId);
 
-        // If requesting current version history, return in-memory history
-        if (version === session.currentVersion) {
-            return session.history.map((h) => ({
-                ...h,
-                createdAt: new Date(h.createdAt),
-            }));
-        }
-
-        const versionDir = resolveVersionDir(sessionId, version);
-        const messagesPath = path.join(versionDir, 'messages.json');
-
-        if (fs.existsSync(messagesPath)) {
-            try {
-                const raw = fs.readFileSync(messagesPath, 'utf-8');
-                const rawHistory = JSON.parse(raw);
-                return sanitizeHistoryForUi(rawHistory);
-            } catch (e) {
-                console.error(
-                    `Failed to read history for ${sessionId} v${version}`,
-                    e,
-                );
-            }
-        }
-
-        return undefined;
+        return session.history.map((msg) => ({
+            ...msg,
+            createdAt: new Date(msg.createdAt),
+            version: typeof msg.version === 'number' ? msg.version : 0,
+            turn: typeof msg.turn === 'number' ? msg.turn : 0,
+        }));
     }
 
     snapshot(sessionId: string): SessionData | undefined {
@@ -644,12 +703,13 @@ export class SessionStore {
                     : new Date(),
                 group: parsed.group ?? 0,
                 currentVersion,
+                lastTurn: parsed.lastTurn ?? 0,
                 imageGenerationAllowed: parsed.imageGenerationAllowed ?? true, // Default to true if missing
             };
 
-            // Attempt to load messages.json and context.json from version dir
-            const messagesPath = path.join(versionDir, 'messages.json');
-            const contextPath = path.join(versionDir, 'context.json');
+            // Attempt to load messages.json and context.json from session root
+            const messagesPath = path.join(sessionDir, 'messages.json');
+            const contextPath = path.join(sessionDir, 'context.json');
 
             if (fs.existsSync(messagesPath)) {
                 try {
@@ -672,6 +732,7 @@ export class SessionStore {
                     console.error(`Failed to parse context.json for ${sessionId}`, e);
                 }
             }
+
 
             ensureVersionSnapshot(
                 session.id,
@@ -697,32 +758,28 @@ export class SessionStore {
             ensureDirectory(sessionDir);
             ensureDirectory(versionDir);
 
-            const payload: PersistedSession = {
-                id: session.id,
-                updatedAt: session.updatedAt.toISOString(),
-                group: session.group,
-                currentVersion: session.currentVersion,
-                imageGenerationAllowed: session.imageGenerationAllowed,
-                // store legacy history only if migration needed or backup? 
-                // We can stop writing strictly if we trust messages.json. 
-                // Let's write empty or stop writing it to save space.
-                // But to be safe initially, maybe we shouldn't delete it yet?
-                // User requirement: "split these duties". 
-                // Let's remove it from here to force usage of messages.json
-            };
 
+
+            // Write to session root
             fs.writeFileSync(
-                path.join(versionDir, 'messages.json'),
+                path.join(sessionDir, 'messages.json'),
                 JSON.stringify(session.history, null, 2),
                 'utf-8'
             );
 
             fs.writeFileSync(
-                path.join(versionDir, 'context.json'),
+                path.join(sessionDir, 'context.json'),
                 JSON.stringify(session.context, null, 2),
                 'utf-8'
             );
-
+            const payload: PersistedSession = {
+                id: session.id,
+                updatedAt: session.updatedAt.toISOString(),
+                group: session.group,
+                currentVersion: session.currentVersion,
+                lastTurn: session.lastTurn,
+                imageGenerationAllowed: session.imageGenerationAllowed,
+            };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
                 JSON.stringify(payload, null, 2),
@@ -743,7 +800,7 @@ export class SessionStore {
                 session.files.js,
                 'utf-8',
             );
-        } catch (error) {
+        } catch (error: any) {
             console.error(
                 `Failed to persist session ${session.id} to disk`,
                 error,
@@ -949,7 +1006,8 @@ function cloneSession(session: SessionData): SessionData {
             version:
                 typeof message.version === 'number'
                     ? message.version
-                    : undefined,
+                    : 0,
+            turn: typeof message.turn === 'number' ? message.turn : 0,
         })),
         context: session.context.map((message) => ({
             ...message,
@@ -960,10 +1018,13 @@ function cloneSession(session: SessionData): SessionData {
             version:
                 typeof message.version === 'number'
                     ? message.version
-                    : undefined,
+                    : 0,
+            turn: typeof message.turn === 'number' ? message.turn : 0,
         })),
         updatedAt: new Date(session.updatedAt),
         group: session.group,
         currentVersion: session.currentVersion,
+        lastTurn: session.lastTurn,
+        imageGenerationAllowed: session.imageGenerationAllowed,
     };
 }

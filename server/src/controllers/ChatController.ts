@@ -1,5 +1,6 @@
 import {
     Body,
+    Delete,
     Get,
     JsonController,
     Param,
@@ -163,22 +164,17 @@ export class ChatController {
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
+            currentTurn: snapshot.lastTurn ?? 0,
             imageGenerationAllowed: snapshot.imageGenerationAllowed ?? true,
         };
     }
 
-    @Get('/api/sessions/:sessionId/versions/:version/history')
+    @Get('/api/sessions/:sessionId/history')
     getHistory(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response.status(400).json({ message: 'Invalid version' });
-        }
-
-        const history = this.sessionStore.getHistory(sessionId, version);
+        const history = this.sessionStore.getAllHistory(sessionId);
         if (!history) {
             return response.status(404).json({ message: 'History not found' });
         }
@@ -205,28 +201,48 @@ export class ChatController {
         };
     }
 
+    @Delete('/api/sessions/:sessionId')
+    deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
+        try {
+            this.sessionStore.deleteSession(sessionId);
+            return response.status(200).json({ message: 'Session deleted' });
+        } catch (error) {
+            console.error('Failed to delete session', error);
+            return response.status(500).json({ message: 'Failed to delete session' });
+        }
+    }
 
 
-    @Get('/api/sessions/:sessionId/versions/:version/archive')
+
+
+    @Get('/api/sessions/:sessionId/turns/:turn/archive')
     async downloadArchive(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Param('turn') turnParam: string,
         @Res() response: Response,
     ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
             return response
                 .status(400)
-                .json({ message: 'Некорректная версия' });
+                .json({ message: 'Некорректный номер хода' });
         }
 
         try {
+            // Resolve version from turn
+            const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+            if (version === undefined) {
+                return response
+                    .status(404)
+                    .json({ message: 'Ход не найден или не содержит файлов' });
+            }
+
             // Get code files
             const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
                 return response
                     .status(404)
-                    .json({ message: 'Версия не найдена' });
+                    .json({ message: 'Файлы для указанного хода не найдены' });
             }
 
             const safeId =
@@ -248,7 +264,7 @@ export class ChatController {
             response.setHeader('Content-Type', 'application/zip');
             response.setHeader(
                 'Content-Disposition',
-                `attachment; filename="session-${safeId}-v${version}.zip"`,
+                `attachment; filename="session-${safeId}-turn${turn}.zip"`,
             );
 
             archive.pipe(response);
@@ -260,13 +276,14 @@ export class ChatController {
 
             // Add images
             try {
+                // Images also need to be filtered? 
+                // Images are versioned. We used `version`.
                 const images = await this.imageService.listImages(sessionId, version);
                 const cwd = process.cwd();
                 const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                // We still need to read from filesystem based on VERSION dir
                 const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
 
-                // Reconstruct path logic similar to getStaticFile
-                // It would be better to have this in logic shared, but consistent within controller for now
                 const versionDir = path.join(
                     sessionRoot,
                     safeId,
@@ -282,7 +299,6 @@ export class ChatController {
                 }
             } catch (imageError) {
                 console.warn('Failed to add images to archive', imageError);
-                // Continue without images rather than failing entire archive
             }
 
             void archive.finalize();
@@ -295,21 +311,17 @@ export class ChatController {
         }
     }
 
-
-
-
-
-    @Get('/api/sessions/:sessionId/versions/:version/static/:filename')
+    @Get('/api/sessions/:sessionId/turns/:turn/static/:filename')
     getStaticFile(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Param('turn') turnParam: string,
         @Param('filename') filename: string,
         @Res() response: Response,
     ) {
         // Basic validation
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response.status(400).send('Invalid version');
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return response.status(400).send('Invalid turn');
         }
 
         // Allow alphanumeric, dashes, underscores, dots only
@@ -317,11 +329,16 @@ export class ChatController {
             return response.status(400).send('Invalid filename');
         }
 
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return response.status(404).send('Turn not found');
+        }
+
         const validFiles = ['index.html', 'styles.css', 'script.js'];
         if (validFiles.includes(filename)) {
             const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
-                return response.status(404).send('Version not found');
+                return response.status(404).send('Files not found');
             }
 
             let content = '';
@@ -368,27 +385,45 @@ export class ChatController {
         return response.status(404).send('File not found');
     }
 
-    @Post('/api/sessions/:sessionId/versions/:version/clone')
-    cloneVersion(
+
+    @Post('/api/sessions/:sessionId/undo')
+    undoLastTurn(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+        try {
+            const result = this.sessionStore.undoLastTurn(sessionId);
+            return result;
+        } catch (error) {
+            console.error('Failed to undo last turn', error);
+            return response
+                .status(500)
+                .json({ message: 'Failed to undo last turn' });
+        }
+    }
+
+    @Post('/api/sessions/:sessionId/turns/:turn/clone')
+    cloneTurn(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Res() response: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
             return response
                 .status(400)
-                .json({ message: 'Некорректная версия' });
+                .json({ message: 'Некорректный номер хода' });
         }
 
         try {
             // Prepare ID and Group
-            const { id, group } = this.sessionStore.prepareClone(sessionId);
+            const { id } = this.sessionStore.prepareClone(sessionId);
+            const { group } = this.sessionStore.getOrCreate(sessionId);
 
             // Start cloning in background
             setImmediate(async () => {
                 try {
-                    await this.sessionStore.executeCloneAtVersion(id, sessionId, version);
+                    await this.sessionStore.executeCloneAtTurn(id, sessionId, turn);
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
                         newSessionId: id,
@@ -408,29 +443,34 @@ export class ChatController {
             return response.status(201).json({
                 id,
                 group,
-                currentVersion: version,
+                currentTurn: turn,
                 updatedAt: new Date().toISOString(),
             });
         } catch (error) {
-            console.error('Failed to clone session by version', error);
+            console.error('Failed to clone session by turn', error);
             return response
                 .status(400)
-                .json({ message: 'Не удалось инициировать клонирование версии' });
+                .json({ message: 'Не удалось инициировать клонирование хода' });
         }
     }
 
-    @Post('/api/sessions/:sessionId/versions/:version/static/:filename')
+    @Post('/api/sessions/:sessionId/turns/:turn/static/:filename')
     updateStaticFile(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Param('turn') turnParam: string,
         @Param('filename') filename: string,
         @Req() req: Request,
         @Res() response: Response
     ) {
         // Basic validation
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response.status(400).send('Invalid version');
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return response.status(400).send('Invalid turn');
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return response.status(404).send('Turn not found');
         }
 
         // Map filename to SessionFiles key
@@ -478,16 +518,25 @@ export class ChatController {
                 .json({ message: 'Не удалось обновить файл' });
         }
     }
-    @Get('/api/sessions/:sessionId/versions/:version/images')
+    @Get('/api/sessions/:sessionId/turns/:turn/images')
     async getImages(
         @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Param('turn') turnParam: string,
         @Res() response: Response,
     ) {
-        const version = Number.parseInt(versionParam, 10);
-        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
-            return response.status(400).json({ message: 'Invalid version' });
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return response.status(400).json({ message: 'Invalid turn' });
         }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            // Fallback to empty list or 404? 
+            // If turn exists but has no version, it's effectively version 0 for images usually
+            return response.json([]);
+        }
+
         return this.imageService.listImages(sessionId, version);
     }
+
 }
