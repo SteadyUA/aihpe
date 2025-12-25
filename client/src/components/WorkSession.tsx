@@ -56,17 +56,22 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
         // 4. Handle Selection Restoration (e.g. after Undo)
         if (this.props.session.selection && this.props.session.selection !== prevProps.session.selection) {
-            // We need to wait for iframe to be ready/rendered if turn also changed?
-            // But usually preview is persistent.
-            // We use a small timeout to let the iframe settle if it was reloading? 
-            // Or just call selection restoration logic.
-            // We can reuse `restoreSelection` logic but without updating session (since it's already updated).
-            // Actually `restoreSelection` updates session. We just want to visualize it.
             const selector = this.props.session.selection;
-            // Use timeout to ensure DOM is ready if it's a new turn
             setTimeout(() => {
                 this.visualizeSelection(selector);
             }, 500);
+        }
+
+        // 5. Handle Tab Switch Side Effects
+        if (prevProps.session.activeTab !== this.props.session.activeTab) {
+            if (this.props.session.activeTab !== 'preview') {
+                this.stopPicking();
+            } else if (this.props.session.selection) {
+                const selector = this.props.session.selection;
+                setTimeout(() => {
+                    this.visualizeSelection(selector);
+                }, 100);
+            }
         }
     }
 
@@ -79,8 +84,19 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.picker.selectBySelector(iframe, selector);
     };
 
-    handlePreviewTabChange = (tab: any) => {
+    handlePreviewTabChange = (_tab: any) => {
         // 3. Handle Preview Tab Switch
+        // Logic moved to bubbling up state, but side effects like stopping picking are handled in DidUpdate or here?
+        // Since we update session state, DidUpdate will catch it?
+        // Actually, let's keep side effects here before state update or react to state update.
+        // But we are bubbling state update via onUpdateSession.
+
+        // Let's rely on componentDidUpdate monitoring session.activeTab!
+        // Wait, componentDidUpdate in WorkSession monitors props changes?
+        // We haven't implemented that yet.
+
+        // Existing logic was:
+        /*
         if (tab !== 'preview') {
             this.stopPicking();
         } else if (this.props.session.selection) {
@@ -90,6 +106,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                 this.visualizeSelection(selector);
             }, 100);
         }
+        */
+        // We can simply remove this method and inline the state update in render, 
+        // AND add a check in componentDidUpdate for activeTab change.
     };
 
     componentWillUnmount() {
@@ -199,7 +218,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     ref={this.previewRef}
                     sessionId={session.id}
                     turn={currentTurn}
-                    onTabChange={this.handlePreviewTabChange}
+                    activeTab={session.activeTab}
+                    onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                 />
             </div>
         );

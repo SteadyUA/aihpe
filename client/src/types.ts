@@ -1,3 +1,5 @@
+export type TabType = 'preview' | 'images' | 'html' | 'css' | 'js';
+
 export interface MessageData {
     role: 'user' | 'assistant' | 'system';
     content: string;
@@ -15,6 +17,7 @@ export interface Session {
 
     currentTurn: number;
     activeTurn: number | null;
+    activeTab: TabType;
 
     imageGenerationAllowed: boolean;
     pendingRefreshTurn: number | null;

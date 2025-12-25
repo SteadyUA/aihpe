@@ -8,9 +8,10 @@ import { SessionStore } from './store/SessionStore';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
-interface AppProps { }
+import { withRouter, RouterProps } from './components/withRouter';
+import { Session, TabType } from './types';
 
-import { Session } from './types';
+interface AppProps extends RouterProps { }
 
 interface AppState {
     sessions: Record<string, Session>;
@@ -20,7 +21,7 @@ interface AppState {
     sessionToDelete: string | null;
 }
 
-export default class App extends React.Component<AppProps, AppState> {
+class App extends React.Component<AppProps, AppState> {
     private evtSource: EventSource | null = null;
 
     constructor(props: AppProps) {
@@ -54,6 +55,7 @@ export default class App extends React.Component<AppProps, AppState> {
                         requestStartTime: null,
                         currentTurn: 0,
                         activeTurn: null,
+                        activeTab: 'preview',
                         imageGenerationAllowed: true,
                         selection: null,
                         isPicking: false,
@@ -65,12 +67,9 @@ export default class App extends React.Component<AppProps, AppState> {
                 this.setState({
                     sessions: sessionsMap,
                     sessionOrder: sessionIds,
-                    activeSessionId,
+                    activeSessionId, // Will be overridden by URL if present
                 }, () => {
-                    // Fetch active session data after mounting
-                    if (activeSessionId) {
-                        this.handleSessionChange(activeSessionId);
-                    }
+                    this.handleInitialRouting();
                 });
             } else {
                 // Auto-create session on startup if none exist
@@ -84,29 +83,135 @@ export default class App extends React.Component<AppProps, AppState> {
         this.setupSse();
     }
 
-    componentDidUpdate(_prevProps: AppProps, prevState: AppState) {
-        if (prevState.activeSessionId !== this.state.activeSessionId) {
-            SessionStore.saveActiveSessionId(this.state.activeSessionId);
-            // We handle data fetching in the switch method or here. 
-            // Better to handle it when the switch actually happens or state updates.
+    handleInitialRouting = () => {
+        const { searchParams } = this.props.router;
+        const params = this.props.router.params as Record<string, string | undefined>;
+        const sessionIdFromUrl = params['sessionId'];
+        const turnFromUrl = searchParams.get('turn');
+        const tabFromUrl = searchParams.get('tab') as TabType;
+
+        let targetSessionId = sessionIdFromUrl || this.state.activeSessionId;
+
+        // If URL has session ID, use it. If not, rely on state (loaded from store) or default.
+        if (sessionIdFromUrl && this.state.sessions[sessionIdFromUrl]) {
+            targetSessionId = sessionIdFromUrl;
         }
 
+        if (targetSessionId) {
+            // Apply URL params to the session state immediately
+            if (this.state.sessions[targetSessionId]) {
+                const updates: Partial<Session> = {};
+                if (turnFromUrl) updates.activeTurn = parseInt(turnFromUrl, 10);
+                if (tabFromUrl) updates.activeTab = tabFromUrl;
+
+                if (Object.keys(updates).length > 0) {
+                    this.updateSession(targetSessionId, updates);
+                }
+            }
+
+            // Set active and fetch
+            this.setState({ activeSessionId: targetSessionId }, () => {
+                this.handleSessionChange(targetSessionId);
+            });
+        }
+    }
+
+    componentDidUpdate(prevProps: AppProps, prevState: AppState) {
+        const { activeSessionId, sessions } = this.state;
+        const { router } = this.props;
+
+        // 1. Handle URL Changes (Back/Forward) => Sync to State
+        if (prevProps.router.location !== router.location) {
+            const params = router.params as Record<string, string | undefined>;
+            const newSessionId = params['sessionId'];
+            const newTurn = router.searchParams.get('turn');
+            const newTab = router.searchParams.get('tab') as TabType;
+
+            // Session change via URL
+            if (newSessionId && newSessionId !== activeSessionId && sessions[newSessionId]) {
+                this.setState({ activeSessionId: newSessionId });
+            }
+
+            // Turn/Tab change via URL for current session
+            if (activeSessionId && sessions[activeSessionId]) {
+                const session = sessions[activeSessionId];
+                const cleanTurn = newTurn ? parseInt(newTurn, 10) : null;
+                const cleanTab = newTab || 'preview';
+
+                if (session.activeTurn !== cleanTurn || session.activeTab !== cleanTab) {
+                    this.updateSession(activeSessionId, {
+                        activeTurn: cleanTurn,
+                        activeTab: cleanTab
+                    });
+                }
+            }
+        }
+
+        // 2. Handle State Changes => Sync to URL
+        // Active Session changed
+        if (prevState.activeSessionId !== activeSessionId) {
+            SessionStore.saveActiveSessionId(activeSessionId);
+            if (activeSessionId) {
+                // If we switched session, we want to replace the URL entirely to match that session's state
+                // However, we might just want to push new session ID and keep default query params?
+                // Or restore query params if we store them in session state?
+                // The implementation plan says sync state -> URL.
+                // If I click a session, activeSessionId changes.
+                // I should navigate to `/session/${activeSessionId}` + params from that session state.
+                const session = sessions[activeSessionId];
+                if (session) {
+                    this.handleSessionChange(activeSessionId);
+
+                    // Only navigate if URL doesn't match (avoid double nav)
+                    const params = router.params as Record<string, string | undefined>;
+                    if (params['sessionId'] !== activeSessionId) {
+                        this.updateUrl(activeSessionId, session.activeTurn, session.activeTab);
+                    }
+                }
+            }
+        }
+
+        // Session State (Turn/Tab) changed
+        if (activeSessionId && sessions[activeSessionId]) {
+            const prevSession = prevState.sessions[activeSessionId];
+            const currSession = sessions[activeSessionId];
+
+            if (prevSession && (prevSession.activeTurn !== currSession.activeTurn || prevSession.activeTab !== currSession.activeTab)) {
+                this.updateUrl(activeSessionId, currSession.activeTurn, currSession.activeTab);
+            }
+        }
+
+        // Persistence
         if (prevState.sessionOrder !== this.state.sessionOrder) {
             SessionStore.saveSessions(this.state.sessionOrder);
-
-            // Auto-create if all sessions were removed
             if (this.state.sessionOrder.length === 0 && prevState.sessionOrder.length > 0) {
                 this.createSession();
             }
         }
 
-        // Save groups whenever they change in any session
-        // This is a bit expensive to check deep equality, but manageable for small number of sessions.
-        // Or we can just save whenever sessions change.
         const prevGroups = this.extractGroups(prevState.sessions);
         const currGroups = this.extractGroups(this.state.sessions);
         if (JSON.stringify(prevGroups) !== JSON.stringify(currGroups)) {
             SessionStore.saveGroups(currGroups);
+        }
+    }
+
+    updateUrl = (sessionId: string, turn: number | null, tab: TabType) => {
+        const params = new URLSearchParams();
+        if (turn !== null) params.set('turn', turn.toString());
+        if (tab && tab !== 'preview') params.set('tab', tab); // Default tab is preview, unnecessary to show
+
+        // Use replace if just tab changed? Use push if session changed?
+        // Let's use navigate.
+        const path = `/session/${sessionId}`;
+        const search = params.toString() ? `?${params.toString()}` : '';
+
+        // Check if we need to update to avoid redundant pushes
+        const currentPath = this.props.router.location.pathname;
+        const currentSearch = this.props.router.location.search;
+
+        if (currentPath !== path || currentSearch !== search) {
+            this.props.router.navigate(`${path}${search}`);
         }
     }
 
@@ -231,6 +336,7 @@ export default class App extends React.Component<AppProps, AppState> {
                     requestStartTime: null,
                     currentTurn: 0,
                     activeTurn: null,
+                    activeTab: 'preview',
                     imageGenerationAllowed: true,
                     selection: null,
                     isPicking: false,
@@ -362,6 +468,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 requestStartTime: null,
                 currentTurn: sessionData.currentTurn ?? 0,
                 activeTurn: null,
+                activeTab: 'preview',
                 imageGenerationAllowed: sessionData.imageGenerationAllowed ?? true,
                 selection: null,
                 isPicking: false,
@@ -474,7 +581,9 @@ export default class App extends React.Component<AppProps, AppState> {
 
     switchSession = (id: string) => {
         this.setState({ activeSessionId: id }, () => {
-            this.handleSessionChange(id);
+            // handleSessionChange call is now redundant here if we rely on componentDidUpdate/URL sync
+            // But for immediate response we can keep it, or just let the URL update trigger it.
+            // Let's let the URL update trigger clean routing.
         });
     };
 
@@ -656,3 +765,5 @@ export default class App extends React.Component<AppProps, AppState> {
         );
     }
 }
+
+export default withRouter(App);

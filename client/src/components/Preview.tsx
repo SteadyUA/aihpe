@@ -9,9 +9,12 @@ interface IDisposable {
     dispose(): void;
 }
 
+import { TabType } from '../types';
+
 interface PreviewProps {
     sessionId: string | null;
     turn: number;
+    activeTab: TabType;
     onTabChange?: (tab: TabType) => void;
 }
 
@@ -44,12 +47,12 @@ const FILENAME_MAP: Record<AssetType, string> = {
 };
 
 type AssetType = 'html' | 'css' | 'js';
-type TabType = 'preview' | 'images' | AssetType;
+// type TabType = 'preview' | 'images' | AssetType;
 
 interface PreviewState {
     isMobile: boolean;
     deviceIndex: number;
-    activeTab: TabType;
+    // activeTab: TabType; // Now controlled
     iframeKey: number;
     // Cache per turn: turnId -> { html: ..., css: ... }
     turnCache: Record<number, Record<AssetType, string | null>>;
@@ -68,7 +71,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.state = {
             isMobile: false,
             deviceIndex: 0,
-            activeTab: 'preview',
+            // activeTab: 'preview',
             iframeKey: 0,
             turnCache: {}, // Initialize empty
             loading: { html: false, css: false, js: false, images: false },
@@ -81,12 +84,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
     private preservedScroll: { x: number; y: number } | null = null;
 
-    getSnapshotBeforeUpdate(prevProps: PreviewProps, prevState: PreviewState) {
+    getSnapshotBeforeUpdate(prevProps: PreviewProps, _prevState: PreviewState) {
         // If we are about to switch version within the same session
         if (
             prevProps.sessionId === this.props.sessionId &&
             prevProps.turn !== this.props.turn &&
-            prevState.activeTab === 'preview'
+            prevProps.activeTab === 'preview'
         ) {
             const iframe = this.iframeRef.current;
             if (iframe && iframe.contentWindow) {
@@ -112,13 +115,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     ) {
         if (
             prevProps.sessionId !== this.props.sessionId ||
-            prevProps.turn !== this.props.turn
+            prevProps.turn !== this.props.turn ||
+            prevProps.activeTab !== this.props.activeTab // React to tab changes from prop
         ) {
             const isSessionSwitch = prevProps.sessionId !== this.props.sessionId;
-            const nextActiveTab = isSessionSwitch ? 'preview' : this.state.activeTab;
+            const nextActiveTab = isSessionSwitch ? 'preview' : this.props.activeTab;
 
-            // When switching turn, we should:
-            // 1. Clear unsaved content (as we moved away)
+            // When switching turn or tab, we should:
+            // 1. Clear unsaved content (if session switched)
             // 2. Not clear cache (we keep it)
             // 3. Start fetching if we are on a code tab and missing cache for new turn
 
@@ -126,12 +130,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 {
                     loading: { html: false, css: false, js: false, images: false }, // Reset loading only
                     unsavedContent: { html: null, css: null, js: null },
-                    activeTab: nextActiveTab,
+                    // activeTab: nextActiveTab, // No longer in state
                     iframeKey: this.state.iframeKey + 1,
                 },
                 () => {
-                    // Fetch content for the new version if we stayed on a non-preview tab
-                    // And only if missing from cache (handled by fetchFile)
+                    // Fetch content for the new version/tab
                     if (!isSessionSwitch && nextActiveTab !== 'preview') {
                         if (nextActiveTab === 'images') {
                             this.fetchImages();
@@ -186,8 +189,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             };
         }, () => {
             // Re-fetch if current
-            const { turn, sessionId } = this.props;
-            const { activeTab } = this.state;
+            const { turn, sessionId, activeTab } = this.props;
             if (turn === turn && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
                 this.fetchFile(activeTab as AssetType);
             }
@@ -284,20 +286,17 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
     handleTabChange = async (tab: TabType) => {
         // Auto-save if switching AWAY from an editor
-        const { activeTab, unsavedContent } = this.state;
+        const { activeTab } = this.props;
+        const { unsavedContent } = this.state;
         // activeTab is the OLD tab
         if (activeTab !== 'preview' && activeTab !== 'images' && unsavedContent[activeTab as AssetType] !== null) {
             await this.handleSave(activeTab as AssetType);
         }
 
-        this.setState({ activeTab: tab });
+        // this.setState({ activeTab: tab }); // Now controlled
         this.props.onTabChange?.(tab);
 
-        if (tab === 'images') {
-            this.fetchImages();
-        } else if (tab !== 'preview') {
-            this.fetchFile(tab);
-        }
+        // Fetching will happen in componentDidUpdate when prop changes
     };
 
     handleEditorChange = (type: AssetType) => (value: string | undefined) => {
@@ -312,8 +311,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleSave = async (targetType?: AssetType) => {
-        const { sessionId, turn } = this.props;
-        const { activeTab, unsavedContent } = this.state;
+        const { sessionId, turn, activeTab } = this.props;
+        const { unsavedContent } = this.state;
 
         // Use targetType if provided, otherwise activeTab
         const typeToSave = targetType || activeTab;
@@ -550,11 +549,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     render() {
-        const { sessionId, turn } = this.props;
+        const { sessionId, turn, activeTab } = this.props;
         const {
             isMobile,
             deviceIndex,
-            activeTab,
+            // activeTab,
             turnCache,
             loading,
             unsavedContent,
