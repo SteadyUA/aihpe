@@ -1,6 +1,6 @@
 import React from 'react';
 import classNames from 'classnames';
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import { UiCheckbox } from './UiCheckbox';
 import styles from './Preview.module.css';
 
@@ -12,7 +12,7 @@ interface IDisposable {
 interface PreviewProps {
     sessionId: string | null;
     version: number;
-    maxDate?: string;
+    onTabChange?: (tab: TabType) => void;
 }
 
 interface ImageMetadata {
@@ -102,6 +102,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         return null;
     }
 
+    private monacoConfigured = false;
+
     componentDidUpdate(
         prevProps: PreviewProps,
         _prevState: PreviewState,
@@ -111,20 +113,25 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             prevProps.sessionId !== this.props.sessionId ||
             prevProps.version !== this.props.version
         ) {
+            const isSessionSwitch = prevProps.sessionId !== this.props.sessionId;
+            const nextActiveTab = isSessionSwitch ? 'preview' : this.state.activeTab;
+
             // Reset cache when session or version changes
             this.setState(
                 {
                     fileCache: { html: null, css: null, js: null },
                     loading: { html: false, css: false, js: false, images: false },
                     unsavedContent: { html: null, css: null, js: null },
-                    activeTab: 'preview', // Reset to preview on version switch
+                    activeTab: nextActiveTab,
                 },
                 () => {
-                    // If we stayed on code tab (unlikely due to reset), re-fetch
-                    if (this.state.activeTab !== 'preview' && this.state.activeTab !== 'images') {
-                        this.fetchFile(this.state.activeTab);
-                    } else if (this.state.activeTab === 'images') {
-                        this.fetchImages();
+                    // Fetch content for the new version if we stayed on a non-preview tab
+                    if (!isSessionSwitch && nextActiveTab !== 'preview') {
+                        if (nextActiveTab === 'images') {
+                            this.fetchImages();
+                        } else {
+                            this.fetchFile(nextActiveTab as AssetType);
+                        }
                     }
                 },
             );
@@ -157,6 +164,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     componentWillUnmount() {
         this.disposables.forEach((d) => d.dispose());
         this.disposables = [];
+        this.monacoConfigured = false;
     }
 
     fetchFile = async (type: AssetType) => {
@@ -200,8 +208,15 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         const { sessionId, version } = this.props;
         if (!sessionId) return;
 
-        // If already loaded successfully (and session/version hasn't changed, handled by componentDidUpdate reset), return
-        // Actually, we reset images to [] on update, so just check if loading.
+        // If already loaded successfully (and session/version hasn't changed), return
+        // We reset images to [] on update (via parent? No, local state).
+        // Actually componentDidUpdate above doesn't clear images explicitly in the generic reset, 
+        // but it clears loading state. Let's ensure visuals are consistent.
+        // The original code reset images to [] in logic that was removed? 
+        // Ah, in the original componentDidUpdate it wasn't clearing images explicitly, 
+        // but it was setting loading.images to false.
+        // Let's rely on loading flag.
+
         if (this.state.loading.images) return;
 
         this.setState((prev) => ({
@@ -228,13 +243,16 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleTabChange = async (tab: TabType) => {
-        // Auto-save if needed before switching
+        // Auto-save if switching AWAY from an editor
         const { activeTab, unsavedContent } = this.state;
+        // activeTab is the OLD tab
         if (activeTab !== 'preview' && activeTab !== 'images' && unsavedContent[activeTab as AssetType] !== null) {
-            await this.handleSave();
+            await this.handleSave(activeTab as AssetType);
         }
 
         this.setState({ activeTab: tab });
+        this.props.onTabChange?.(tab);
+
         if (tab === 'images') {
             this.fetchImages();
         } else if (tab !== 'preview') {
@@ -242,24 +260,26 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     };
 
-    handleEditorChange = (value: string | undefined) => {
-        const { activeTab } = this.state;
-        if (activeTab === 'preview' || activeTab === 'images' || value === undefined) return;
+    handleEditorChange = (type: AssetType) => (value: string | undefined) => {
+        if (value === undefined) return;
 
         this.setState((prev) => ({
             unsavedContent: {
                 ...prev.unsavedContent,
-                [activeTab]: value,
+                [type]: value,
             },
         }));
     };
 
-    handleSave = async () => {
+    handleSave = async (targetType?: AssetType) => {
         const { sessionId, version } = this.props;
         const { activeTab, unsavedContent } = this.state;
 
-        if (activeTab === 'preview' || activeTab === 'images') return;
-        const content = unsavedContent[activeTab as AssetType];
+        // Use targetType if provided, otherwise activeTab
+        const typeToSave = targetType || activeTab;
+
+        if (typeToSave === 'preview' || typeToSave === 'images') return;
+        const content = unsavedContent[typeToSave as AssetType];
         if (content === null) return; // No changes
 
         if (!sessionId) return;
@@ -268,7 +288,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         try {
             const filenameMap: Record<AssetType, string> = FILENAME_MAP;
-            const filename = filenameMap[activeTab as AssetType];
+            const filename = filenameMap[typeToSave as AssetType];
 
             const res = await fetch(
                 `/api/sessions/${sessionId}/versions/${version}/static/${filename}`,
@@ -295,11 +315,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             this.setState((prev) => ({
                 fileCache: {
                     ...prev.fileCache,
-                    [activeTab]: content,
+                    [typeToSave]: content,
                 },
                 unsavedContent: {
                     ...prev.unsavedContent,
-                    [activeTab]: null,
+                    [typeToSave]: null,
                 },
                 isSaving: false,
                 iframeKey: prev.iframeKey + 1, // Force iframe reload
@@ -363,8 +383,25 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.setState({ isMobile: checked });
     };
 
-    handleEditorDidMount: OnMount = (editor, monaco) => {
-        // Dispose old providers
+    handleEditorDidMount = (type: AssetType) => (editor: any, monaco: any) => {
+        // Per-editor config
+
+        // Auto-save on blur
+        editor.onDidBlurEditorText(() => {
+            this.handleSave(type);
+        });
+
+        // Ctrl+S shortcut
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+            this.handleSave(type);
+        });
+
+        // Global config (Providers) - run once
+        if (this.monacoConfigured) return;
+        this.monacoConfigured = true;
+
+        // Dispose old providers if any (from previous session of this component?)
+        // Actually if we just set flag true, we assume we never need to re-register unless we unmount.
         this.disposables.forEach((d) => d.dispose());
         this.disposables = [];
 
@@ -459,16 +496,6 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 },
             }),
         );
-
-        // Auto-save on blur
-        editor.onDidBlurEditorText(() => {
-            this.handleSave();
-        });
-
-        // Ctrl+S shortcut
-        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-            this.handleSave();
-        });
     };
 
     render() {
@@ -483,24 +510,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             iframeKey,
         } = this.state;
         const device = DEVICES[deviceIndex];
-        const isCodeView = activeTab !== 'preview';
+        const isCodeView = activeTab !== 'preview' && activeTab !== 'images';
 
         const previewUrl =
             sessionId && typeof version === 'number'
                 ? `/api/sessions/${sessionId}/versions/${version}/static/index.html`
                 : 'about:blank';
 
-        const currentContent =
-            activeTab !== 'preview' && activeTab !== 'images'
-                ? unsavedContent[activeTab as AssetType] ??
-                fileCache[activeTab as AssetType] ??
-                ''
-                : '';
-
-        const visibleImages = this.state.images.filter((img) => {
-            if (!this.props.maxDate) return true;
-            return new Date(img.createdAt) <= new Date(this.props.maxDate);
-        });
+        const visibleImages = this.state.images;
 
         return (
             <div
@@ -540,37 +557,37 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     ))}
                 </div>
 
-                {activeTab === 'images' && (
-                    <div className={styles.imagesPanel}>
-                        {loading.images ? (
-                            <div className={styles.loading}>Loading images...</div>
-                        ) : visibleImages.length === 0 ? (
-                            <div className={styles.noImages}>
-                                No images found for this version
-                            </div>
-                        ) : (
-                            <div className={styles.imageGrid}>
-                                {visibleImages.map((img) => (
-                                    <div
-                                        key={img.filename}
-                                        className={styles.imageTile}
-                                    >
-                                        <img
-                                            src={`/api/sessions/${sessionId}/versions/${version}/static/${img.filename}`}
-                                            alt={img.description}
-                                            className={styles.imageThumb}
-                                        />
-                                        <div className={styles.imageDesc}>
-                                            {img.description}
-                                        </div>
+                {/* IMAGES TAB CONTAINER */}
+                <div className={styles.imagesPanel} style={{ display: activeTab === 'images' ? 'block' : 'none' }}>
+                    {loading.images ? (
+                        <div className={styles.loading}>Loading images...</div>
+                    ) : visibleImages.length === 0 ? (
+                        <div className={styles.noImages}>
+                            No images found for this version
+                        </div>
+                    ) : (
+                        <div className={styles.imageGrid}>
+                            {visibleImages.map((img) => (
+                                <div
+                                    key={img.filename}
+                                    className={styles.imageTile}
+                                >
+                                    <img
+                                        src={`/api/sessions/${sessionId}/versions/${version}/static/${img.filename}`}
+                                        alt={img.description}
+                                        className={styles.imageThumb}
+                                    />
+                                    <div className={styles.imageDesc}>
+                                        {img.description}
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
 
-                {!isCodeView && (
+                {/* PREVIEW TAB CONTAINER */}
+                <div style={{ display: activeTab === 'preview' ? 'flex' : 'none', flexDirection: 'column', height: '100%', flex: 1, overflow: 'hidden' }}>
                     <div className={styles.toolbar}>
                         <div className={styles.deviceControls}>
                             <UiCheckbox
@@ -634,9 +651,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             </button>
                         </div>
                     </div>
-                )}
 
-                {!isCodeView && (
                     <div
                         className={classNames(styles.frameWrapper, {
                             [styles.mobile]: isMobile,
@@ -659,36 +674,41 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             }
                         />
                     </div>
-                )}
+                </div>
 
-                {isCodeView && activeTab !== 'images' && (
-                    <div className={styles.assetsPanels}>
-                        {loading[activeTab as AssetType] ? (
-                            <div className={styles.loading}>Loading...</div>
-                        ) : (
-                            <Editor
-                                height="100%"
-                                defaultLanguage={this.getEditorLanguage(
-                                    activeTab,
-                                )}
-                                language={this.getEditorLanguage(activeTab)}
-                                value={currentContent}
-                                theme="light"
-                                onMount={this.handleEditorDidMount}
-                                onChange={this.handleEditorChange}
-                                options={{
-                                    minimap: { enabled: false },
-                                    fontSize: 14,
-                                    wordWrap: 'on',
-                                    padding: { top: 16, bottom: 16 },
-                                }}
-                            />
-                        )}
-                    </div>
-                )}
+                {/* EDITORS (Persistent) */}
+                {(['html', 'css', 'js'] as const).map(type => {
+                    const content = unsavedContent[type] ?? fileCache[type] ?? '';
+                    const language = this.getEditorLanguage(type);
+
+                    return (
+                        <div key={type} className={styles.assetsPanels} style={{ display: activeTab === type ? 'flex' : 'none' }}>
+                            {loading[type] ? (
+                                <div className={styles.loading}>Loading...</div>
+                            ) : (
+                                <Editor
+                                    height="100%"
+                                    defaultLanguage={language}
+                                    language={language}
+                                    value={content}
+                                    theme="light"
+                                    onMount={this.handleEditorDidMount(type)}
+                                    onChange={this.handleEditorChange(type)}
+                                    options={{
+                                        minimap: { enabled: false },
+                                        fontSize: 14,
+                                        wordWrap: 'on',
+                                        padding: { top: 16, bottom: 16 },
+                                    }}
+                                />
+                            )}
+                        </div>
+                    );
+                })}
             </div>
         );
     }
+
     public getIframe = (): HTMLIFrameElement | null => {
         return this.iframeRef.current;
     };

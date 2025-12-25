@@ -531,6 +531,40 @@ export class SessionStore {
         return undefined;
     }
 
+    getHistory(sessionId: string, version: number): ChatMessage[] | undefined {
+        if (!Number.isInteger(version) || version < 0) {
+            return undefined;
+        }
+
+        const session = this.getOrCreate(sessionId);
+
+        // If requesting current version history, return in-memory history
+        if (version === session.currentVersion) {
+            return session.history.map((h) => ({
+                ...h,
+                createdAt: new Date(h.createdAt),
+            }));
+        }
+
+        const versionDir = resolveVersionDir(sessionId, version);
+        const messagesPath = path.join(versionDir, 'messages.json');
+
+        if (fs.existsSync(messagesPath)) {
+            try {
+                const raw = fs.readFileSync(messagesPath, 'utf-8');
+                const rawHistory = JSON.parse(raw);
+                return sanitizeHistoryForUi(rawHistory);
+            } catch (e) {
+                console.error(
+                    `Failed to read history for ${sessionId} v${version}`,
+                    e,
+                );
+            }
+        }
+
+        return undefined;
+    }
+
     snapshot(sessionId: string): SessionData | undefined {
         const cached = this.sessions.get(sessionId);
         if (cached) {

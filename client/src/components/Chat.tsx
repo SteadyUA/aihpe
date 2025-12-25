@@ -7,12 +7,7 @@ import styles from './Chat.module.css';
 
 marked.setOptions({ breaks: true });
 
-interface MessageData {
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-    version?: number; // Added version
-    selection?: { selector: string };
-}
+import { MessageData } from '../types';
 
 interface MessageProps {
     msg: MessageData;

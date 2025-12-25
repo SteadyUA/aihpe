@@ -159,13 +159,30 @@ export class ChatController {
             this.sessionStore.getOrCreate(sessionId);
         return {
             id: snapshot.id,
-            files: snapshot.files,
-            history: snapshot.history,
+            // files and history removed. Fetch files via static routes and history via history route.
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
             imageGenerationAllowed: snapshot.imageGenerationAllowed ?? true,
         };
+    }
+
+    @Get('/api/sessions/:sessionId/versions/:version/history')
+    getHistory(
+        @Param('sessionId') sessionId: string,
+        @Param('version') versionParam: string,
+        @Res() response: Response,
+    ) {
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).json({ message: 'Invalid version' });
+        }
+
+        const history = this.sessionStore.getHistory(sessionId, version);
+        if (!history) {
+            return response.status(404).json({ message: 'History not found' });
+        }
+        return history;
     }
 
     @Post('/api/sessions/:sessionId/settings')
@@ -392,8 +409,6 @@ export class ChatController {
                 id,
                 group,
                 currentVersion: version,
-                history: [],
-                files: {},
                 updatedAt: new Date().toISOString(),
             });
         } catch (error) {

@@ -1,81 +1,72 @@
 import React from 'react';
 import { SessionBar } from './components/SessionBar';
-import { Chat } from './components/Chat';
-import { Preview } from './components/Preview';
-import { ElementPicker } from './lib/ElementPicker';
+
+
+import { WorkSession } from './components/WorkSession';
+
 import { SessionStore } from './store/SessionStore';
 import styles from './App.module.css';
 
 interface AppProps { }
 
-interface AppState {
-    sessions: string[];
-    activeSessionId: string | null;
-    groups: Record<string, number>;
-    messages: any[];
-    utilStatus: string;
-    utilMessages: string[];
-    requestStartTime: number | null;
-    utilMessage: string | null; // Keep for backward compatibility or simple status? Maybe remove if Chat handles list.
-    // Actually Chat needs string[] now. But App checks utilMessage != null?
-    // Let's keep utilMessage as null, and add utilMessages.
-    // Or just rename. Let's rename to avoid confusion.
-    // But other components might use it. Chat uses statusMessage.
-    // Let's replace utilMessage with utilMessages in state and pass the list.
-    activeVersion: number | null;
-    currentVersion: number;
-    imageGenerationAllowed: boolean;
-    activeVersions: Record<string, number | null>; // Map sessionId -> activeVersion
+import { Session } from './types';
 
-    // UI states
-    selection: string | null;
-    isPicking: boolean;
-    pendingSessions: string[];
+interface AppState {
+    sessions: Record<string, Session>;
+    sessionOrder: string[]; // To maintain list order
+    activeSessionId: string | null;
     isConnected: boolean;
 }
 
 export default class App extends React.Component<AppProps, AppState> {
     private evtSource: EventSource | null = null;
-    private picker: ElementPicker;
-    private previewRef: React.RefObject<Preview | null>;
 
     constructor(props: AppProps) {
         super(props);
         this.state = {
-            sessions: [],
+            sessions: {},
+            sessionOrder: [],
             activeSessionId: null,
-            groups: {},
-            messages: [],
-            utilStatus: 'idle',
-            utilMessages: [],
-            requestStartTime: null,
-            utilMessage: null,
-            activeVersion: null,
-            currentVersion: 0,
-            imageGenerationAllowed: true,
-            activeVersions: {},
-
-            selection: null,
-            isPicking: false,
-            pendingSessions: [],
             isConnected: false,
         };
-        this.picker = new ElementPicker();
-        this.previewRef = React.createRef();
+
     }
 
     componentDidMount() {
         // Load from SessionStore
         try {
-            const sessions = SessionStore.loadSessions();
+            const sessionIds = SessionStore.loadSessions();
             const activeSessionId = SessionStore.loadActiveSessionId();
             const groups = SessionStore.loadGroups();
 
-            if (sessions.length > 0) {
+            if (sessionIds.length > 0) {
+                const sessionsMap: Record<string, Session> = {};
+
+                sessionIds.forEach(id => {
+                    sessionsMap[id] = {
+                        id,
+                        status: 'idle',
+                        messages: [],
+                        statusMessages: [],
+                        requestStartTime: null,
+                        currentVersion: 0,
+                        activeVersion: null,
+                        imageGenerationAllowed: true,
+                        selection: null,
+                        isPicking: false,
+                        group: groups[id] ?? 0 // Default to 0 if missing from store
+                    };
+                });
+
                 this.setState({
-                    sessions,
-                    groups,
+                    sessions: sessionsMap,
+                    sessionOrder: sessionIds,
                     activeSessionId,
+                }, () => {
+                    // Fetch active session data after mounting
+                    if (activeSessionId) {
+                        this.handleSessionChange(activeSessionId);
+                    }
                 });
             } else {
                 // Auto-create session on startup if none exist
@@ -92,50 +83,56 @@ export default class App extends React.Component<AppProps, AppState> {
     componentDidUpdate(_prevProps: AppProps, prevState: AppState) {
         if (prevState.activeSessionId !== this.state.activeSessionId) {
             SessionStore.saveActiveSessionId(this.state.activeSessionId);
-            this.handleSessionChange();
+            // We handle data fetching in the switch method or here. 
+            // Better to handle it when the switch actually happens or state updates.
         }
 
-        if (prevState.sessions !== this.state.sessions) {
-            SessionStore.saveSessions(this.state.sessions);
+        if (prevState.sessionOrder !== this.state.sessionOrder) {
+            SessionStore.saveSessions(this.state.sessionOrder);
 
             // Auto-create if all sessions were removed
-            if (this.state.sessions.length === 0 && prevState.sessions.length > 0) {
+            if (this.state.sessionOrder.length === 0 && prevState.sessionOrder.length > 0) {
                 this.createSession();
             }
         }
 
-        if (prevState.groups !== this.state.groups) {
-            SessionStore.saveGroups(this.state.groups);
+        // Save groups whenever they change in any session
+        // This is a bit expensive to check deep equality, but manageable for small number of sessions.
+        // Or we can just save whenever sessions change.
+        const prevGroups = this.extractGroups(prevState.sessions);
+        const currGroups = this.extractGroups(this.state.sessions);
+        if (JSON.stringify(prevGroups) !== JSON.stringify(currGroups)) {
+            SessionStore.saveGroups(currGroups);
         }
+    }
+
+    extractGroups(sessions: Record<string, Session>): Record<string, number> {
+        const groups: Record<string, number> = {};
+        Object.values(sessions).forEach(s => {
+            groups[s.id] = s.group;
+        });
+        return groups;
     }
 
     componentWillUnmount() {
         if (this.evtSource) {
             this.evtSource.close();
         }
-        this.picker.stop();
+
     }
 
-    handleSessionChange = () => {
-        const { activeSessionId } = this.state;
-
-        if (!activeSessionId) {
-            this.setState({
-                messages: [],
-                utilStatus: 'idle',
-                utilMessage: null,
-                selection: null,
-                isPicking: false,
-            });
-            return;
+    handleSessionChange = (newId: string | null) => {
+        if (!newId) {
+            // Should we just set active null?
+            return; // managed primarily by switchSession
         }
 
         // Fetch session data
-        this.fetchSession(activeSessionId).then(() => {
-            // If there is an active version restored, load ITS files instead of the latest
-            const { activeVersion } = this.state;
-            if (activeVersion !== null) {
-                this.previewVersion(activeVersion);
+        this.fetchSession(newId).then(() => {
+            // If there is an active version restored/persisted in the object, load ITS files
+            const session = this.state.sessions[newId];
+            if (session && session.activeVersion !== null) {
+                this.previewVersion(session.activeVersion);
             }
         });
     };
@@ -165,71 +162,101 @@ export default class App extends React.Component<AppProps, AppState> {
 
         this.evtSource.addEventListener('chat-status', (e) => {
             const data = JSON.parse(e.data);
-            const { activeSessionId } = this.state;
+            const { sessionId } = data;
 
-            // Only handle status updates for the active session
-            if (data.sessionId !== activeSessionId) return;
+            this.setState(prevState => {
+                const session = prevState.sessions[sessionId];
+                if (!session) return null; // Update for unknown session? Ignore.
 
-            if (data.status === 'started') {
-                this.setState({
-                    utilStatus: 'busy',
-                    utilMessages: [data.message || 'Thinking...'],
-                    requestStartTime: Date.now(),
-                });
-            } else if (data.status === 'generating') {
-                // Append new status message if it's not effectively empty
-                if (data.message) {
-                    this.setState(prev => ({
-                        utilMessages: [...prev.utilMessages, data.message]
-                    }));
+                const updatedSession = { ...session };
+
+                if (data.status === 'started') {
+                    updatedSession.status = 'busy';
+                    updatedSession.statusMessages = [data.message || 'Thinking...'];
+                    updatedSession.requestStartTime = Date.now();
+                } else if (data.status === 'generating') {
+                    if (data.message) {
+                        updatedSession.statusMessages = [...updatedSession.statusMessages, data.message];
+                    }
+                } else if (data.status === 'completed') {
+                    updatedSession.status = 'idle';
+                    updatedSession.requestStartTime = null;
+                    // Trigger fetch to get latest messages/version
+                    setTimeout(() => this.fetchSession(sessionId), 0);
+                } else if (data.status === 'error') {
+                    updatedSession.status = 'error';
+                    updatedSession.statusMessages = [...updatedSession.statusMessages, data.message || 'Error occurred'];
+                    updatedSession.requestStartTime = null;
                 }
-            } else if (data.status === 'completed') {
-                this.setState({
-                    utilStatus: 'idle',
-                    // Clear start time? Or keep it to show "Took X seconds"?
-                    // User requirement implies showing duration while waiting. 
-                    // Completed means we are done. 
-                    requestStartTime: null
-                });
-                if (activeSessionId) {
-                    this.fetchSession(activeSessionId).then(() => {
-                        const { activeVersion } = this.state;
-                        if (activeVersion !== null) {
-                            this.previewVersion(activeVersion);
-                        }
-                    });
-                }
-            } else if (data.status === 'error') {
-                this.setState({
-                    utilStatus: 'error',
-                    utilMessages: [...this.state.utilMessages, data.message || 'Error occurred'],
-                    requestStartTime: null,
-                });
-            }
+
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [sessionId]: updatedSession
+                    }
+                };
+            });
         });
 
         this.evtSource.addEventListener('session-created', (e) => {
             const data = JSON.parse(e.data);
-            // Avoid adding duplicate if this tab created it (already in state)
-            this.setState((prevState) => {
-                if (prevState.sessions.includes(data.newSessionId)) {
-                    // Even if in sessions, we might need to clear pending status
-                    return {
-                        sessions: prevState.sessions,
-                        groups: prevState.groups,
-                        pendingSessions: prevState.pendingSessions.filter(id => id !== data.newSessionId),
-                    };
+            // Verify if we already have it (e.g. created by this client)
+            this.setState((prevState: Readonly<AppState>) => {
+                if (prevState.sessions[data.newSessionId]) {
+                    // Already exists, just ensure pending status is removed if it was pending
+                    const s = prevState.sessions[data.newSessionId];
+                    if (s.status === 'pending') {
+                        return {
+                            sessions: {
+                                ...prevState.sessions,
+                                [data.newSessionId]: { ...s, status: 'idle', group: data.group ?? 0 }
+                            },
+                            sessionOrder: prevState.sessionOrder
+                        };
+                    }
+                    return null;
                 }
 
-                const newGroups = { ...prevState.groups };
-                if (data.group) {
-                    newGroups[data.newSessionId] = data.group;
-                }
-                return {
-                    sessions: [...prevState.sessions, data.newSessionId],
-                    groups: newGroups,
-                    pendingSessions: prevState.pendingSessions.filter(id => id !== data.newSessionId),
+                // New session from elsewhere
+                const newSession: Session = {
+                    id: data.newSessionId,
+                    status: 'idle',
+                    messages: [],
+                    statusMessages: [],
+                    requestStartTime: null,
+                    currentVersion: 0,
+                    activeVersion: null,
+                    imageGenerationAllowed: true,
+                    selection: null,
+                    isPicking: false,
+                    group: data.group ?? 0
                 };
+
+                // Calculate new order
+                let newOrder = [...prevState.sessionOrder];
+                console.log('[App] session-created', data, 'source:', data.sourceSessionId, 'order:', newOrder);
+
+                if (data.sourceSessionId && data.sourceSessionId !== 'system') {
+                    const sourceIndex = newOrder.indexOf(data.sourceSessionId);
+                    if (sourceIndex !== -1) {
+                        // Insert after source
+                        newOrder.splice(sourceIndex + 1, 0, data.newSessionId);
+                    } else {
+                        // Source not found, append
+                        newOrder.push(data.newSessionId);
+                    }
+                } else {
+                    // System created or no source, append
+                    newOrder.push(data.newSessionId);
+                }
+
+                return {
+                    sessions: { ...prevState.sessions, [data.newSessionId]: newSession },
+                    sessionOrder: newOrder
+                } as Pick<AppState, 'sessions' | 'sessionOrder'>;
+            }, () => {
+                // Fetch the new session history after state update
+                this.fetchSession(data.newSessionId);
             });
         });
     };
@@ -238,10 +265,34 @@ export default class App extends React.Component<AppProps, AppState> {
         try {
             const res = await fetch(`/api/sessions/${id}`);
             const data = await res.json();
-            this.setState({
-                messages: data.history || [],
-                currentVersion: data.currentVersion ?? 0,
-                imageGenerationAllowed: data.imageGenerationAllowed ?? true,
+
+            // Fetch history separately
+            const currentVersion = data.currentVersion ?? 0;
+            const historyRes = await fetch(`/api/sessions/${id}/versions/${currentVersion}/history`);
+            let history = [];
+            if (historyRes.ok) {
+                history = await historyRes.json();
+            } else {
+                console.warn(`Failed to fetch history for session ${id} v${currentVersion}`);
+            }
+
+            this.setState(prevState => {
+                const session = prevState.sessions[id];
+                if (!session) return null; // Should probably create it if missing? For now stick to strict.
+
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [id]: {
+                            ...session,
+                            messages: history,
+                            currentVersion: currentVersion,
+                            imageGenerationAllowed: data.imageGenerationAllowed ?? true,
+                            // If status was pending, now it is definitively idle/ready
+                            status: session.status === 'pending' ? 'idle' : session.status
+                        }
+                    }
+                };
             });
         } catch (error) {
             console.error('Failed to fetch session', error);
@@ -254,31 +305,23 @@ export default class App extends React.Component<AppProps, AppState> {
         if (App.creatingSessionPromise) {
             try {
                 const session = await App.creatingSessionPromise;
-                // If this instance is still mounted (or rather, just run the update), try to update state
-                // Note: If multiple instances await, they all get the same session.
-                // We should check if we already have it?
-                // Actually, just proceeding to setState is fine. React handles dedup if strictly same?
-                // But here we are pushing to array.
-                // We need to avoid adding it twice if this function runs twice on the SAME instance?
-                // But here the issue is TWO instances calls it.
-                // If instance 1 calls it, makes promise.
-                // Instance 2 calls it, awaits promise.
-                // Promise resolves.
-                // Instance 1 updates state (warns if unmounted).
-                // Instance 2 updates state (works).
-                // Result: 1 session in state. Correct.
                 this.handleSessionCreated(session);
                 return;
             } catch (e) {
-                // If failed, maybe try again?
                 App.creatingSessionPromise = null;
             }
         }
 
         try {
+            // Optimistic creation in UI?
+            // User might want to see "Creating..." immediately. 
+            // We can check if we want to show a temporary loader or just wait.
+            // Previous code used 'pendingSessions' array. 
+            // We can't really add a session to the map without an ID yet.
+            // So we wait for the ID from server.
+
             App.creatingSessionPromise = fetch('/api/sessions', { method: 'POST' }).then(res => res.json());
             const session = await App.creatingSessionPromise;
-            // Clear promise so future calls (e.g. user manually creating) make new ones
             App.creatingSessionPromise = null;
 
             this.handleSessionCreated(session);
@@ -288,26 +331,51 @@ export default class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    handleSessionCreated = (session: any) => {
+    handleSessionCreated = (sessionData: any, sourceSessionId?: string) => {
         this.setState((prevState) => {
-            // Even if it exists (e.g. from SSE), we should switch to it if this was a user action
-            const exists = prevState.sessions.includes(session.id);
+            const exists = prevState.sessions[sessionData.id];
+
             if (exists) {
-                return {
-                    activeSessionId: session.id,
-                } as any;
+                // Just switch to it
+                return { activeSessionId: sessionData.id } as any;
+            }
+
+            const newSession: Session = {
+                id: sessionData.id,
+                status: 'idle', // Ready to use
+                messages: [],
+                statusMessages: [],
+                requestStartTime: null,
+                currentVersion: sessionData.currentVersion ?? 0,
+                activeVersion: null,
+                imageGenerationAllowed: sessionData.imageGenerationAllowed ?? true,
+                selection: null,
+                isPicking: false,
+                group: sessionData.group ?? 0
+            };
+
+            // Calculate new order
+            let newOrder = [...prevState.sessionOrder];
+
+            // Use provided sourceSessionId or try to infer from data if available (though usually not in API response)
+            const sourceId = sourceSessionId || (sessionData.sourceSessionId);
+
+            if (sourceId && sourceId !== 'system') {
+                const sourceIndex = newOrder.indexOf(sourceId);
+                if (sourceIndex !== -1) {
+                    // Insert after source
+                    newOrder.splice(sourceIndex + 1, 0, sessionData.id);
+                } else {
+                    newOrder.push(sessionData.id);
+                }
+            } else {
+                newOrder.push(sessionData.id);
             }
 
             return {
-                sessions: [...prevState.sessions, session.id],
-                // Auto-activate immediately (it will show loader because it is pending)
-                activeSessionId: session.id,
-                currentVersion: session.currentVersion ?? 0,
-                imageGenerationAllowed: session.imageGenerationAllowed ?? true,
-                groups: session.group !== undefined
-                    ? { ...prevState.groups, [session.id]: session.group }
-                    : prevState.groups,
-                pendingSessions: [...prevState.pendingSessions, session.id],
+                sessions: { ...prevState.sessions, [sessionData.id]: newSession },
+                sessionOrder: newOrder,
+                activeSessionId: sessionData.id,
             };
         });
     };
@@ -324,7 +392,8 @@ export default class App extends React.Component<AppProps, AppState> {
             );
             if (!res.ok) throw new Error('Clone version failed');
             const session = await res.json();
-            this.handleSessionCreated(session);
+            // Pass the activeSessionId as the source
+            this.handleSessionCreated(session, activeSessionId);
         } catch (error) {
             console.error('Failed to clone version', error);
         }
@@ -334,84 +403,81 @@ export default class App extends React.Component<AppProps, AppState> {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
-        // If clicking same version, maybe toggle off? Or just reload.
-        // For now, let's load it.
-
-        try {
-            this.setState((prevState) => ({
-                activeVersion: version,
-                utilStatus: 'busy',
-                activeVersions: {
-                    ...prevState.activeVersions,
-                    [activeSessionId]: version,
-                },
-            }));
-
-            this.setState({
-                utilStatus: 'idle',
-            });
-        } catch (error) {
-            console.error('Failed to preview version', error);
-            this.setState({ utilStatus: 'error' });
-        }
+        // Optimistic update
+        this.updateSession(activeSessionId, {
+            activeVersion: version,
+            // status? Preview doesn't really block interaction, but maybe show loading?
+            // Previous code set utilStatus='busy' then 'idle'. 
+        });
     };
 
+    updateSession(id: string, updates: Partial<Session>) {
+        this.setState(prev => ({
+            sessions: {
+                ...prev.sessions,
+                [id]: { ...prev.sessions[id], ...updates }
+            }
+        }));
+    }
+
     switchSession = (id: string) => {
-        const nextVersion = this.state.activeVersions[id] ?? null;
-        this.setState({ activeSessionId: id, activeVersion: nextVersion });
+        this.setState({ activeSessionId: id }, () => {
+            this.handleSessionChange(id);
+        });
     };
 
     removeSession = (id: string) => {
+        const wasActive = this.state.activeSessionId === id;
         this.setState((prevState) => {
-            const index = prevState.sessions.indexOf(id);
+            const index = prevState.sessionOrder.indexOf(id);
             if (index === -1) return null;
 
-            const newSessions = prevState.sessions.filter((s) => s !== id);
+            const newOrder = prevState.sessionOrder.filter((s) => s !== id);
+            // Create new sessions map without the key
+            const { [id]: removed, ...newSessions } = prevState.sessions;
+
             let newActiveId = prevState.activeSessionId;
 
             if (prevState.activeSessionId === id) {
-                if (newSessions.length === 0) {
+                if (newOrder.length === 0) {
                     newActiveId = null;
                 } else if (index > 0) {
-                    // Activate left neighbor (which is at index-1 in newSessions because 
-                    // the removed element was at 'index', so 0..index-1 are same)
-                    // Wait, if we remove 'index', elements 0 to index-1 are unchanged.
-                    // So newSessions[index-1] is the correct left neighbor.
-                    // Example: [A, B, C], remove B (1). new: [A, C]. index-1=0 -> A. Correct.
-                    newActiveId = newSessions[index - 1];
+                    newActiveId = newOrder[index - 1];
                 } else {
-                    // Was first element, activate new first (original second)
-                    newActiveId = newSessions[0];
+                    newActiveId = newOrder[0];
                 }
             }
 
             return {
                 sessions: newSessions,
+                sessionOrder: newOrder,
                 activeSessionId: newActiveId,
             };
+        }, () => {
+            if (wasActive && this.state.activeSessionId) {
+                this.handleSessionChange(this.state.activeSessionId);
+            }
         });
     };
 
     sendMessage = async (text: string) => {
-        const { activeSessionId, selection } = this.state;
+        const { activeSessionId, sessions } = this.state;
         if (!activeSessionId) return;
+        const session = sessions[activeSessionId];
+        if (!session) return;
 
-        // selection object to send
-        const selectionData = selection ? { selector: selection } : undefined;
+        const selectionData = session.selection ? { selector: session.selection } : undefined;
 
-        this.setState((prevState) => ({
-            utilStatus: 'busy',
+        // Optimistic update
+        this.updateSession(activeSessionId, {
+            status: 'busy',
             messages: [
-                ...prevState.messages,
-                { role: 'user', content: text, selection: selectionData },
+                ...session.messages,
+                { role: 'user', content: text, selection: selectionData }
             ],
-            selection: null, // Clear selection after sending
-            activeVersion: null, // Reset to follow latest
-            activeVersions: {
-                ...prevState.activeVersions,
-                [activeSessionId]: null,
-            },
-        }));
+            selection: null, // Clear selection
+            activeVersion: null // Reset time travel
+        });
 
         try {
             await fetch(`/api/sessions/${activeSessionId}/chat`, {
@@ -423,55 +489,15 @@ export default class App extends React.Component<AppProps, AppState> {
                 }),
             });
         } catch (e) {
-            this.setState({ utilStatus: 'error' });
+            this.updateSession(activeSessionId, { status: 'error' });
         }
-    };
-
-    startPicking = () => {
-        const previewInstance = this.previewRef.current;
-        if (!previewInstance) return;
-
-        const iframe = previewInstance.getIframe();
-        if (!iframe) {
-            alert('Preview not ready');
-            return;
-        }
-
-        this.setState({ isPicking: true });
-        this.picker.start(iframe, (selector) => {
-            this.setState({ selection: selector, isPicking: false });
-        });
-    };
-
-    stopPicking = () => {
-        this.picker.stop();
-        this.setState({ isPicking: false });
-    };
-
-    restoreSelection = (selector: string) => {
-        const previewInstance = this.previewRef.current;
-        if (!previewInstance) return;
-        const iframe = previewInstance.getIframe();
-        if (!iframe) {
-            alert('Preview not ready');
-            return;
-        }
-
-        this.picker.selectBySelector(iframe, selector);
-        this.setState({ selection: selector });
-    };
-
-    clearSelection = () => {
-        this.picker.clearSelection();
-        this.setState({ selection: null });
     };
 
     toggleImageGeneration = async (allowed: boolean) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
-        // Optimistic update
-        this.setState({ imageGenerationAllowed: allowed });
+        this.updateSession(activeSessionId, { imageGenerationAllowed: allowed });
 
         try {
             await fetch(`/api/sessions/${activeSessionId}/settings`, {
@@ -481,99 +507,74 @@ export default class App extends React.Component<AppProps, AppState> {
             });
         } catch (error) {
             console.error('Failed to update session settings', error);
-            // Revert on failure? 
-            // For now, let's assume it works or next fetch corrects it.
         }
     };
+
+
 
     render() {
         const {
             sessions,
+            sessionOrder,
             activeSessionId,
-            messages,
-            utilStatus,
-            selection,
-            isPicking,
-            pendingSessions,
+            isConnected
         } = this.state;
 
-        const isPending = activeSessionId ? pendingSessions.includes(activeSessionId) : false;
 
+
+        // Derive props for SessionBar
         const statusMap: Record<string, string> = {};
-        if (activeSessionId) {
-            statusMap[activeSessionId] = utilStatus;
-        }
+        const groups: Record<string, number> = {};
+        const pendingSessions: string[] = [];
 
-        const currentVersion = this.state.activeVersion ?? this.state.currentVersion;
-        const nextVersionMsg = this.state.messages.find(
-            (m) =>
-                typeof m.version === 'number' && m.version > currentVersion,
-        );
-        // If there is a message with a higher version, use its date as cutoff.
-        // Otherwise (we are at latest or no newer version exists), pass null/undefined to show all.
-        const maxDate = nextVersionMsg ? nextVersionMsg.createdAt : undefined;
+        sessionOrder.forEach(id => {
+            const s = sessions[id];
+            if (s) {
+                statusMap[id] = s.status;
+                groups[id] = s.group;
+                if (s.status === 'pending') pendingSessions.push(id);
+            }
+        });
+
+
+
+
 
         return (
             <div className={styles.app}>
                 <div className={styles.sessionBarWrapper}>
                     <SessionBar
-                        sessions={sessions}
-                        activeSessionId={this.state.activeSessionId}
+                        sessions={sessionOrder}
+                        activeSessionId={activeSessionId}
                         onSwitch={this.switchSession}
                         onCreate={this.createSession}
                         onRemove={this.removeSession}
-                        statusMap={Object.fromEntries(
-                            this.state.sessions.map((id) => [
-                                id,
-                                id === this.state.activeSessionId
-                                    ? this.state.utilStatus
-                                    : 'idle',
-                            ]),
-                        )}
-                        groups={this.state.groups}
-                        pendingSessions={this.state.pendingSessions}
-                        isConnected={this.state.isConnected}
+                        statusMap={statusMap}
+                        groups={groups}
+                        pendingSessions={pendingSessions}
+                        isConnected={isConnected}
                     />
                 </div>
 
-
-
                 {
-                    isPending ? (
-                        <div className={styles.mainLoader}>
-                            <div className={styles.spinner}></div>
-                            <div>Creating session...</div>
-                        </div>
-                    ) : (
-                        <>
-                            <Chat
-                                messages={messages}
+                    sessionOrder.map(sessionId => {
+                        const session = sessions[sessionId];
+                        if (!session) return null;
+                        const isVisible = sessionId === activeSessionId;
+
+                        return (
+                            <WorkSession
+                                key={sessionId}
+                                session={session}
+                                isVisible={isVisible}
                                 onSend={this.sendMessage}
-                                status={utilStatus}
-                                statusMessages={this.state.utilMessages}
-                                startTime={this.state.requestStartTime}
-                                onPickElement={this.startPicking}
-                                onCancelPick={this.stopPicking}
-                                selection={selection}
-                                isPicking={isPicking}
-                                onClearSelection={this.clearSelection}
-                                onSelectChip={this.restoreSelection}
+                                onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
                                 onCloneVersion={this.cloneVersion}
-                                activeVersion={this.state.activeVersion}
                                 onPreviewVersion={this.previewVersion}
-                                disabled={!activeSessionId}
-                                imageGenerationAllowed={this.state.imageGenerationAllowed}
                                 onToggleImageGeneration={this.toggleImageGeneration}
                             />
-
-                            <Preview
-                                ref={this.previewRef}
-                                sessionId={activeSessionId}
-                                version={currentVersion}
-                                maxDate={maxDate}
-                            />
-                        </>
-                    )
+                        );
+                    })
                 }
             </div>
         );
