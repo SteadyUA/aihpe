@@ -27,7 +27,8 @@ import fs from 'fs';
 import { ChatService } from '../services/ChatService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
-import { ChatAttachment } from '../types/chat';
+
+import { ChatAttachment, LlmProvider } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
 
 class ScreenshotAttachmentRequest {
@@ -133,7 +134,6 @@ export class ChatController {
             history: [],
             files: {}, // Empty/Minimal files for client compliance if needed
             updatedAt: new Date().toISOString(),
-            imageGenerationAllowed: true, // Default
         });
     }
 
@@ -142,7 +142,7 @@ export class ChatController {
     @Post('/api/sessions/:sessionId/chat')
     sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; selection?: { selector: string } },
+        @Body() body: { message: string; selection?: { selector: string }, provider?: LlmProvider },
     ) {
         return this.chatService.handleUserMessage(
             sessionId,
@@ -150,6 +150,7 @@ export class ChatController {
             [],
             true, // allowVariants
             body.selection,
+            body.provider,
         );
     }
 
@@ -158,48 +159,21 @@ export class ChatController {
         const snapshot =
             this.sessionStore.snapshot(sessionId) ??
             this.sessionStore.getOrCreate(sessionId);
+
+        const history = this.sessionStore.getAllHistory(sessionId) || [];
+
         return {
             id: snapshot.id,
-            // files and history removed. Fetch files via static routes and history via history route.
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
             currentTurn: snapshot.lastTurn ?? 0,
-            imageGenerationAllowed: snapshot.imageGenerationAllowed ?? true,
+            provider: snapshot.provider ?? 'openai',
+            history,
         };
     }
 
-    @Get('/api/sessions/:sessionId/history')
-    getHistory(
-        @Param('sessionId') sessionId: string,
-        @Res() response: Response,
-    ) {
-        const history = this.sessionStore.getAllHistory(sessionId);
-        if (!history) {
-            return response.status(404).json({ message: 'History not found' });
-        }
-        return history;
-    }
 
-    @Post('/api/sessions/:sessionId/settings')
-    updateSettings(
-        @Param('sessionId') sessionId: string,
-        @Body() body: { imageGenerationAllowed: boolean },
-    ) {
-        const updated = this.sessionStore.updateImageGenerationAllowed(
-            sessionId,
-            body.imageGenerationAllowed,
-        );
-        return {
-            id: updated.id,
-            files: updated.files,
-            history: updated.history,
-            updatedAt: updated.updatedAt.toISOString(),
-            group: updated.group,
-            currentVersion: updated.currentVersion,
-            imageGenerationAllowed: updated.imageGenerationAllowed,
-        };
-    }
 
     @Delete('/api/sessions/:sessionId')
     deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {

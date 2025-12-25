@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, SessionData, SessionFiles } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
@@ -19,7 +19,7 @@ type PersistedSession = {
     group?: number;
     currentVersion?: number;
     lastTurn?: number;
-    imageGenerationAllowed?: boolean;
+    provider?: LlmProvider;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -151,7 +151,7 @@ export class SessionStore {
             group: source.group,
             currentVersion: source.currentVersion,
             lastTurn: source.lastTurn,
-            imageGenerationAllowed: source.imageGenerationAllowed,
+            provider: source.provider,
         };
 
         clearPersistedSessionData(targetId);
@@ -247,7 +247,7 @@ export class SessionStore {
             group: source.group,
             currentVersion: targetVersion,
             lastTurn: normalizedTurn,
-            imageGenerationAllowed: true, // Reset or copy? Resetting seems safer for a "fork".
+            provider: source.provider, // Copy provider settings
         };
 
         clearPersistedSessionData(targetId);
@@ -372,15 +372,15 @@ export class SessionStore {
             group: group ?? Math.floor(Math.random() * 12),
             currentVersion: 0,
             lastTurn: 0,
-            imageGenerationAllowed: true,
+            provider: 'openai', // Default provider
         };
     }
 
-    updateImageGenerationAllowed(sessionId: string, allowed: boolean): SessionData {
+    updateProvider(sessionId: string, provider: LlmProvider): SessionData {
         const session = this.getOrCreate(sessionId);
         const updated: SessionData = {
             ...session,
-            imageGenerationAllowed: allowed,
+            provider,
             updatedAt: new Date(),
         };
         this.sessions.set(sessionId, updated);
@@ -704,7 +704,7 @@ export class SessionStore {
                 group: parsed.group ?? 0,
                 currentVersion,
                 lastTurn: parsed.lastTurn ?? 0,
-                imageGenerationAllowed: parsed.imageGenerationAllowed ?? true, // Default to true if missing
+                provider: parsed.provider ?? 'openai',
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -778,7 +778,7 @@ export class SessionStore {
                 group: session.group,
                 currentVersion: session.currentVersion,
                 lastTurn: session.lastTurn,
-                imageGenerationAllowed: session.imageGenerationAllowed,
+                provider: session.provider,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1025,6 +1025,6 @@ function cloneSession(session: SessionData): SessionData {
         group: session.group,
         currentVersion: session.currentVersion,
         lastTurn: session.lastTurn,
-        imageGenerationAllowed: session.imageGenerationAllowed,
+        provider: session.provider,
     };
 }

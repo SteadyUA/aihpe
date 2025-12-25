@@ -2,13 +2,14 @@ import React from 'react';
 import { marked } from 'marked';
 import classNames from 'classnames';
 import { ElementPicker } from './ElementPicker';
-import { UiCheckbox } from './UiCheckbox';
+import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 
 marked.setOptions({ breaks: true });
 
-import { MessageData } from '../types';
+marked.setOptions({ breaks: true });
+import { MessageData, LlmProvider } from '../types';
 
 interface MessageProps {
     msg: MessageData;
@@ -181,8 +182,9 @@ interface ChatProps {
     onPreviewTurn?: (turn: number) => void;
     activeTurn?: number | null;
     disabled?: boolean;
-    imageGenerationAllowed?: boolean;
-    onToggleImageGeneration?: (allowed: boolean) => void;
+
+    provider?: LlmProvider;
+    onProviderChange?: (provider: LlmProvider) => void;
     onUndo?: () => Promise<{ restoredInput?: string } | void>;
 }
 
@@ -296,8 +298,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             activeTurn,
             onPreviewTurn,
             disabled,
-            imageGenerationAllowed,
-            onToggleImageGeneration
+
+            provider,
+            onProviderChange,
         } = this.props;
         const { input, elapsedSeconds } = this.state;
 
@@ -419,12 +422,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <div
                         className={styles.formActions}
                     >
-                        {onToggleImageGeneration && (
-                            <UiCheckbox
-                                checked={imageGenerationAllowed ?? true}
-                                onChange={onToggleImageGeneration}
-                                label="Image Gen"
-                                title="Enable/Disable image generation"
+                        {onProviderChange && (
+                            <ProviderSelector
+                                value={provider}
+                                onChange={onProviderChange}
                                 disabled={disabled || status === 'busy'}
                                 className={styles.imageToggle}
                             />

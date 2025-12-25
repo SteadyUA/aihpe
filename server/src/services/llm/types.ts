@@ -7,7 +7,6 @@ export interface GeneratePageRequest {
     conversation: ChatMessage[];
     attachments?: ChatAttachment[];
     allowVariants?: boolean;
-    imageGenerationAllowed?: boolean;
     currentVersion: number;
     onProgress?: (chunk: string) => void;
 }

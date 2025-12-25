@@ -2,6 +2,7 @@ import React from 'react';
 import classNames from 'classnames';
 import Editor from '@monaco-editor/react';
 import { UiCheckbox } from './UiCheckbox';
+import { UiDropdown } from './UiDropdown';
 import styles from './Preview.module.css';
 
 // Define IDisposable locally to avoid deep import issues
@@ -16,6 +17,7 @@ interface PreviewProps {
     turn: number;
     activeTab: TabType;
     onTabChange?: (tab: TabType) => void;
+    onLoad?: () => void;
 }
 
 interface ImageMetadata {
@@ -167,6 +169,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 }
             }
             this.preservedScroll = null;
+        }
+        if (this.props.onLoad) {
+            this.props.onLoad();
         }
     };
 
@@ -417,8 +422,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         window.open(url, '_blank');
     };
 
-    handleDeviceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        this.setState({ deviceIndex: Number(e.target.value) });
+    handleDeviceChange = (value: string) => {
+        this.setState({ deviceIndex: Number(value) });
     };
 
     toggleMobile = (checked: boolean) => {
@@ -648,18 +653,17 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 onChange={this.toggleMobile}
                                 label="Mobile"
                             />
-                            <select
-                                className={styles.deviceSelect}
-                                disabled={!isMobile}
-                                value={deviceIndex}
-                                onChange={this.handleDeviceChange}
-                            >
-                                {DEVICES.map((d, i) => (
-                                    <option key={d.name} value={i}>
-                                        {d.name} ({d.width}×{d.height})
-                                    </option>
-                                ))}
-                            </select>
+                            {isMobile && (
+                                <UiDropdown
+                                    className={styles.deviceSelect}
+                                    value={String(deviceIndex)}
+                                    onChange={this.handleDeviceChange}
+                                    options={DEVICES.map((d, i) => ({
+                                        value: String(i),
+                                        label: `${d.name} (${d.width}×${d.height})`
+                                    }))}
+                                />
+                            )}
                         </div>
                         <div className={styles.actions}>
                             <button

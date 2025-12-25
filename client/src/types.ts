@@ -8,6 +8,8 @@ export interface MessageData {
     selection?: { selector: string };
 }
 
+export type LlmProvider = 'openai' | 'google';
+
 export interface Session {
     id: string;
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
@@ -19,7 +21,7 @@ export interface Session {
     activeTurn: number | null;
     activeTab: TabType;
 
-    imageGenerationAllowed: boolean;
+    provider?: LlmProvider;
     pendingRefreshTurn: number | null;
 
     // UI selections per session

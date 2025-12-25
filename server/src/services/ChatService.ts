@@ -1,5 +1,5 @@
 import { Inject, Service } from 'typedi';
-import { ChatAttachment, ChatMessage, SessionData } from '../types/chat';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionData } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
@@ -24,6 +24,7 @@ export class ChatService {
         attachments: ChatAttachment[] = [],
         allowVariants: boolean = true,
         selection?: { selector: string },
+        provider?: LlmProvider,
     ): Promise<ChatResult> {
         const trimmed = userMessage.trim();
         const normalizedAttachments = this.normalizeAttachments(attachments);
@@ -45,6 +46,14 @@ export class ChatService {
             };
         }
 
+        // Update provider if specified and different
+        if (provider) {
+            this.sessionStore.updateProvider(sessionId, provider);
+        }
+
+        // Reload session data after potential update
+        const currentSessionData = this.sessionStore.getOrCreate(sessionId);
+
         // 1. Append user message immediately
         const userContentForHistory = this.composeUserContent(
             trimmed,
@@ -52,7 +61,7 @@ export class ChatService {
         );
         const now = new Date();
         // Determine turn: User message starts a new turn
-        const currentTurn = session.lastTurn ?? 0;
+        const currentTurn = currentSessionData.lastTurn ?? 0;
         const newTurn = currentTurn + 1;
 
         const userMessageEntry: ChatMessage = {
@@ -60,7 +69,7 @@ export class ChatService {
             content: userContentForHistory,
             createdAt: now,
             selection,
-            version: session.currentVersion,
+            version: currentSessionData.currentVersion,
             turn: newTurn,
         };
 
@@ -69,13 +78,13 @@ export class ChatService {
             content: this.enrichContentWithSelection(userContentForHistory, selection),
             createdAt: now,
             selection,
-            version: session.currentVersion,
+            version: currentSessionData.currentVersion,
             turn: newTurn,
         };
 
         this.sessionStore.upsert(sessionId, {
-            history: [...session.history, userMessageEntry],
-            context: [...session.context, contextEntry],
+            history: [...currentSessionData.history, userMessageEntry],
+            context: [...currentSessionData.context, contextEntry],
             lastTurn: newTurn, // Update lastTurn
             updatedAt: now,
         });
@@ -106,16 +115,15 @@ export class ChatService {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
             let thoughtBuffer = '';
 
-            const client = this.llmFactory.getClient();
+            const client = this.llmFactory.getClient(currentSessionData.provider);
             const generation = await client.generatePage({
                 sessionId,
                 instructions: effectiveInstructions,
-                files: session.files,
+                files: currentSessionData.files,
                 conversation,
                 attachments: normalizedAttachments,
                 allowVariants,
-                imageGenerationAllowed: session.imageGenerationAllowed ?? true,
-                currentVersion: session.currentVersion,
+                currentVersion: currentSessionData.currentVersion,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {

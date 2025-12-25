@@ -15,6 +15,8 @@ export interface ChatMessage {
     createdAt: Date;
 }
 
+export type LlmProvider = 'openai' | 'google';
+
 export interface SessionData {
     id: string;
     files: SessionFiles;
@@ -24,7 +26,7 @@ export interface SessionData {
     group: number;
     currentVersion: number;
     lastTurn?: number;
-    imageGenerationAllowed?: boolean;
+    provider?: LlmProvider;
 }
 
 export interface ScreenshotAttachment {

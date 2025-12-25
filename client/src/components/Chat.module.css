@@ -231,35 +231,43 @@
     font-family: var(--font-sans);
     font-size: 0.95rem;
     resize: none;
-    margin-bottom: 8px;
-    transition: border-color 0.2s;
+    background: var(--secondary);
+    color: var(--text-primary);
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chatForm textarea:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
 }
 
 .formActions {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    margin-top: 8px;
 }
 
 .submitButton {
-    background: var(--accent);
+    background: var(--accent-primary);
     color: white;
     border: none;
-    padding: 0.5rem 1rem;
+    padding: 6px 1rem;
     border-radius: 6px;
     font-weight: 500;
+    line-height: 16px;
     cursor: pointer;
     transition: background 0.2s;
 }
 
 .submitButton:hover {
     background: var(--accent-hover);
+}
+
+.submitButton:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
 }
 
 .submitButton:disabled {

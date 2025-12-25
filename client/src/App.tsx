@@ -9,7 +9,7 @@ import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
 import { withRouter, RouterProps } from './components/withRouter';
-import { Session, TabType } from './types';
+import { Session, TabType, LlmProvider } from './types';
 
 interface AppProps extends RouterProps { }
 
@@ -55,9 +55,10 @@ class App extends React.Component<AppProps, AppState> {
                         requestStartTime: null,
                         currentTurn: 0,
                         activeTurn: null,
+
                         activeTab: 'preview',
-                        imageGenerationAllowed: true,
                         selection: null,
+                        provider: 'openai', // Default to openai locally until fetched? Or just optional
                         isPicking: false,
                         pendingRefreshTurn: null,
                         group: groups[id] ?? 0 // Default to 0 if missing from store
@@ -336,10 +337,11 @@ class App extends React.Component<AppProps, AppState> {
                     requestStartTime: null,
                     currentTurn: 0,
                     activeTurn: null,
+
                     activeTab: 'preview',
-                    imageGenerationAllowed: true,
                     selection: null,
                     isPicking: false,
+                    provider: 'openai',
                     group: data.group ?? 0,
                     pendingRefreshTurn: null
                 };
@@ -378,18 +380,11 @@ class App extends React.Component<AppProps, AppState> {
             const res = await fetch(`/api/sessions/${id}`);
             const data = await res.json();
 
-            // Fetch history separately
+            // Fetch history is now included in the main session endpoint
             // New API always returns full history, no version needed
-            const historyRes = await fetch(`/api/sessions/${id}/history`);
-            let history = [];
+            const history = data.history || [];
             // Use currentTurn directly from API
             const lastTurn = data.currentTurn ?? 0;
-
-            if (historyRes.ok) {
-                history = await historyRes.json();
-            } else {
-                console.warn(`Failed to fetch history for session ${id}`);
-            }
 
             this.setState(prevState => {
                 const session = prevState.sessions[id];
@@ -405,7 +400,7 @@ class App extends React.Component<AppProps, AppState> {
                             ...session,
                             messages: history,
                             currentTurn: lastTurn,
-                            imageGenerationAllowed: data.imageGenerationAllowed ?? true,
+                            provider: data.provider ?? 'openai',
                             // If status was pending or unloaded, now it is definitively idle/ready
                             status: (session.status === 'pending' || session.status === 'unloaded') ? 'idle' : session.status,
                             // Set pendingRefreshTurn only if completion triggered this fetch
@@ -468,10 +463,11 @@ class App extends React.Component<AppProps, AppState> {
                 requestStartTime: null,
                 currentTurn: sessionData.currentTurn ?? 0,
                 activeTurn: null,
+
                 activeTab: 'preview',
-                imageGenerationAllowed: sessionData.imageGenerationAllowed ?? true,
                 selection: null,
                 isPicking: false,
+                provider: sessionData.provider ?? 'openai',
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null
             };
@@ -664,6 +660,7 @@ class App extends React.Component<AppProps, AppState> {
                 body: JSON.stringify({
                     message: text,
                     selection: selectionData,
+                    provider: session.provider,
                 }),
             });
         } catch (e) {
@@ -671,21 +668,11 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    toggleImageGeneration = async (allowed: boolean) => {
+    handleProviderChange = async (provider: LlmProvider) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
-        this.updateSession(activeSessionId, { imageGenerationAllowed: allowed });
-
-        try {
-            await fetch(`/api/sessions/${activeSessionId}/settings`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageGenerationAllowed: allowed }),
-            });
-        } catch (error) {
-            console.error('Failed to update session settings', error);
-        }
+        this.updateSession(activeSessionId, { provider });
     };
 
 
@@ -755,7 +742,8 @@ class App extends React.Component<AppProps, AppState> {
                                 onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
                                 onCloneTurn={this.cloneTurn}
                                 onPreviewTurn={this.previewTurn}
-                                onToggleImageGeneration={this.toggleImageGeneration}
+
+                                onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
                             />
                         );

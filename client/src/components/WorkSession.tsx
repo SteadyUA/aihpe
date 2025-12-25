@@ -1,7 +1,7 @@
 import React from 'react';
 import { Chat } from './Chat';
 import { Preview } from './Preview';
-import { Session } from '../types';
+import { Session, LlmProvider } from '../types';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
@@ -11,7 +11,8 @@ interface WorkSessionProps {
     onUpdateSession: (updates: Partial<Session>) => void;
     onCloneTurn: (turn: number) => void;
     onPreviewTurn: (turn: number) => void;
-    onToggleImageGeneration: (allowed: boolean) => void;
+
+    onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
 }
 
@@ -31,17 +32,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.stopPicking();
         } else if (!prevProps.isVisible && this.props.isVisible && this.props.session.selection) {
             // Became visible -> restore selection
-            const selector = this.props.session.selection;
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 100);
+            // We interpret visibility change as "show existing iframe", so we try to restore immediately.
+            // If the iframe reloads upon becoming visible, onLoad will also fire, which is fine (redundant but harmless).
+            this.visualizeSelection(this.props.session.selection);
         }
 
         // 2. Handle Turn Switch
         const prevTurn = prevProps.session.activeTurn ?? prevProps.session.currentTurn;
         const currentTurn = this.props.session.activeTurn ?? this.props.session.currentTurn;
+        const turnChanged = prevTurn !== currentTurn;
 
-        if (prevTurn !== currentTurn) {
+        if (turnChanged) {
             this.stopPicking();
         }
 
@@ -54,24 +55,23 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.props.onUpdateSession({ pendingRefreshTurn: null });
         }
 
-        // 4. Handle Selection Restoration (e.g. after Undo)
+        // 4. Handle Selection Restoration (e.g. after Undo or Picking)
         if (this.props.session.selection && this.props.session.selection !== prevProps.session.selection) {
-            const selector = this.props.session.selection;
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 500);
+            // If selection changed WITHOUT a turn change or tab change, we must update manually.
+            // If turn/tab changed, the iframe will reload and trigger onLoad, so we don't need to do anything here.
+            const tabChanged = prevProps.session.activeTab !== this.props.session.activeTab;
+
+            if (!turnChanged && !tabChanged) {
+                this.visualizeSelection(this.props.session.selection);
+            }
         }
 
         // 5. Handle Tab Switch Side Effects
         if (prevProps.session.activeTab !== this.props.session.activeTab) {
             if (this.props.session.activeTab !== 'preview') {
                 this.stopPicking();
-            } else if (this.props.session.selection) {
-                const selector = this.props.session.selection;
-                setTimeout(() => {
-                    this.visualizeSelection(selector);
-                }, 100);
             }
+            // If switching TO preview, iframe reloads -> onLoad handles restoration
         }
     }
 
@@ -84,31 +84,10 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.picker.selectBySelector(iframe, selector);
     };
 
-    handlePreviewTabChange = (_tab: any) => {
-        // 3. Handle Preview Tab Switch
-        // Logic moved to bubbling up state, but side effects like stopping picking are handled in DidUpdate or here?
-        // Since we update session state, DidUpdate will catch it?
-        // Actually, let's keep side effects here before state update or react to state update.
-        // But we are bubbling state update via onUpdateSession.
-
-        // Let's rely on componentDidUpdate monitoring session.activeTab!
-        // Wait, componentDidUpdate in WorkSession monitors props changes?
-        // We haven't implemented that yet.
-
-        // Existing logic was:
-        /*
-        if (tab !== 'preview') {
-            this.stopPicking();
-        } else if (this.props.session.selection) {
-            // Restore selection if returning to preview
-            const selector = this.props.session.selection;
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 100);
+    handlePreviewLoad = () => {
+        if (this.props.session.selection) {
+            this.visualizeSelection(this.props.session.selection);
         }
-        */
-        // We can simply remove this method and inline the state update in render, 
-        // AND add a check in componentDidUpdate for activeTab change.
     };
 
     componentWillUnmount() {
@@ -154,7 +133,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onSend,
             onCloneTurn,
             onPreviewTurn,
-            onToggleImageGeneration,
+
+            onProviderChange,
             onUndo
         } = this.props;
 
@@ -209,8 +189,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onCloneTurn={onCloneTurn}
                     activeTurn={session.activeTurn}
                     onPreviewTurn={onPreviewTurn}
-                    imageGenerationAllowed={session.imageGenerationAllowed ?? true}
-                    onToggleImageGeneration={onToggleImageGeneration}
+
+                    provider={session.provider}
+                    onProviderChange={onProviderChange}
                     onUndo={onUndo}
                 />
 
@@ -220,6 +201,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     turn={currentTurn}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
+                    onLoad={this.handlePreviewLoad}
                 />
             </div>
         );
