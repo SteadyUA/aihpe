@@ -2,6 +2,7 @@ import React from 'react';
 import classNames from 'classnames';
 import Editor from '@monaco-editor/react';
 import { UiCheckbox } from './UiCheckbox';
+import { UiButton } from './UiButton';
 import { UiDropdown } from './UiDropdown';
 import styles from './Preview.module.css';
 
@@ -666,8 +667,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             )}
                         </div>
                         <div className={styles.actions}>
-                            <button
-                                className={styles.action}
+                            <UiButton
+                                variant="secondary"
+                                size="icon"
                                 onClick={this.handleNewWindow}
                                 title="Open in new window"
                             >
@@ -685,9 +687,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                     <polyline points="15 3 21 3 21 9"></polyline>
                                     <line x1="10" y1="14" x2="21" y2="3"></line>
                                 </svg>
-                            </button>
-                            <button
-                                className={styles.action}
+                            </UiButton>
+                            <UiButton
+                                variant="secondary"
+                                size="icon"
                                 onClick={this.handleDownload}
                                 title="Download ZIP"
                             >
@@ -705,7 +708,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                     <polyline points="7 10 12 15 17 10"></polyline>
                                     <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
-                            </button>
+                            </UiButton>
                         </div>
                     </div>
 

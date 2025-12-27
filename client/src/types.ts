@@ -19,6 +19,13 @@ export interface ImageAttachment {
 
 export type ChatAttachment = ImageAttachment;
 
+export interface UnsentData {
+    input?: string | null;
+    attachment?: ChatAttachment | null;
+    selection?: string | null;
+    provider?: LlmProvider | null;
+}
+
 export type LlmProvider = 'openai' | 'google';
 
 export interface Session {
@@ -39,6 +46,8 @@ export interface Session {
     selection: string | null;
     attachment?: ChatAttachment;
     isPicking: boolean;
+
+    unsent?: UnsentData;
 
     group: number;
 }

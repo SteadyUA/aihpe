@@ -1,5 +1,7 @@
 import React from 'react';
 import styles from './ElementPicker.module.css';
+import { UiButton } from './UiButton';
+import { UiTarget } from './UiTarget';
 
 export interface ElementPickerProps {
     /** The currently selected element selector, if any */
@@ -35,10 +37,9 @@ export class ElementPicker extends React.Component<ElementPickerProps> {
         if (selection) {
             return (
                 <div className={containerClass}>
-                    <div className={styles.selectionBanner}>
+                    <UiTarget onRemove={onClear} removeTitle="Clear selection" disabled={disabled}>
                         <code className={styles.selectionValue}>{selection}</code>
-                        <button type="button" onClick={onClear} className={styles.clearButton} title="Clear selection">×</button>
-                    </div>
+                    </UiTarget>
                 </div>
             );
         }
@@ -46,29 +47,27 @@ export class ElementPicker extends React.Component<ElementPickerProps> {
         return (
             <div className={containerClass}>
                 {isPicking ? (
-                    <button
+                    <UiButton
                         type="button"
-                        className={styles.pickerButton}
+                        variant="danger"
                         onClick={onCancel}
                         title="Cancel selection"
-                        style={{
-                            borderColor: 'var(--danger)',
-                            color: 'var(--danger)',
-                        }}
                         disabled={disabled}
+                        className={styles.pickerButtonFull}
                     >
                         <span>Cancel Selection</span>
-                    </button>
+                    </UiButton>
                 ) : (
-                    <button
+                    <UiButton
                         type="button"
-                        className={styles.pickerButton}
+                        variant="secondary"
                         onClick={onPick}
                         title="Select an element in preview"
                         disabled={disabled}
+                        className={styles.pickerButtonFull}
                     >
                         <span>Pick Element</span>
-                    </button>
+                    </UiButton>
                 )}
             </div>
         );

@@ -229,43 +229,14 @@
     margin-bottom: 8px;
 }
 
-.uploadButton {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    cursor: pointer;
-    padding: 6px;
-    color: var(--text-secondary);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
 
-.uploadButton:hover:not(:disabled) {
-    background-color: var(--hover-color);
-    color: var(--text-primary);
-}
-
-.uploadButton:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
 
 /* ElementPicker internal container or button should target this if needed, 
    but since ElementPicker is a component, we rely on it having a container/button that we can style here or pass class to.
    Assuming ElementPicker renders a container/button. If it has a wrapper div, we target it. 
 */
 /* Hack: If ElementPicker renders a div/button directly in toolbar */
-.toolbar> :global(.element-picker-trigger),
-.toolbar>button:not(.uploadButton) {
-    /* Assuming ElementPicker uses a button or similar */
-    flex: 1;
-    /* Grow to fill space */
-}
+
 
 .elementPicker {
     flex: 1;
@@ -280,21 +251,7 @@
     /* Stack if multiple, but single limit enforced */
     width: 100%;
     margin-bottom: 8px;
-}
-
-.attachmentPreview {
-    position: relative;
-    border-radius: 4px;
-    overflow: hidden;
-    border: 1px solid var(--border-color);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    background: #f0f0f0;
-    /* Check contrast with theme */
-    padding: 1rem;
-    /* Add breathing room */
+    max-height: 160px;
 }
 
 .imagePreview,
@@ -303,32 +260,10 @@
     /* 3:4 aspect ratio handled by image or container? */
     /* Set max dimensions to keep it reasonable while centered */
     max-width: 100%;
-    max-height: 300px;
+    max-height: 150px;
     object-fit: contain;
     /* Ensure full image is visible */
     background: transparent;
-}
-
-.removeAttachment {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    background: rgba(0, 0, 0, 0.5);
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 16px;
-    height: 16px;
-    font-size: 10px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-}
-
-.removeAttachment:hover {
-    background: rgba(0, 0, 0, 0.8);
 }
 
 .attachmentName {
@@ -340,8 +275,8 @@
 .messageThumbnail {
     display: block;
     margin-top: 8px;
-    max-width: 200px;
-    max-height: 200px;
+    max-width: 150px;
+    max-height: 150px;
     border-radius: 4px;
     border: 1px solid var(--border-color);
     cursor: pointer;
@@ -379,50 +314,9 @@
     margin-top: 8px;
 }
 
-.submitButton {
-    background: var(--accent-primary);
-    color: white;
-    border: none;
-    padding: 6px 1rem;
-    border-radius: 6px;
-    font-weight: 500;
-    line-height: 16px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
 
-.submitButton:hover {
-    background: var(--accent-hover);
-}
 
-.submitButton:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
-}
 
-.submitButton:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.secondaryButton {
-    background: white;
-    border: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.secondaryButton:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
 
 
 

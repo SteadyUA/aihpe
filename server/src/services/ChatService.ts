@@ -91,6 +91,7 @@ export class ChatService {
             context: [...currentSessionData.context, contextEntry],
             lastTurn: newTurn, // Update lastTurn
             updatedAt: now,
+            unsent: undefined // Clear unsent data as we just sent it
         });
 
         this.notifyStatus(sessionId, 'started', 'Thinking...');
@@ -466,17 +467,7 @@ export class ChatService {
         message: string,
         attachment?: ChatAttachment,
     ): string {
-        const base = message.trim();
-        if (!attachment) {
-            return base;
-        }
-
-        const attachmentLine = `[Вложение: image ${attachment.originalName || attachment.filename}]`;
-
-        if (base) {
-            return `${base}\n\n${attachmentLine}`;
-        }
-        return attachmentLine;
+        return message.trim();
     }
 
     private appendAssistantMessage(

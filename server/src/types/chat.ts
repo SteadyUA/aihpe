@@ -28,6 +28,7 @@ export interface SessionData {
     currentVersion: number;
     lastTurn?: number;
     provider?: LlmProvider;
+    unsent?: UnsentData;
 }
 
 export interface ImageAttachment {
@@ -40,3 +41,10 @@ export interface ImageAttachment {
 }
 
 export type ChatAttachment = ImageAttachment;
+
+export interface UnsentData {
+    input?: string;
+    attachment?: ChatAttachment;
+    selection?: string;
+    provider?: LlmProvider;
+}

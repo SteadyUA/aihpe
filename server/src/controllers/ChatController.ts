@@ -31,7 +31,7 @@ import { ChatService } from '../services/ChatService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
 
-import { ChatAttachment, LlmProvider } from '../types/chat';
+import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
 
 class AttachmentRequest {
@@ -82,6 +82,25 @@ class ChatRequest {
     @ValidateNested()
     @Type(() => SelectionRequest)
     selection?: SelectionRequest;
+}
+
+class UnsentDataRequest {
+    @IsOptional()
+    @IsString()
+    input?: string;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => AttachmentRequest)
+    attachment?: AttachmentRequest;
+
+    @IsOptional()
+    @IsString()
+    selection?: string;
+
+    @IsOptional()
+    @IsString()
+    provider?: LlmProvider;
 }
 
 @Service()
@@ -143,6 +162,43 @@ export class ChatController {
     }
 
 
+
+    @Post('/api/sessions/:sessionId/unsent')
+    saveUnsent(
+        @Param('sessionId') sessionId: string,
+        @Body() body: UnsentDataRequest,
+    ) {
+        const session = this.sessionStore.getOrCreate(sessionId);
+
+        // Filter out undefined values from body to ensure we don't overwrite existing data with undefined
+        // This is crucial for partial updates (e.g. saving input shouldn't clear selection)
+        // Initialize updates using the Current state (avoiding spread in the final upsert)
+        const updates: Partial<UnsentDataRequest> = { ...(session.unsent || {}) };
+
+        // Define a helper or just check each field. 
+        // If value is null, remove it from updates (clearing the field).
+        // If value is defined (and not null), update it.
+        // If value is undefined, ignore (preserve existing).
+
+        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider'];
+
+        for (const field of fields) {
+            const value = body[field];
+            if (value !== undefined) {
+                if (value === null) {
+                    delete updates[field];
+                } else {
+                    updates[field] = value as any;
+                }
+            }
+        }
+
+        this.sessionStore.upsert(sessionId, {
+            unsent: updates
+        });
+
+        return { status: 'saved' };
+    }
 
     @Post('/api/sessions/:sessionId/chat')
     sendMessage(
@@ -289,6 +345,7 @@ export class ChatController {
             currentTurn: snapshot.lastTurn ?? 0,
             provider: snapshot.provider ?? 'openai',
             history,
+            unsent: snapshot.unsent,
         };
     }
 

@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, LlmProvider, SessionData, SessionFiles } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -20,6 +20,7 @@ type PersistedSession = {
     currentVersion?: number;
     lastTurn?: number;
     provider?: LlmProvider;
+    unsent?: UnsentData;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -262,7 +263,7 @@ export class SessionStore {
     undoLastTurn(sessionId: string): {
         success: boolean;
         restoredInput?: string;
-        restoredSelection?: { selector: string };
+        restoredSelection?: string;
         previousTurn?: number;
     } {
         const session = this.getOrCreate(sessionId);
@@ -336,6 +337,12 @@ export class SessionStore {
             currentVersion: targetVersion,
             lastTurn: currentTurn - 1,
             updatedAt: new Date(),
+            unsent: {
+                ...session.unsent,
+                input: restoredInput,
+                selection: restoredSelection?.selector, // Extract selector string
+                attachment: userMessage?.attachment,
+            }
         };
 
         this.sessions.set(sessionId, updated);
@@ -344,7 +351,7 @@ export class SessionStore {
         return {
             success: true,
             restoredInput,
-            restoredSelection: restoredSelection ? { selector: restoredSelection.selector } : undefined,
+            restoredSelection: restoredSelection?.selector,
             previousTurn: currentTurn - 1
         };
     }
@@ -373,6 +380,7 @@ export class SessionStore {
             currentVersion: 0,
             lastTurn: 0,
             provider: 'openai', // Default provider
+            unsent: {},
         };
     }
 
@@ -705,6 +713,7 @@ export class SessionStore {
                 currentVersion,
                 lastTurn: parsed.lastTurn ?? 0,
                 provider: parsed.provider ?? 'openai',
+                unsent: parsed.unsent ?? {},
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -779,6 +788,7 @@ export class SessionStore {
                 currentVersion: session.currentVersion,
                 lastTurn: session.lastTurn,
                 provider: session.provider,
+                unsent: session.unsent,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1026,5 +1036,6 @@ function cloneSession(session: SessionData): SessionData {
         currentVersion: session.currentVersion,
         lastTurn: session.lastTurn,
         provider: session.provider,
+        unsent: session.unsent ? { ...session.unsent } : undefined,
     };
 }

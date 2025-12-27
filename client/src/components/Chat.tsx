@@ -2,9 +2,12 @@ import React from 'react';
 import { marked } from 'marked';
 import classNames from 'classnames';
 import { ElementPicker } from './ElementPicker';
+import { UiButton } from './UiButton';
+import { UiTarget } from './UiTarget';
 import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
+
 
 marked.setOptions({ breaks: true });
 
@@ -58,9 +61,7 @@ class Message extends React.Component<MessageProps> {
             [styles.dimmed]: isDimmed,
         });
 
-        // Filter out attachment text from content for display
-        // Regex to match [Вложение: type name]
-        const contentWithoutAttachments = msg.content.replace(/\[Вложение: image [^\]]+\]/g, '').trim();
+
 
         return (
             <div
@@ -85,16 +86,17 @@ class Message extends React.Component<MessageProps> {
                     )}
 
                     {/* Render Text Content */}
-                    {(contentWithoutAttachments || (!msg.attachment && isUser)) && (
+                    {/* Render Text Content */}
+                    {(msg.content || (!msg.attachment && isUser)) && (
                         isAssistant ? (
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: marked.parse(contentWithoutAttachments || msg.content) as string,
+                                    __html: marked.parse(msg.content) as string,
                                 }}
                             />
                         ) : (
-                            <div className="message-text">{contentWithoutAttachments || msg.content}</div>
+                            <div className="message-text">{msg.content}</div>
                         )
                     )}
 
@@ -213,6 +215,8 @@ interface ChatProps {
     onUpload?: (file: File) => Promise<ChatAttachment>;
     attachment?: ChatAttachment;
     onAttachmentChange?: (attachment?: ChatAttachment) => void;
+    unsentInput?: string;
+    onSaveUnsent?: (data: { input?: string | null }) => void;
 }
 
 interface ChatState {
@@ -239,6 +243,12 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             elapsedSeconds: 0,
             showUndoConfirmation: false,
         };
+        if (props.unsentInput) {
+            this.state = {
+                ...this.state,
+                input: props.unsentInput
+            };
+        }
         this.messagesEndRef = React.createRef();
         this.fileInputRef = React.createRef();
     }
@@ -259,6 +269,17 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         if (prevProps.startTime !== this.props.startTime || prevProps.status !== this.props.status) {
             this.updateTimer();
+        }
+
+        if (prevProps.unsentInput !== this.props.unsentInput && this.props.unsentInput !== undefined) {
+            // Only update if it's different and not just undefined (or maybe blank string is valid)
+            // Beware of overriding user input if they are typing?
+            // Usually unsentInput updates come from LOAD or UNDO.
+            // If local input is different?
+            // Let's assume unsentInput prop is the truth from server/store.
+            if (this.props.unsentInput !== this.state.input) {
+                this.setState({ input: this.props.unsentInput });
+            }
         }
     }
 
@@ -382,6 +403,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onSelectChip,
         } = this.props;
         const { input, elapsedSeconds, isUploading, isLoading } = this.state;
+        const isFormDisabled = status === 'busy' || disabled;
 
         let effectiveActiveTurn = activeTurn;
         if (
@@ -481,22 +503,14 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     {/* Attachment Preview (Above Toolbar) */}
                     {attachment && (
                         <div className={styles.attachmentList}>
-                            <div className={styles.attachmentPreview}>
+                            <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
                                 <img
                                     src={attachment.url}
                                     alt={attachment.originalName || attachment.filename}
                                     className={styles.imagePreview}
                                     title={attachment.originalName || attachment.filename}
                                 />
-                                <button
-                                    type="button"
-                                    className={styles.removeAttachment}
-                                    onClick={this.removeAttachment}
-                                    title="Remove attachment"
-                                >
-                                    ✕
-                                </button>
-                            </div>
+                            </UiTarget>
                         </div>
                     )}
 
@@ -511,11 +525,12 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     onChange={this.handleFileChange}
                                     accept="image/*"
                                 />
-                                <button
+                                <UiButton
                                     type="button"
-                                    className={styles.uploadButton}
+                                    variant="secondary"
+                                    size="icon"
                                     onClick={() => this.fileInputRef.current?.click()}
-                                    disabled={disabled || isUploading || !!attachment} // Disable if attachment exists
+                                    disabled={isFormDisabled || isUploading || !!attachment} // Disable if attachment exists
                                     title={!!attachment ? "Only one attachment allowed" : "Attach image"}
                                 >
                                     {isUploading ? (
@@ -534,7 +549,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                             <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                                         </svg>
                                     )}
-                                </button>
+                                </UiButton>
                             </>
                         )}
 
@@ -544,7 +559,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                             onPick={onPickElement}
                             onCancel={onCancelPick}
                             onClear={onClearSelection}
-                            disabled={disabled}
+                            disabled={isFormDisabled}
                             className={styles.elementPicker}
                         />
                     </div>
@@ -552,10 +567,15 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <textarea
                         value={input}
                         onChange={this.handleInputChange}
-                        placeholder={disabled ? "Create a session to start chatting..." : "Describe changes..."}
+                        placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
                         rows={4}
-                        disabled={disabled}
+                        disabled={isFormDisabled}
                         tabIndex={1}
+                        onBlur={() => {
+                            if (this.props.onSaveUnsent) {
+                                this.props.onSaveUnsent({ input: this.state.input });
+                            }
+                        }}
                     />
                     <div
                         className={styles.formActions}
@@ -564,18 +584,18 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                             <ProviderSelector
                                 value={provider}
                                 onChange={onProviderChange}
-                                disabled={disabled || isLoading || isUploading}
+                                disabled={isFormDisabled || isLoading || isUploading}
                                 className={styles.imageToggle}
                             />
                         )}
-                        <button
+                        <UiButton
                             type="submit"
-                            disabled={status === 'busy' || disabled}
-                            className={styles.submitButton}
+                            variant="primary"
+                            disabled={isFormDisabled}
                             tabIndex={2}
                         >
                             Send
-                        </button>
+                        </UiButton>
                     </div>
                 </form>
 

@@ -16,6 +16,8 @@ interface WorkSessionProps {
     onUndo?: () => Promise<any>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
+    unsentInput?: string;
+    onSaveUnsent?: (data: { input?: string }) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -139,7 +141,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onProviderChange,
             onUndo,
             onUpload,
-            onAttachmentChange
+            onAttachmentChange,
+            unsentInput,
+            onSaveUnsent
         } = this.props;
 
         if (session.status === 'pending' || session.status === 'unloaded') {
@@ -200,6 +204,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onUpload={onUpload}
                     attachment={session.attachment}
                     onAttachmentChange={onAttachmentChange}
+                    unsentInput={unsentInput}
+                    onSaveUnsent={onSaveUnsent}
                 />
 
                 <Preview

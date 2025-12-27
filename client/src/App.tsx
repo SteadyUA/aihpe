@@ -61,7 +61,8 @@ class App extends React.Component<AppProps, AppState> {
                         provider: 'openai', // Default to openai locally until fetched? Or just optional
                         isPicking: false,
                         pendingRefreshTurn: null,
-                        group: groups[id] ?? 0 // Default to 0 if missing from store
+                        group: groups[id] ?? 0, // Default to 0 if missing from store
+                        unsent: {} // Default empty unsent
                     };
                 });
 
@@ -291,7 +292,7 @@ class App extends React.Component<AppProps, AppState> {
                 } else if (data.status === 'completed') {
                     updatedSession.status = 'idle';
                     updatedSession.requestStartTime = null;
-                    updatedSession.requestStartTime = null;
+
                     // Trigger fetch to get latest messages/turn
                     setTimeout(() => this.fetchSession(sessionId, true), 0);
                 } else if (data.status === 'error') {
@@ -343,7 +344,8 @@ class App extends React.Component<AppProps, AppState> {
                     isPicking: false,
                     provider: 'openai',
                     group: data.group ?? 0,
-                    pendingRefreshTurn: null
+                    pendingRefreshTurn: null,
+                    unsent: {}
                 };
 
                 // Calculate new order
@@ -400,11 +402,18 @@ class App extends React.Component<AppProps, AppState> {
                             ...session,
                             messages: history,
                             currentTurn: lastTurn,
-                            provider: data.provider ?? 'openai',
+
                             // If status was pending or unloaded, now it is definitively idle/ready
                             status: (session.status === 'pending' || session.status === 'unloaded') ? 'idle' : session.status,
                             // Set pendingRefreshTurn only if completion triggered this fetch
-                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn
+                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,
+                            unsent: data.unsent || session.unsent || {},
+
+                            // Restore unsent state if present and currently empty/default
+                            selection: (data.unsent?.selection) ?? session.selection,
+                            attachment: (data.unsent?.attachment) ?? session.attachment,
+                            // Use unsent provider if available, otherwise data.provider (from session), otherwise 'openai'
+                            provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                         }
                     }
                 };
@@ -469,7 +478,8 @@ class App extends React.Component<AppProps, AppState> {
                 isPicking: false,
                 provider: sessionData.provider ?? 'openai',
                 group: sessionData.group ?? 0,
-                pendingRefreshTurn: null
+                pendingRefreshTurn: null,
+                unsent: sessionData.unsent ?? {}
             };
 
             // Calculate new order
@@ -535,8 +545,64 @@ class App extends React.Component<AppProps, AppState> {
                 ...prev.sessions,
                 [id]: { ...prev.sessions[id], ...updates }
             }
-        }));
+        }), () => {
+            // Auto-save triggers
+            if (updates.selection !== undefined) {
+                // Pass null to clear if updates.selection is null/empty, otherwise value
+                this.handleSaveUnsent(id, { selection: updates.selection ? updates.selection : null });
+            }
+        });
     }
+
+    handleSaveUnsent = async (sessionId?: string, data?: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null }) => {
+        const targetId = sessionId || this.state.activeSessionId;
+        if (!targetId || !data) return;
+
+        // Optimistic update of unsent in state
+        this.setState(prev => {
+            const session = prev.sessions[targetId];
+            if (!session) return null;
+
+            // Helper to merge unsent data: if val is null, remove key. if val is undefined, keep. if val defined, update.
+            const currentUnsent = { ...(session.unsent || {}) };
+            if (data.input !== undefined) {
+                if (data.input === null) delete currentUnsent.input;
+                else currentUnsent.input = data.input;
+            }
+            if (data.attachment !== undefined) {
+                if (data.attachment === null) delete currentUnsent.attachment;
+                else currentUnsent.attachment = data.attachment;
+            }
+            if (data.selection !== undefined) {
+                if (data.selection === null) delete currentUnsent.selection;
+                else currentUnsent.selection = data.selection;
+            }
+            if (data.provider !== undefined) {
+                if (data.provider === null) delete currentUnsent.provider;
+                else currentUnsent.provider = data.provider;
+            }
+
+            return {
+                sessions: {
+                    ...prev.sessions,
+                    [targetId]: {
+                        ...session,
+                        unsent: currentUnsent
+                    }
+                }
+            };
+        });
+
+        try {
+            await fetch(`/api/sessions/${targetId}/unsent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } catch (e) {
+            console.error('Failed to save unsent data', e);
+        }
+    };
 
     handleUndo = async () => {
         const { activeSessionId } = this.state;
@@ -550,7 +616,7 @@ class App extends React.Component<AppProps, AppState> {
             if (data.success) {
                 // If there's a selection restored, update it locally immediately so UI reflects it
                 if (data.restoredSelection) {
-                    this.updateSession(activeSessionId, { selection: data.restoredSelection.selector });
+                    this.updateSession(activeSessionId, { selection: data.restoredSelection });
                 }
 
                 // Fetch updated session state (history, versions, etc.)
@@ -644,10 +710,7 @@ class App extends React.Component<AppProps, AppState> {
 
         const selectionData = session.selection ? { selector: session.selection } : undefined;
 
-        let optimisticContent = text;
-        if (attachment) {
-            optimisticContent += '\n\n' + `[Вложение: image ${attachment.originalName || attachment.filename}]`;
-        }
+        const optimisticContent = text;
 
         // Optimistic update
         this.updateSession(activeSessionId, {
@@ -679,6 +742,26 @@ class App extends React.Component<AppProps, AppState> {
                 }),
             });
             this.updateSession(activeSessionId, { attachment: undefined }); // Clear attachment
+            // Explicitly clear unsent data via API or handled by server?
+            // Server ChatService should clear it.
+            // Client state should also be cleared to reflect that.
+            // But if we want to be safe, we can clear it locally.
+            // However, ChatService handles it.
+            // Wait, if we rely on ChatService clearing it, we need to know WHEN it's cleared.
+            // Since we receive SSE status updates, maybe we don't need to manually clear unsent here if we fetch?
+            // But to be responsive, we should clear it.
+            this.setState(prev => {
+                const s = prev.sessions[activeSessionId];
+                return {
+                    sessions: {
+                        ...prev.sessions,
+                        [activeSessionId]: {
+                            ...s,
+                            unsent: undefined
+                        }
+                    }
+                };
+            });
         } catch (e) {
             this.updateSession(activeSessionId, { status: 'error' });
         }
@@ -715,6 +798,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) return;
 
         this.updateSession(activeSessionId, { attachment });
+        this.handleSaveUnsent(activeSessionId, { attachment: attachment ?? null });
     };
 
     handleProviderChange = async (provider: LlmProvider) => {
@@ -722,6 +806,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) return;
 
         this.updateSession(activeSessionId, { provider });
+        this.handleSaveUnsent(activeSessionId, { provider });
     };
 
 
@@ -796,6 +881,8 @@ class App extends React.Component<AppProps, AppState> {
                                 onUndo={this.handleUndo}
                                 onUpload={this.handleUpload}
                                 onAttachmentChange={this.handleAttachmentChange}
+                                unsentInput={session.unsent?.input ?? undefined}
+                                onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
                             />
                         );
                     })
