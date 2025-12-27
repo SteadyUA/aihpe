@@ -7,9 +7,12 @@ import {
     Post,
     Req,
     Res,
+    UseBefore,
 } from 'routing-controllers';
 import { Request, Response } from 'express';
+import multer from 'multer';
 import archiver from 'archiver';
+import crypto from 'crypto';
 import {
     IsArray,
     IsIn,
@@ -31,24 +34,41 @@ import { SessionStore } from '../services/session/SessionStore';
 import { ChatAttachment, LlmProvider } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
 
-class ScreenshotAttachmentRequest {
+class AttachmentRequest {
     @IsString()
     @IsNotEmpty()
-    @IsIn(['screenshot'])
-    type!: 'screenshot';
+    @IsIn(['screenshot', 'image'])
+    type!: 'screenshot' | 'image';
 
     @IsOptional()
     @IsString()
     id?: string;
 
+    @ValidateIf((o) => o.type === 'screenshot')
     @IsString()
     @IsNotEmpty()
-    selector!: string;
+    selector?: string;
 
+    @ValidateIf((o) => o.type === 'screenshot')
     @IsString()
     @IsNotEmpty()
     @Matches(/^data:image\/[a-z0-9.+-]+;base64,/i)
-    dataUrl!: string;
+    dataUrl?: string;
+
+    @ValidateIf((o) => o.type === 'image')
+    @IsString()
+    @IsOptional()
+    originalName?: string;
+
+    @ValidateIf((o) => o.type === 'image')
+    @IsString()
+    @IsNotEmpty()
+    filename?: string;
+
+    @ValidateIf((o) => o.type === 'image')
+    @IsString()
+    @IsNotEmpty()
+    url?: string;
 }
 
 class SelectionRequest {
@@ -70,8 +90,8 @@ class ChatRequest {
     @IsOptional()
     @IsArray()
     @ValidateNested({ each: true })
-    @Type(() => ScreenshotAttachmentRequest)
-    attachments?: ScreenshotAttachmentRequest[];
+    @Type(() => AttachmentRequest)
+    attachments?: AttachmentRequest[];
 
     @IsOptional()
     @ValidateNested()
@@ -142,16 +162,130 @@ export class ChatController {
     @Post('/api/sessions/:sessionId/chat')
     sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; selection?: { selector: string }, provider?: LlmProvider },
+        @Body() body: { message: string; attachments?: any[]; selection?: { selector: string }, provider?: LlmProvider },
     ) {
         return this.chatService.handleUserMessage(
             sessionId,
             body.message,
-            [],
+            body.attachments || [],
             true, // allowVariants
             body.selection,
             body.provider,
         );
+    }
+
+    @Post('/api/sessions/:sessionId/images')
+    async uploadImage(
+        @Param('sessionId') sessionId: string,
+        @Req() req: Request,
+        @Res() res: Response,
+    ) {
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const uploadDir = path.join(sessionRoot, safeId, 'uploads');
+
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        const storage = multer.diskStorage({
+            destination: (req, file, cb) => {
+                cb(null, uploadDir);
+            },
+            filename: (req, file, cb) => {
+                const ext = path.extname(file.originalname);
+                const uniqueName = crypto.randomUUID() + ext;
+                cb(null, uniqueName);
+            },
+        });
+
+        const upload = multer({ storage: storage }).single('file');
+
+        return new Promise((resolve, reject) => {
+            upload(req, res, (err) => {
+                if (err) {
+                    console.error('File upload failed', err);
+                    return resolve(
+                        res.status(500).json({ message: 'File upload failed' }),
+                    );
+                }
+                if (!req.file) {
+                    return resolve(
+                        res.status(400).json({ message: 'No file provided' }),
+                    );
+                }
+
+                // Metadata handling
+                const metadataPath = path.join(uploadDir, 'uploads.json');
+                let metadata: Record<string, any> = {};
+                try {
+                    if (fs.existsSync(metadataPath)) {
+                        const content = fs.readFileSync(metadataPath, 'utf-8');
+                        metadata = JSON.parse(content);
+                    }
+                } catch (e) {
+                    console.error('Failed to read uploads metadata', e);
+                }
+
+                metadata[req.file.filename] = {
+                    originalName: req.file.originalname,
+                    timestamp: Date.now(),
+                    mimeType: req.file.mimetype,
+                    size: req.file.size
+                };
+
+                try {
+                    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+                } catch (e) {
+                    console.error('Failed to write uploads metadata', e);
+                }
+
+                const fileUrl = `/api/sessions/${sessionId}/uploads/${req.file.filename}`;
+                resolve(
+                    res.json({
+                        filename: req.file.filename,
+                        url: fileUrl,
+                        type: 'image',
+                        originalName: req.file.originalname,
+                    }),
+                );
+            });
+        });
+    }
+
+    @Get('/api/sessions/:sessionId/uploads/:filename')
+    getUploadedFile(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        // Sanitize
+        if (!/^[a-zA-Z0-9-_\. \(\)]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const filePath = path.join(sessionRoot, safeId, 'uploads', filename);
+
+        if (fs.existsSync(filePath)) {
+            const ext = path.extname(filename).toLowerCase();
+            let contentType = 'application/octet-stream';
+            if (ext === '.png') contentType = 'image/png';
+            if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+            if (ext === '.gif') contentType = 'image/gif';
+            if (ext === '.webp') contentType = 'image/webp';
+
+            response.setHeader('Content-Type', contentType);
+            return fs.createReadStream(filePath);
+        }
+
+        console.log(`[getUploadedFile] File not found: ${filePath}`);
+        return response.status(404).send('File not found');
     }
 
     @Get('/api/sessions/:sessionId')

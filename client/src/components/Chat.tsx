@@ -9,7 +9,7 @@ import { ConfirmationModal } from './ConfirmationModal';
 marked.setOptions({ breaks: true });
 
 marked.setOptions({ breaks: true });
-import { MessageData, LlmProvider } from '../types';
+import { MessageData, LlmProvider, ChatAttachment } from '../types';
 
 interface MessageProps {
     msg: MessageData;
@@ -53,10 +53,14 @@ class Message extends React.Component<MessageProps> {
             [styles.user]: isUser,
             [styles.assistant]: isAssistant,
             [styles.system]: isSystem,
-            [styles.hasVersion]: hasTurn, // Keep class name for CSS compatibility or rename? styles.hasVersion likely refers to appearance
+            [styles.hasVersion]: hasTurn,
             [styles.activeVersion]: isActiveTurn,
             [styles.dimmed]: isDimmed,
         });
+
+        // Filter out attachment text from content for display
+        // Regex to match [Вложение N: type name]
+        const contentWithoutAttachments = msg.content.replace(/\[Вложение \d+: (image|screenshot) [^\]]+\]/g, '').trim();
 
         return (
             <div
@@ -79,15 +83,38 @@ class Message extends React.Component<MessageProps> {
                             {msg.selection.selector}
                         </div>
                     )}
-                    {isAssistant ? (
-                        <div
-                            className="message-text"
-                            dangerouslySetInnerHTML={{
-                                __html: marked.parse(msg.content) as string,
-                            }}
-                        />
-                    ) : (
-                        <div className="message-text">{msg.content}</div>
+
+                    {/* Render Text Content */}
+                    {(contentWithoutAttachments || (!msg.attachments?.length && isUser)) && (
+                        isAssistant ? (
+                            <div
+                                className="message-text"
+                                dangerouslySetInnerHTML={{
+                                    __html: marked.parse(contentWithoutAttachments || msg.content) as string,
+                                }}
+                            />
+                        ) : (
+                            <div className="message-text">{contentWithoutAttachments || msg.content}</div>
+                        )
+                    )}
+
+                    {/* Render Attachments as Thumbnails */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                        <div className={styles.messageAttachments}>
+                            {msg.attachments.map((att, i) => (
+                                <img
+                                    key={i}
+                                    src={att.type === 'screenshot' ? att.dataUrl : att.url}
+                                    alt={att.type === 'screenshot' ? 'Screenshot' : (att.originalName || att.filename)}
+                                    className={styles.messageThumbnail}
+                                    title={att.type === 'screenshot' ? 'Screenshot' : (att.originalName || att.filename)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(att.type === 'screenshot' ? att.dataUrl : att.url, '_blank');
+                                    }}
+                                />
+                            ))}
+                        </div>
                     )}
 
                 </div>
@@ -167,7 +194,7 @@ class Message extends React.Component<MessageProps> {
 
 interface ChatProps {
     messages: MessageData[];
-    onSend: (text: string) => void;
+    onSend: (text: string, attachments?: ChatAttachment[]) => void;
     status: string;
     statusMessages?: string[]; // Renamed from statusMessage, now array
     startTime?: number | null; // For timer
@@ -186,26 +213,37 @@ interface ChatProps {
     provider?: LlmProvider;
     onProviderChange?: (provider: LlmProvider) => void;
     onUndo?: () => Promise<{ restoredInput?: string } | void>;
+    onUpload?: (file: File) => Promise<ChatAttachment>;
+    attachments?: ChatAttachment[];
+    onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
 }
 
 interface ChatState {
+    isLoading: boolean;
+    error: string | null;
     input: string;
     elapsedSeconds: number;
     showUndoConfirmation: boolean;
+    isUploading: boolean;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
+    private fileInputRef: React.RefObject<HTMLInputElement | null>;
     private timerInterval: any = null;
 
     constructor(props: ChatProps) {
         super(props);
         this.state = {
+            isLoading: false,
+            error: null,
             input: '',
+            isUploading: false,
             elapsedSeconds: 0,
             showUndoConfirmation: false,
         };
         this.messagesEndRef = React.createRef();
+        this.fileInputRef = React.createRef();
     }
 
     componentDidMount() {
@@ -274,13 +312,64 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (this.props.disabled) return;
-        if (!this.state.input.trim()) return;
-        this.props.onSend(this.state.input);
-        this.setState({ input: '' });
+
+        const hasText = this.state.input.trim().length > 0;
+        // Optimistically update history?
+        // Actually App.tsx handles message sending.
+        // We just call onSend.
+        // Attachments are in App state now.
+
+        if (this.state.input.trim() || (this.props.attachments && this.props.attachments.length > 0)) {
+            this.props.onSend(this.state.input, this.props.attachments);
+            this.setState({ input: '' });
+            // Clear attachments after sending
+            if (this.props.onAttachmentsChange) {
+                this.props.onAttachmentsChange([]);
+            }
+        }
     };
 
     handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         this.setState({ input: e.target.value });
+    };
+
+    handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (
+            e.target.files &&
+            e.target.files.length > 0 &&
+            this.props.onUpload
+        ) {
+            const file = e.target.files[0];
+            this.setState({ isUploading: true });
+            if (this.props.onUpload) {
+                try {
+                    const attachment = await this.props.onUpload(file);
+                    // Single file limit: Replace any existing attachments
+                    if (this.props.onAttachmentsChange) {
+                        this.props.onAttachmentsChange([attachment]);
+                    }
+                } catch (error) {
+                    console.error('Upload failed', error);
+                } finally {
+                    this.setState({ isUploading: false });
+                }
+            } else {
+                // Fallback if no upload handler (shouldn't happen with current setup but good for robust component)
+                this.setState({ isUploading: false });
+            }
+            // Reset input
+            if (this.fileInputRef.current) {
+                this.fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    removeAttachment = (indexToRemove: number) => {
+        const currentAttachments = this.props.attachments || [];
+        const newAttachments = currentAttachments.filter((_, i) => i !== indexToRemove);
+        if (this.props.onAttachmentsChange) {
+            this.props.onAttachmentsChange(newAttachments);
+        }
     };
 
     render() {
@@ -292,19 +381,21 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onCancelPick,
             selection,
             isPicking,
-            onClearSelection,
-            onSelectChip,
-            onCloneTurn,
             activeTurn,
+            onCloneTurn,
             onPreviewTurn,
             disabled,
-
             provider,
             onProviderChange,
+            onUpload,
+            attachments,
+            // Restore missing ones
+            onClearSelection,
+            onSelectChip,
         } = this.props;
-        const { input, elapsedSeconds } = this.state;
+        const { input, elapsedSeconds, isUploading, isLoading } = this.state;
 
-        // Logic to determine dimmed state
+        const effectiveAttachments = attachments || [];
         let effectiveActiveTurn = activeTurn;
         if (
             effectiveActiveTurn === null ||
@@ -399,17 +490,80 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 </div>
 
                 <form className={styles.chatForm} onSubmit={this.handleSubmit}>
-                    {/* Toolbar above input */}
 
-                    {/* Toolbar above input */}
-                    <ElementPicker
-                        selection={selection ?? null}
-                        isPicking={isPicking}
-                        onPick={onPickElement}
-                        onCancel={onCancelPick}
-                        onClear={onClearSelection}
-                        disabled={disabled}
-                    />
+                    {/* Attachment Preview (Above Toolbar) */}
+                    {effectiveAttachments.length > 0 && (
+                        <div className={styles.attachmentList}>
+                            {effectiveAttachments.map((att, i) => (
+                                <div key={i} className={styles.attachmentPreview}>
+                                    <img
+                                        src={att.type === 'screenshot' ? att.dataUrl : att.url}
+                                        alt={att.type === 'screenshot' ? 'Скриншот' : (att.originalName || att.filename)}
+                                        className={att.type === 'screenshot' ? styles.screenshotPreview : styles.imagePreview}
+                                        title={att.type === 'screenshot' ? 'Скриншот' : (att.originalName || att.filename)}
+                                    />
+                                    <button
+                                        type="button"
+                                        className={styles.removeAttachment}
+                                        onClick={() => this.removeAttachment(i)}
+                                        title="Remove attachment"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Toolbar */}
+                    {/* Toolbar */}
+                    <div className={styles.toolbar}>
+                        {onUpload && (
+                            <>
+                                <input
+                                    type="file"
+                                    ref={this.fileInputRef}
+                                    style={{ display: 'none' }}
+                                    onChange={this.handleFileChange}
+                                    accept="image/*"
+                                />
+                                <button
+                                    type="button"
+                                    className={styles.uploadButton}
+                                    onClick={() => this.fileInputRef.current?.click()}
+                                    disabled={disabled || isUploading || effectiveAttachments.length >= 1} // Disable if 1 attachment exists
+                                    title={effectiveAttachments.length >= 1 ? "Only one attachment allowed" : "Attach image"}
+                                >
+                                    {isUploading ? (
+                                        <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
+                                    ) : (
+                                        <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        >
+                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                        </svg>
+                                    )}
+                                </button>
+                            </>
+                        )}
+
+                        <ElementPicker
+                            selection={selection ?? null}
+                            isPicking={isPicking}
+                            onPick={onPickElement}
+                            onCancel={onCancelPick}
+                            onClear={onClearSelection}
+                            disabled={disabled}
+                            className={styles.elementPicker}
+                        />
+                    </div>
 
                     <textarea
                         value={input}
@@ -426,7 +580,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                             <ProviderSelector
                                 value={provider}
                                 onChange={onProviderChange}
-                                disabled={disabled || status === 'busy'}
+                                disabled={disabled || isLoading || isUploading}
                                 className={styles.imageToggle}
                             />
                         )}

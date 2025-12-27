@@ -9,7 +9,7 @@ import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
 import { withRouter, RouterProps } from './components/withRouter';
-import { Session, TabType, LlmProvider } from './types';
+import { Session, TabType, LlmProvider, ChatAttachment } from './types';
 
 interface AppProps extends RouterProps { }
 
@@ -640,14 +640,42 @@ class App extends React.Component<AppProps, AppState> {
         const session = sessions[activeSessionId];
         if (!session) return;
 
+        const attachments = session.attachments || [];
+
+        // Include attachments in message payload?
+        // The server expects `attachments` in body.
+
         const selectionData = session.selection ? { selector: session.selection } : undefined;
+
+        // Prepare attachment list for UI update (optional, if we want to show them in history immediately)
+        // Usually we just append user message text.
+        // If we want to show attachments in history, we should probably append them to content or structure it.
+        // For now, let's assume Chat component renders attachments in history if they are part of message?
+        // Server ChatService composes them into text: [Вложение ...]
+        // So the optimistic update should probably match that if possible, or just wait for server.
+        // Let's just append text.
+
+        let optimisticContent = text;
+        if (attachments.length > 0) {
+            optimisticContent += '\n\n' + attachments.map((a, i) => {
+                if (a.type === 'image') return `[Вложение ${i + 1}: image ${a.originalName || a.filename}]`;
+                return `[Вложение ${i + 1}: screenshot ${a.selector}]`;
+            }).join('\n');
+        }
 
         // Optimistic update
         this.updateSession(activeSessionId, {
             status: 'busy',
             messages: [
                 ...session.messages,
-                { role: 'user', content: text, selection: selectionData, turn: session.currentTurn + 1 }
+                {
+                    role: 'user',
+                    content: optimisticContent,
+                    selection: selectionData,
+                    turn: session.currentTurn + 1,
+                    attachments: attachments, // Include attachments for immediate rendering
+                    createdAt: new Date().toISOString() // Include timestamp
+                }
             ],
             selection: null, // Clear selection
             activeTurn: null // Reset time travel
@@ -659,13 +687,48 @@ class App extends React.Component<AppProps, AppState> {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: text,
+                    attachments,
                     selection: selectionData,
                     provider: session.provider,
                 }),
             });
+            this.updateSession(activeSessionId, { attachments: [] }); // Clear attachments
         } catch (e) {
             this.updateSession(activeSessionId, { status: 'error' });
         }
+    };
+
+    handleUpload = async (file: File): Promise<ChatAttachment> => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) throw new Error("No active session");
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`/api/sessions/${activeSessionId}/images`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!res.ok) {
+            throw new Error('Upload failed');
+        }
+
+        const data = await res.json();
+        return {
+            type: 'image',
+            filename: data.filename,
+            url: data.url,
+            id: data.filename,
+            originalName: data.originalName
+        };
+    };
+
+    handleAttachmentsChange = (attachments: ChatAttachment[]) => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        this.updateSession(activeSessionId, { attachments });
     };
 
     handleProviderChange = async (provider: LlmProvider) => {
@@ -745,6 +808,8 @@ class App extends React.Component<AppProps, AppState> {
 
                                 onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
+                                onUpload={this.handleUpload}
+                                onAttachmentsChange={this.handleAttachmentsChange}
                             />
                         );
                     })

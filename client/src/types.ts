@@ -6,7 +6,25 @@ export interface MessageData {
     turn: number;
     createdAt?: string;
     selection?: { selector: string };
+    attachments?: ChatAttachment[];
 }
+
+export interface ScreenshotAttachment {
+    type: 'screenshot';
+    selector: string;
+    dataUrl: string;
+    id?: string;
+}
+
+export interface ImageAttachment {
+    type: 'image';
+    filename: string;
+    originalName?: string;
+    url: string;
+    id?: string;
+}
+
+export type ChatAttachment = ScreenshotAttachment | ImageAttachment;
 
 export type LlmProvider = 'openai' | 'google';
 
@@ -26,6 +44,7 @@ export interface Session {
 
     // UI selections per session
     selection: string | null;
+    attachments?: ChatAttachment[];
     isPicking: boolean;
 
     group: number;

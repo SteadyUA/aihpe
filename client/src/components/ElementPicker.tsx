@@ -14,6 +14,8 @@ export interface ElementPickerProps {
     onClear?: () => void;
     /** Whether the picker is disabled */
     disabled?: boolean;
+    /** Optional class name */
+    className?: string;
 }
 
 export class ElementPicker extends React.Component<ElementPickerProps> {
@@ -25,11 +27,14 @@ export class ElementPicker extends React.Component<ElementPickerProps> {
             onCancel,
             onClear,
             disabled,
+            className,
         } = this.props;
+
+        const containerClass = `${styles.pickerContainer} ${className || ''}`.trim();
 
         if (selection) {
             return (
-                <div className={styles.pickerContainer}>
+                <div className={containerClass}>
                     <div className={styles.selectionBanner}>
                         <code className={styles.selectionValue}>{selection}</code>
                         <button type="button" onClick={onClear} className={styles.clearButton} title="Clear selection">×</button>
@@ -39,7 +44,7 @@ export class ElementPicker extends React.Component<ElementPickerProps> {
         }
 
         return (
-            <div className={styles.pickerContainer}>
+            <div className={containerClass}>
                 {isPicking ? (
                     <button
                         type="button"

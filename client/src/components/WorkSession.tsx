@@ -1,7 +1,7 @@
 import React from 'react';
 import { Chat } from './Chat';
 import { Preview } from './Preview';
-import { Session, LlmProvider } from '../types';
+import { Session, LlmProvider, ChatAttachment } from '../types';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
@@ -14,6 +14,8 @@ interface WorkSessionProps {
 
     onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
+    onUpload?: (file: File) => Promise<ChatAttachment>;
+    onAttachmentsChange: (attachments: ChatAttachment[]) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -131,11 +133,14 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             session,
             isVisible,
             onSend,
+            onUpdateSession,
             onCloneTurn,
             onPreviewTurn,
 
             onProviderChange,
-            onUndo
+            onUndo,
+            onUpload,
+            onAttachmentsChange
         } = this.props;
 
         if (session.status === 'pending' || session.status === 'unloaded') {
@@ -193,6 +198,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     provider={session.provider}
                     onProviderChange={onProviderChange}
                     onUndo={onUndo}
+                    onUpload={onUpload}
+                    attachments={session.attachments}
+                    onAttachmentsChange={onAttachmentsChange}
                 />
 
                 <Preview

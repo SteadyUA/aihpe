@@ -4,6 +4,8 @@ import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
 import { formatContentForUi } from '../utils/chat';
+import fs from 'fs';
+import path from 'path';
 
 interface ChatResult {
     message: string;
@@ -27,7 +29,7 @@ export class ChatService {
         provider?: LlmProvider,
     ): Promise<ChatResult> {
         const trimmed = userMessage.trim();
-        const normalizedAttachments = this.normalizeAttachments(attachments);
+        const normalizedAttachments = await this.prepareAttachments(sessionId, attachments);
         const hasContent =
             trimmed.length > 0 ||
             normalizedAttachments.length > 0 ||
@@ -71,6 +73,7 @@ export class ChatService {
             selection,
             version: currentSessionData.currentVersion,
             turn: newTurn,
+            attachments: normalizedAttachments,
         };
 
         const contextEntry: ChatMessage = {
@@ -78,6 +81,7 @@ export class ChatService {
             content: this.enrichContentWithSelection(userContentForHistory, selection),
             createdAt: now,
             selection,
+            attachments: normalizedAttachments,
             version: currentSessionData.currentVersion,
             turn: newTurn,
         };
@@ -97,7 +101,10 @@ export class ChatService {
         const conversation = currentContext.slice(0, -1);
 
         const selectorsSummary = normalizedAttachments
-            .map((attachment) => attachment.selector)
+            .map((attachment) => {
+                if (attachment.type === 'screenshot') return attachment.selector;
+                return `Image: ${attachment.filename}`;
+            })
             .join(', ');
         const selectionContext = selection
             ? `Выбран элемент: ${selection.selector}.`
@@ -346,28 +353,57 @@ export class ChatService {
         return 'неизвестная ошибка';
     }
 
-    private normalizeAttachments(
+    private async prepareAttachments(
+        sessionId: string,
         attachments?: ChatAttachment[],
-    ): ChatAttachment[] {
+    ): Promise<ChatAttachment[]> {
         if (!attachments || attachments.length === 0) {
             return [];
         }
 
-        return attachments
-            .filter((attachment): attachment is ChatAttachment =>
-                Boolean(
-                    attachment &&
-                    attachment.type === 'screenshot' &&
-                    attachment.selector &&
-                    attachment.dataUrl,
-                ),
-            )
-            .map((attachment) => ({
-                type: 'screenshot',
-                selector: attachment.selector.trim(),
-                dataUrl: attachment.dataUrl.trim(),
-                id: attachment.id?.trim(),
-            }));
+        const normalized: ChatAttachment[] = [];
+
+        for (const attachment of attachments) {
+            if (attachment.type === 'screenshot' && attachment.dataUrl) {
+                normalized.push({
+                    type: 'screenshot',
+                    selector: attachment.selector.trim(),
+                    dataUrl: attachment.dataUrl.trim(),
+                    id: attachment.id?.trim(),
+                });
+            } else if (attachment.type === 'image' && attachment.filename) {
+                try {
+                    const cwd = process.cwd();
+                    const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                    const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+                    const uploadDir = path.join(sessionRoot, safeId, 'uploads');
+                    const filePath = path.join(uploadDir, attachment.filename);
+
+                    if (fs.existsSync(filePath)) {
+                        const buffer = await fs.promises.readFile(filePath);
+                        const base64 = buffer.toString('base64');
+                        const ext = path.extname(attachment.filename).toLowerCase();
+                        let mimeType = 'image/png';
+                        if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+                        else if (ext === '.webp') mimeType = 'image/webp';
+                        else if (ext === '.gif') mimeType = 'image/gif';
+
+                        const dataUrl = `data:${mimeType};base64,${base64}`;
+
+                        normalized.push({
+                            type: 'image',
+                            filename: attachment.filename,
+                            url: attachment.url || '',
+                            dataUrl: dataUrl,
+                            id: attachment.id?.trim(),
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to read attached image', e);
+                }
+            }
+        }
+        return normalized;
     }
 
     private composeUserContent(
@@ -381,8 +417,13 @@ export class ChatService {
 
         const attachmentLines = attachments
             .map(
-                (attachment, index) =>
-                    `[Вложение ${index + 1}: ${attachment.type} ${attachment.selector}]`,
+                (attachment, index) => {
+                    if (attachment.type === 'screenshot') {
+                        return `[Вложение ${index + 1}: screenshot ${attachment.selector}]`;
+                    } else {
+                        return `[Вложение ${index + 1}: image ${attachment.originalName || attachment.filename}]`;
+                    }
+                }
             )
             .join('\n');
 
