@@ -5,7 +5,7 @@ export interface GeneratePageRequest {
     instructions: string;
     files: SessionFiles;
     conversation: ChatMessage[];
-    attachments?: ChatAttachment[];
+    attachment?: ChatAttachment;
     allowVariants?: boolean;
     currentVersion: number;
     onProgress?: (chunk: string) => void;

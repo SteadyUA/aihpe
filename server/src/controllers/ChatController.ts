@@ -37,38 +37,24 @@ import { ImageService } from '../services/image/ImageService';
 class AttachmentRequest {
     @IsString()
     @IsNotEmpty()
-    @IsIn(['screenshot', 'image'])
-    type!: 'screenshot' | 'image';
+    @IsIn(['image'])
+    type!: 'image';
 
     @IsOptional()
     @IsString()
     id?: string;
 
-    @ValidateIf((o) => o.type === 'screenshot')
-    @IsString()
-    @IsNotEmpty()
-    selector?: string;
-
-    @ValidateIf((o) => o.type === 'screenshot')
-    @IsString()
-    @IsNotEmpty()
-    @Matches(/^data:image\/[a-z0-9.+-]+;base64,/i)
-    dataUrl?: string;
-
-    @ValidateIf((o) => o.type === 'image')
     @IsString()
     @IsOptional()
     originalName?: string;
 
-    @ValidateIf((o) => o.type === 'image')
     @IsString()
     @IsNotEmpty()
-    filename?: string;
+    filename!: string;
 
-    @ValidateIf((o) => o.type === 'image')
     @IsString()
     @IsNotEmpty()
-    url?: string;
+    url!: string;
 }
 
 class SelectionRequest {
@@ -83,15 +69,14 @@ class ChatRequest {
     sessionId!: string;
 
     @IsString()
-    @ValidateIf((o) => !o.attachments || o.attachments.length === 0)
+    @ValidateIf((o) => !o.attachment)
     @IsNotEmpty()
     message?: string;
 
     @IsOptional()
-    @IsArray()
-    @ValidateNested({ each: true })
+    @ValidateNested()
     @Type(() => AttachmentRequest)
-    attachments?: AttachmentRequest[];
+    attachment?: AttachmentRequest;
 
     @IsOptional()
     @ValidateNested()
@@ -162,12 +147,12 @@ export class ChatController {
     @Post('/api/sessions/:sessionId/chat')
     sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; attachments?: any[]; selection?: { selector: string }, provider?: LlmProvider },
+        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider },
     ) {
         return this.chatService.handleUserMessage(
             sessionId,
             body.message,
-            body.attachments || [],
+            body.attachment,
             true, // allowVariants
             body.selection,
             body.provider,

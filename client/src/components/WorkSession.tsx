@@ -15,7 +15,7 @@ interface WorkSessionProps {
     onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
-    onAttachmentsChange: (attachments: ChatAttachment[]) => void;
+    onAttachmentChange: (attachment?: ChatAttachment) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -133,14 +133,13 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             session,
             isVisible,
             onSend,
-            onUpdateSession,
             onCloneTurn,
             onPreviewTurn,
 
             onProviderChange,
             onUndo,
             onUpload,
-            onAttachmentsChange
+            onAttachmentChange
         } = this.props;
 
         if (session.status === 'pending' || session.status === 'unloaded') {
@@ -199,8 +198,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onProviderChange={onProviderChange}
                     onUndo={onUndo}
                     onUpload={onUpload}
-                    attachments={session.attachments}
-                    onAttachmentsChange={onAttachmentsChange}
+                    attachment={session.attachment}
+                    onAttachmentChange={onAttachmentChange}
                 />
 
                 <Preview

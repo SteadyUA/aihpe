@@ -59,8 +59,8 @@ class Message extends React.Component<MessageProps> {
         });
 
         // Filter out attachment text from content for display
-        // Regex to match [Вложение N: type name]
-        const contentWithoutAttachments = msg.content.replace(/\[Вложение \d+: (image|screenshot) [^\]]+\]/g, '').trim();
+        // Regex to match [Вложение: type name]
+        const contentWithoutAttachments = msg.content.replace(/\[Вложение: image [^\]]+\]/g, '').trim();
 
         return (
             <div
@@ -85,7 +85,7 @@ class Message extends React.Component<MessageProps> {
                     )}
 
                     {/* Render Text Content */}
-                    {(contentWithoutAttachments || (!msg.attachments?.length && isUser)) && (
+                    {(contentWithoutAttachments || (!msg.attachment && isUser)) && (
                         isAssistant ? (
                             <div
                                 className="message-text"
@@ -98,22 +98,19 @@ class Message extends React.Component<MessageProps> {
                         )
                     )}
 
-                    {/* Render Attachments as Thumbnails */}
-                    {msg.attachments && msg.attachments.length > 0 && (
+                    {/* Render Attachment as Thumbnail */}
+                    {msg.attachment && (
                         <div className={styles.messageAttachments}>
-                            {msg.attachments.map((att, i) => (
-                                <img
-                                    key={i}
-                                    src={att.type === 'screenshot' ? att.dataUrl : att.url}
-                                    alt={att.type === 'screenshot' ? 'Screenshot' : (att.originalName || att.filename)}
-                                    className={styles.messageThumbnail}
-                                    title={att.type === 'screenshot' ? 'Screenshot' : (att.originalName || att.filename)}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        window.open(att.type === 'screenshot' ? att.dataUrl : att.url, '_blank');
-                                    }}
-                                />
-                            ))}
+                            <img
+                                src={msg.attachment.url}
+                                alt={msg.attachment.originalName || msg.attachment.filename}
+                                className={styles.messageThumbnail}
+                                title={msg.attachment.originalName || msg.attachment.filename}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    window.open(msg.attachment!.url, '_blank');
+                                }}
+                            />
                         </div>
                     )}
 
@@ -194,7 +191,7 @@ class Message extends React.Component<MessageProps> {
 
 interface ChatProps {
     messages: MessageData[];
-    onSend: (text: string, attachments?: ChatAttachment[]) => void;
+    onSend: (text: string) => void;
     status: string;
     statusMessages?: string[]; // Renamed from statusMessage, now array
     startTime?: number | null; // For timer
@@ -214,8 +211,8 @@ interface ChatProps {
     onProviderChange?: (provider: LlmProvider) => void;
     onUndo?: () => Promise<{ restoredInput?: string } | void>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
-    attachments?: ChatAttachment[];
-    onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+    attachment?: ChatAttachment;
+    onAttachmentChange?: (attachment?: ChatAttachment) => void;
 }
 
 interface ChatState {
@@ -313,18 +310,12 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         e.preventDefault();
         if (this.props.disabled) return;
 
-        const hasText = this.state.input.trim().length > 0;
-        // Optimistically update history?
-        // Actually App.tsx handles message sending.
-        // We just call onSend.
-        // Attachments are in App state now.
-
-        if (this.state.input.trim() || (this.props.attachments && this.props.attachments.length > 0)) {
-            this.props.onSend(this.state.input, this.props.attachments);
+        if (this.state.input.trim() || this.props.attachment) {
+            this.props.onSend(this.state.input);
             this.setState({ input: '' });
-            // Clear attachments after sending
-            if (this.props.onAttachmentsChange) {
-                this.props.onAttachmentsChange([]);
+            // Clear attachment after sending
+            if (this.props.onAttachmentChange) {
+                this.props.onAttachmentChange(undefined);
             }
         }
     };
@@ -344,9 +335,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             if (this.props.onUpload) {
                 try {
                     const attachment = await this.props.onUpload(file);
-                    // Single file limit: Replace any existing attachments
-                    if (this.props.onAttachmentsChange) {
-                        this.props.onAttachmentsChange([attachment]);
+                    // Single file limit: Replace any existing
+                    if (this.props.onAttachmentChange) {
+                        this.props.onAttachmentChange(attachment);
                     }
                 } catch (error) {
                     console.error('Upload failed', error);
@@ -354,7 +345,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     this.setState({ isUploading: false });
                 }
             } else {
-                // Fallback if no upload handler (shouldn't happen with current setup but good for robust component)
                 this.setState({ isUploading: false });
             }
             // Reset input
@@ -364,11 +354,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
-    removeAttachment = (indexToRemove: number) => {
-        const currentAttachments = this.props.attachments || [];
-        const newAttachments = currentAttachments.filter((_, i) => i !== indexToRemove);
-        if (this.props.onAttachmentsChange) {
-            this.props.onAttachmentsChange(newAttachments);
+    removeAttachment = () => {
+        if (this.props.onAttachmentChange) {
+            this.props.onAttachmentChange(undefined);
         }
     };
 
@@ -388,14 +376,13 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             provider,
             onProviderChange,
             onUpload,
-            attachments,
+            attachment,
             // Restore missing ones
             onClearSelection,
             onSelectChip,
         } = this.props;
         const { input, elapsedSeconds, isUploading, isLoading } = this.state;
 
-        const effectiveAttachments = attachments || [];
         let effectiveActiveTurn = activeTurn;
         if (
             effectiveActiveTurn === null ||
@@ -492,30 +479,27 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 <form className={styles.chatForm} onSubmit={this.handleSubmit}>
 
                     {/* Attachment Preview (Above Toolbar) */}
-                    {effectiveAttachments.length > 0 && (
+                    {attachment && (
                         <div className={styles.attachmentList}>
-                            {effectiveAttachments.map((att, i) => (
-                                <div key={i} className={styles.attachmentPreview}>
-                                    <img
-                                        src={att.type === 'screenshot' ? att.dataUrl : att.url}
-                                        alt={att.type === 'screenshot' ? 'Скриншот' : (att.originalName || att.filename)}
-                                        className={att.type === 'screenshot' ? styles.screenshotPreview : styles.imagePreview}
-                                        title={att.type === 'screenshot' ? 'Скриншот' : (att.originalName || att.filename)}
-                                    />
-                                    <button
-                                        type="button"
-                                        className={styles.removeAttachment}
-                                        onClick={() => this.removeAttachment(i)}
-                                        title="Remove attachment"
-                                    >
-                                        ✕
-                                    </button>
-                                </div>
-                            ))}
+                            <div className={styles.attachmentPreview}>
+                                <img
+                                    src={attachment.url}
+                                    alt={attachment.originalName || attachment.filename}
+                                    className={styles.imagePreview}
+                                    title={attachment.originalName || attachment.filename}
+                                />
+                                <button
+                                    type="button"
+                                    className={styles.removeAttachment}
+                                    onClick={this.removeAttachment}
+                                    title="Remove attachment"
+                                >
+                                    ✕
+                                </button>
+                            </div>
                         </div>
                     )}
 
-                    {/* Toolbar */}
                     {/* Toolbar */}
                     <div className={styles.toolbar}>
                         {onUpload && (
@@ -531,8 +515,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     type="button"
                                     className={styles.uploadButton}
                                     onClick={() => this.fileInputRef.current?.click()}
-                                    disabled={disabled || isUploading || effectiveAttachments.length >= 1} // Disable if 1 attachment exists
-                                    title={effectiveAttachments.length >= 1 ? "Only one attachment allowed" : "Attach image"}
+                                    disabled={disabled || isUploading || !!attachment} // Disable if attachment exists
+                                    title={!!attachment ? "Only one attachment allowed" : "Attach image"}
                                 >
                                     {isUploading ? (
                                         <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>

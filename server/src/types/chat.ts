@@ -10,7 +10,7 @@ export interface ChatMessage {
     role: ChatRole;
     content: any;
     selection?: { selector: string };
-    attachments?: ChatAttachment[];
+    attachment?: ChatAttachment;
     version: number;
     turn: number;
     createdAt: Date;
@@ -30,14 +30,6 @@ export interface SessionData {
     provider?: LlmProvider;
 }
 
-export interface ScreenshotAttachment {
-    type: 'screenshot';
-    selector: string;
-    dataUrl: string;
-    id?: string;
-}
-
-
 export interface ImageAttachment {
     type: 'image';
     filename: string;
@@ -47,4 +39,4 @@ export interface ImageAttachment {
     dataUrl?: string; // Populated by server for LLM
 }
 
-export type ChatAttachment = ScreenshotAttachment | ImageAttachment;
+export type ChatAttachment = ImageAttachment;

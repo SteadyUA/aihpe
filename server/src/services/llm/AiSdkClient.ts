@@ -515,13 +515,35 @@ ${imageInstructions}
     private buildMessages(request: GeneratePageRequest): ModelMessage[] {
         const messages: ModelMessage[] = [];
 
+        const processAttachment = (attachment?: any) => {
+            const contentParts: ImagePart[] = [];
+            if (attachment && attachment.dataUrl) {
+                contentParts.push({
+                    type: 'image',
+                    image: attachment.dataUrl,
+                });
+            }
+            return contentParts;
+        };
+
         for (const entry of request.conversation) {
-            if (entry.role === 'user') {
-                messages.push({ role: 'user', content: entry.content });
-            } else if (entry.role === 'assistant') {
-                // Check if content implies tool calls which might need strict shape?
-                // For now, assume stored content is compatible or just text
-                messages.push({ role: 'assistant', content: entry.content });
+            const role = entry.role;
+            if (role === 'user' || role === 'assistant') { // Assistant can also have images if multimodal model output supported, but mainly user
+                let content: any = entry.content;
+
+                // Check if we have attachments to inject
+                if (entry.attachment) {
+                    const attachmentParts = processAttachment(entry.attachment);
+                    if (attachmentParts.length > 0) {
+                        if (typeof content === 'string') {
+                            content = [{ type: 'text', text: content }, ...attachmentParts];
+                        } else if (Array.isArray(content)) {
+                            content = [...content, ...attachmentParts];
+                        }
+                    }
+                }
+
+                messages.push({ role: role as any, content });
             } else if (entry.role === 'tool') {
                 messages.push({ role: 'tool', content: entry.content });
             } else if (entry.role === 'system') {
@@ -533,16 +555,7 @@ ${imageInstructions}
             { type: 'text', text: request.instructions },
         ];
 
-        if (request.attachments && request.attachments.length > 0) {
-            for (const attachment of request.attachments) {
-                if (attachment.dataUrl) {
-                    content.push({
-                        type: 'image',
-                        image: attachment.dataUrl,
-                    });
-                }
-            }
-        }
+        content.push(...processAttachment(request.attachment));
 
         messages.push({
             role: 'user',

@@ -640,27 +640,13 @@ class App extends React.Component<AppProps, AppState> {
         const session = sessions[activeSessionId];
         if (!session) return;
 
-        const attachments = session.attachments || [];
-
-        // Include attachments in message payload?
-        // The server expects `attachments` in body.
+        const attachment = session.attachment;
 
         const selectionData = session.selection ? { selector: session.selection } : undefined;
 
-        // Prepare attachment list for UI update (optional, if we want to show them in history immediately)
-        // Usually we just append user message text.
-        // If we want to show attachments in history, we should probably append them to content or structure it.
-        // For now, let's assume Chat component renders attachments in history if they are part of message?
-        // Server ChatService composes them into text: [Вложение ...]
-        // So the optimistic update should probably match that if possible, or just wait for server.
-        // Let's just append text.
-
         let optimisticContent = text;
-        if (attachments.length > 0) {
-            optimisticContent += '\n\n' + attachments.map((a, i) => {
-                if (a.type === 'image') return `[Вложение ${i + 1}: image ${a.originalName || a.filename}]`;
-                return `[Вложение ${i + 1}: screenshot ${a.selector}]`;
-            }).join('\n');
+        if (attachment) {
+            optimisticContent += '\n\n' + `[Вложение: image ${attachment.originalName || attachment.filename}]`;
         }
 
         // Optimistic update
@@ -673,7 +659,7 @@ class App extends React.Component<AppProps, AppState> {
                     content: optimisticContent,
                     selection: selectionData,
                     turn: session.currentTurn + 1,
-                    attachments: attachments, // Include attachments for immediate rendering
+                    attachment: attachment, // Include attachment for immediate rendering
                     createdAt: new Date().toISOString() // Include timestamp
                 }
             ],
@@ -687,12 +673,12 @@ class App extends React.Component<AppProps, AppState> {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: text,
-                    attachments,
+                    attachment,
                     selection: selectionData,
                     provider: session.provider,
                 }),
             });
-            this.updateSession(activeSessionId, { attachments: [] }); // Clear attachments
+            this.updateSession(activeSessionId, { attachment: undefined }); // Clear attachment
         } catch (e) {
             this.updateSession(activeSessionId, { status: 'error' });
         }
@@ -724,11 +710,11 @@ class App extends React.Component<AppProps, AppState> {
         };
     };
 
-    handleAttachmentsChange = (attachments: ChatAttachment[]) => {
+    handleAttachmentChange = (attachment?: ChatAttachment) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
-        this.updateSession(activeSessionId, { attachments });
+        this.updateSession(activeSessionId, { attachment });
     };
 
     handleProviderChange = async (provider: LlmProvider) => {
@@ -809,7 +795,7 @@ class App extends React.Component<AppProps, AppState> {
                                 onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
                                 onUpload={this.handleUpload}
-                                onAttachmentsChange={this.handleAttachmentsChange}
+                                onAttachmentChange={this.handleAttachmentChange}
                             />
                         );
                     })
