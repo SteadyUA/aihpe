@@ -1,5 +1,7 @@
 import React from 'react';
-import classNames from 'classnames';
+
+import { UiModal } from './UiModal';
+import { UiButton } from './UiButton';
 import styles from './ConfirmationModal.module.css';
 
 interface ConfirmationModalProps {
@@ -14,32 +16,32 @@ export class ConfirmationModal extends React.Component<ConfirmationModalProps> {
     render() {
         const { isOpen, title, message, onConfirm, onCancel } = this.props;
 
-        if (!isOpen) return null;
+        const actions = (
+            <>
+                <UiButton
+                    variant="secondary"
+                    onClick={onCancel}
+                >
+                    Cancel
+                </UiButton>
+                <UiButton
+                    variant="danger"
+                    onClick={onConfirm}
+                >
+                    Confirm
+                </UiButton>
+            </>
+        );
 
         return (
-            <div className={styles.overlay} onClick={onCancel}>
-                <div
-                    className={styles.modal}
-                    onClick={(e) => e.stopPropagation()} // Prevent click through to overlay
-                >
-                    <h3 className={styles.title}>{title}</h3>
-                    <p className={styles.message}>{message}</p>
-                    <div className={styles.actions}>
-                        <button
-                            className={classNames(styles.button, styles.cancelButton)}
-                            onClick={onCancel}
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            className={classNames(styles.button, styles.confirmButton)}
-                            onClick={onConfirm}
-                        >
-                            Confirm
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <UiModal
+                isOpen={isOpen}
+                title={title}
+                actions={actions}
+                onClose={onCancel}
+            >
+                <p className={styles.message}>{message}</p>
+            </UiModal>
         );
     }
 }

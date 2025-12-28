@@ -194,17 +194,25 @@ export class AiSdkClient implements LlmClient {
 
         // Add image tools
         tools.list_images = tool({
-            description: 'List available images in the current session. Use this to see if a suitable image already exists before generating a new one.',
+            description: 'List available UNUSED images in the current session. Returns image filenames and their geometry (width/height). Use this to find existing unused assets.',
             inputSchema: z.object({
                 summary: z.string().describe('Explain why you are listing images. This will be shown to the user.'),
             }),
             execute: async ({ summary }: { summary: string }) => {
                 try {
                     const images = await this.imageService.listImages(request.sessionId, request.currentVersion);
-                    if (images.length === 0) {
-                        return 'No images found in this session.';
+                    const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
+
+                    if (unusedImages.length === 0) {
+                        return 'No unused images found in this session.';
                     }
-                    return JSON.stringify(images);
+                    return JSON.stringify(unusedImages.map((img) => ({
+                        filename: img.filename,
+                        description: img.description,
+                        width: img.width,
+                        height: img.height,
+                        model: img.model
+                    })));
                 } catch (error: any) {
                     return `Failed to list images: ${error.message}`;
                 }

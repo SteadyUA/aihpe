@@ -2,12 +2,17 @@ import { Service } from 'typedi';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { imageSize } from 'image-size';
+import { SessionFiles } from '../../types/chat';
 
-interface ImageMetadata {
+export interface ImageMetadata {
     filename: string;
     description: string;
     createdAt: string;
     model: string;
+    width?: number;
+    height?: number;
+    isUsed?: boolean;
 }
 
 @Service()
@@ -67,12 +72,25 @@ export class ImageService {
             const buffer = Buffer.from(base64Data, 'base64');
             fs.writeFileSync(filePath, buffer);
 
+            // Calculate dimensions
+            let width, height;
+            try {
+                const dimensions = imageSize(buffer);
+                width = dimensions.width;
+                height = dimensions.height;
+            } catch (e) {
+                console.warn('Failed to calculate image dimensions', e);
+            }
+
             // Save metadata
             this.saveMetadata(sessionId, version, {
                 filename,
                 description,
                 createdAt: new Date().toISOString(),
                 model: this.modelId,
+                width,
+                height,
+                isUsed: false, // Default to false until code uses it
             });
 
             return filename;
@@ -82,9 +100,175 @@ export class ImageService {
         }
     }
 
+    async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {
+        const versionDir = this.resolveVersionDir(sessionId, version);
+        this.ensureDirectory(versionDir);
+
+        const uuid = randomUUID();
+        const ext = path.extname(file.originalname);
+        const filename = `${uuid}${ext}`;
+        const filePath = path.join(versionDir, filename);
+
+        // Copy file from temp location or write buffer
+        if (file.path) {
+            fs.copyFileSync(file.path, filePath);
+            // Optionally remove temp file if we are responsible for it.
+            // Multer usually cleans up if configured for diskStorage / temp
+        } else if (file.buffer) {
+            fs.writeFileSync(filePath, file.buffer);
+        } else {
+            throw new Error('No file content found');
+        }
+
+        // Calculate dimensions
+        let width, height;
+        try {
+            const dimensions = imageSize(fs.readFileSync(filePath));
+            width = dimensions.width;
+            height = dimensions.height;
+        } catch (e) {
+            console.warn('Failed to calculate image dimensions', e);
+        }
+
+        const metadata: ImageMetadata = {
+            filename,
+            description: '', // Empty description
+            createdAt: new Date().toISOString(),
+            model: 'user-upload',
+            width,
+            height,
+            isUsed: false,
+        };
+
+        this.saveMetadata(sessionId, version, metadata);
+
+        return metadata;
+    }
+
+    async describeImage(sessionId: string, version: number, filename: string): Promise<string> {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY not configured');
+        }
+
+        const versionDir = this.resolveVersionDir(sessionId, version);
+        const filePath = path.join(versionDir, filename);
+
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`Image file not found: ${filePath}`);
+        }
+
+        const buffer = fs.readFileSync(filePath);
+        const base64Image = buffer.toString('base64');
+        const mimeType = this.getMimeType(filename);
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+
+        const body = {
+            contents: [{
+                parts: [
+                    // { text: 'Analyze this image. Describe it in detail so that I can use this description for alt-text or generating a similar image.' },
+                    { text: 'Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image.' },
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Image
+                        }
+                    }
+                ]
+            }]
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+
+            if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                return data.candidates[0].content.parts[0].text;
+            }
+
+            throw new Error('No description text found in response');
+
+        } catch (error) {
+            console.error('Failed to describe image:', error);
+            throw new Error(`Failed to describe image: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private getMimeType(filename: string): string {
+        const ext = path.extname(filename).toLowerCase();
+        switch (ext) {
+            case '.png': return 'image/png';
+            case '.jpg':
+            case '.jpeg': return 'image/jpeg';
+            case '.webp': return 'image/webp';
+            case '.heic': return 'image/heic';
+            case '.heif': return 'image/heif';
+            default: return 'image/png';
+        }
+    }
+
+    async updateImageDescription(sessionId: string, version: number, filename: string, newDescription: string): Promise<void> {
+        const metadataList = this.loadMetadata(sessionId, version);
+        const imageIndex = metadataList.findIndex(img => img.filename === filename);
+
+        if (imageIndex === -1) {
+            throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
+        }
+
+        metadataList[imageIndex].description = newDescription;
+
+        const metaPath = this.getMetadataPath(sessionId, version);
+        try {
+            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
+        } catch (e) {
+            console.error(`Failed to save updated image description for ${sessionId} v${version}`, e);
+            throw new Error('Failed to save image metadata');
+        }
+    }
+
     async listImages(sessionId: string, version: number): Promise<ImageMetadata[]> {
         const metadata = this.loadMetadata(sessionId, version);
         return metadata;
+    }
+
+    async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
+        const metadata = this.loadMetadata(sessionId, version);
+        if (metadata.length === 0) return;
+
+        let hasChanges = false;
+        const htmlContent = files.html || '';
+        const cssContent = files.css || '';
+
+        const updatedMetadata = metadata.map(img => {
+            // Check usage
+            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename);
+
+            if (img.isUsed !== isUsed) {
+                hasChanges = true;
+                return { ...img, isUsed };
+            }
+            return img;
+        });
+
+        if (hasChanges) {
+            const metaPath = this.getMetadataPath(sessionId, version);
+            try {
+                fs.writeFileSync(metaPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
+            } catch (e) {
+                console.error(`Failed to save updated image usage for ${sessionId} v${version}`, e);
+            }
+        }
     }
 
     private resolveVersionDir(sessionId: string, version: number): string {
@@ -123,7 +307,9 @@ export class ImageService {
         let current = this.loadMetadata(sessionId, version);
         // Remove existing entry if any to support updates
         current = current.filter(item => item.filename !== newEntry.filename);
+        // Add new entry
         current.push(newEntry);
+
         const metaPath = this.getMetadataPath(sessionId, version);
         try {
             fs.writeFileSync(metaPath, JSON.stringify(current, null, 2), 'utf-8');

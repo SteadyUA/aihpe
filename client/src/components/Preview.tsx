@@ -4,6 +4,8 @@ import Editor from '@monaco-editor/react';
 import { UiCheckbox } from './UiCheckbox';
 import { UiButton } from './UiButton';
 import { UiDropdown } from './UiDropdown';
+import { UiModal } from './UiModal';
+import { UiTarget } from './UiTarget';
 import styles from './Preview.module.css';
 
 // Define IDisposable locally to avoid deep import issues
@@ -26,6 +28,9 @@ interface ImageMetadata {
     description: string;
     createdAt: string;
     model: string;
+    width?: number;
+    height?: number;
+    isUsed?: boolean;
 }
 
 interface Device {
@@ -63,6 +68,16 @@ interface PreviewState {
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
     images: ImageMetadata[];
+    showUnusedOnly: boolean;
+    isUploadModalOpen: boolean;
+    filesToUpload: File[];
+
+    uploadProgress: number; // 0 to 100, or -1 if not uploading
+    editingImage: ImageMetadata | null;
+    editDescriptionValue: string;
+    isSavingDescription: boolean;
+    isGeneratingDescription: boolean;
+    generationTimer: number;
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
@@ -81,11 +96,27 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             unsavedContent: { html: null, css: null, js: null },
             isSaving: false,
             images: [],
+            showUnusedOnly: false,
+            isUploadModalOpen: false,
+            filesToUpload: [],
+            uploadProgress: -1,
+            editingImage: null,
+            editDescriptionValue: '',
+            isSavingDescription: false,
+            isGeneratingDescription: false,
+            generationTimer: 0,
         };
         this.iframeRef = React.createRef();
     }
 
     private preservedScroll: { x: number; y: number } | null = null;
+
+    componentDidMount() {
+        const { sessionId } = this.props;
+        if (sessionId) {
+            this.loadContent();
+        }
+    }
 
     getSnapshotBeforeUpdate(prevProps: PreviewProps, _prevState: PreviewState) {
         // If we are about to switch version within the same session
@@ -116,45 +147,51 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         _prevState: PreviewState,
         snapshot: any,
     ) {
-        if (
-            prevProps.sessionId !== this.props.sessionId ||
-            prevProps.turn !== this.props.turn ||
-            prevProps.activeTab !== this.props.activeTab // React to tab changes from prop
-        ) {
-            const isSessionSwitch = prevProps.sessionId !== this.props.sessionId;
-            const nextActiveTab = isSessionSwitch ? 'preview' : this.props.activeTab;
+        const sessionChanged = prevProps.sessionId !== this.props.sessionId;
+        const turnChanged = prevProps.turn !== this.props.turn;
+        const tabChanged = prevProps.activeTab !== this.props.activeTab;
 
-            // When switching turn or tab, we should:
-            // 1. Clear unsaved content (if session switched)
-            // 2. Not clear cache (we keep it)
-            // 3. Start fetching if we are on a code tab and missing cache for new turn
-
+        if (sessionChanged || turnChanged) {
+            // Full reset for new turn/session
             this.setState(
                 {
-                    loading: { html: false, css: false, js: false, images: false }, // Reset loading only
+                    loading: { html: false, css: false, js: false, images: false },
                     unsavedContent: { html: null, css: null, js: null },
-                    // activeTab: nextActiveTab, // No longer in state
                     iframeKey: this.state.iframeKey + 1,
+                    images: [], // Reset images for new turn
                 },
                 () => {
-                    // Fetch content for the new version/tab
-                    if (!isSessionSwitch && nextActiveTab !== 'preview') {
-                        if (nextActiveTab === 'images') {
-                            this.fetchImages();
-                        } else {
-                            this.fetchFile(nextActiveTab as AssetType);
-                        }
-                    }
+                    this.loadContent();
                 },
             );
+        } else if (tabChanged) {
+            // Just tab switch - load content if missing
+            this.loadContent();
+        }
 
-            if (snapshot) {
-                this.preservedScroll = snapshot;
-            } else {
-                this.preservedScroll = null;
-            }
+        if (snapshot) {
+            this.preservedScroll = snapshot;
+        } else {
+            this.preservedScroll = null;
         }
     }
+
+    loadContent = () => {
+        const { activeTab } = this.props;
+        if (activeTab === 'preview') return;
+
+        if (activeTab === 'images') {
+            // Verify if we need to fetch images
+            // If we already have images, we might not want to re-fetch to avoid flickering
+            // unless we want to ensure freshness.
+            // For now, let's fetch if empty or rely on fetchImages' internal loading check
+            if (this.state.images.length === 0) {
+                this.fetchImages();
+            }
+        } else {
+            this.fetchFile(activeTab as AssetType);
+        }
+    };
 
     handleIframeLoad = () => {
         if (this.preservedScroll) {
@@ -431,6 +468,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.setState({ isMobile: checked });
     };
 
+    toggleShowUnusedOnly = (checked: boolean) => {
+        this.setState({ showUnusedOnly: checked });
+    };
+
     handleEditorDidMount = (type: AssetType) => (editor: any, monaco: any) => {
         // Per-editor config
 
@@ -554,6 +595,352 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         );
     };
 
+    openUploadModal = () => {
+        this.setState({ isUploadModalOpen: true, filesToUpload: [] });
+    };
+
+    closeUploadModal = () => {
+        this.setState({ isUploadModalOpen: false, filesToUpload: [] });
+    };
+
+    handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (this.state.uploadProgress !== -1) return; // Block interactions during upload
+        if (e.target.files) {
+            this.addFiles(Array.from(e.target.files));
+        }
+        e.target.value = ''; // Reset input
+    };
+
+    handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.state.uploadProgress !== -1) return; // Block
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            this.addFiles(Array.from(e.dataTransfer.files));
+        }
+    };
+
+    handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    handleImageClick = (img: ImageMetadata) => {
+        this.setState({
+            editingImage: img,
+            editDescriptionValue: img.description || '',
+        });
+    };
+
+    closeEditModal = () => {
+        this.setState({
+            editingImage: null,
+            editDescriptionValue: '',
+            isSavingDescription: false,
+        });
+    };
+
+    handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        this.setState({ editDescriptionValue: e.target.value });
+    };
+
+    handleSaveDescription = async () => {
+        const { editingImage, editDescriptionValue } = this.state;
+        const { sessionId, turn } = this.props;
+
+        if (!editingImage || !sessionId) return;
+
+        this.setState({ isSavingDescription: true });
+
+        try {
+            const res = await fetch(
+                `/api/sessions/${sessionId}/turns/${turn}/images/${editingImage.filename}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: editDescriptionValue }),
+                }
+            );
+
+            if (!res.ok) {
+                throw new Error('Failed to update description');
+            }
+
+            // Refresh the list locally to reflect changes immediately
+            this.setState(prev => ({
+                images: prev.images.map(img =>
+                    img.filename === editingImage.filename
+                        ? { ...img, description: editDescriptionValue }
+                        : img
+                ),
+                editingImage: null,
+                isSavingDescription: false,
+            }));
+
+        } catch (error) {
+            console.error('Error updating description', error);
+            alert('Failed to save description');
+            this.setState({ isSavingDescription: false });
+        }
+    };
+
+    handleGenerateDescription = async () => {
+        const { editingImage } = this.state;
+        const { sessionId, turn } = this.props;
+
+        if (!editingImage || !sessionId) return;
+
+        this.setState({ isGeneratingDescription: true, generationTimer: 0 });
+
+        const timerInterval = setInterval(() => {
+            this.setState(prev => ({ generationTimer: prev.generationTimer + 1 }));
+        }, 1000);
+
+        try {
+            const res = await fetch(
+                `/api/sessions/${sessionId}/turns/${turn}/images/${editingImage.filename}/describe`,
+                {
+                    method: 'POST',
+                }
+            );
+
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || 'Failed to generate description');
+            }
+
+            const data = await res.json();
+
+            if (data.description) {
+                this.setState({ editDescriptionValue: data.description });
+            }
+
+        } catch (error) {
+            console.error('Error generating description', error);
+            alert(`Failed to generate description: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            clearInterval(timerInterval);
+            this.setState({ isGeneratingDescription: false });
+        }
+    };
+
+    addFiles = (newFiles: File[]) => {
+        this.setState((prev) => {
+            const existingNames = new Set(prev.filesToUpload.map(f => f.name));
+            const uniqueNewFiles = newFiles.filter(f => !existingNames.has(f.name));
+
+            if (uniqueNewFiles.length === 0) return null;
+
+            return {
+                filesToUpload: [...prev.filesToUpload, ...uniqueNewFiles],
+            };
+        });
+    };
+
+
+
+    removeFile = (index: number) => {
+        if (this.state.uploadProgress !== -1) return; // Block
+        this.setState((prev) => ({
+            filesToUpload: prev.filesToUpload.filter((_, i) => i !== index),
+        }));
+    };
+
+    handleUpload = async () => {
+        const { filesToUpload } = this.state;
+        const { sessionId, turn } = this.props;
+
+        if (filesToUpload.length === 0 || !sessionId) return;
+
+        this.setState({ uploadProgress: 0 });
+
+        let completed = 0;
+        const total = filesToUpload.length;
+
+        for (const file of filesToUpload) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch(
+                    `/api/sessions/${sessionId}/turns/${turn}/images`, // Corrected route
+                    {
+                        method: 'POST',
+                        body: formData,
+                    }
+                );
+
+                if (!res.ok) {
+                    console.error('Failed to upload', file.name, res.statusText);
+                    // Continue with other files or stop? 
+                    // Let's continue best effort
+                }
+            } catch (error) {
+                console.error('Error uploading', file.name, error);
+            }
+
+            completed++;
+            this.setState({ uploadProgress: Math.round((completed / total) * 100) });
+        }
+
+        // Finish
+        this.setState({ uploadProgress: -1, isUploadModalOpen: false, filesToUpload: [] });
+        this.fetchImages(); // Refresh gallery
+    };
+
+    renderUploadModal() {
+        const { isUploadModalOpen, filesToUpload, uploadProgress } = this.state;
+        const isUploading = uploadProgress !== -1;
+
+        const actions = (
+            <>
+                <UiButton
+                    variant="secondary"
+                    onClick={this.closeUploadModal}
+                    disabled={isUploading}
+                >
+                    Cancel
+                </UiButton>
+                <UiButton
+                    variant={filesToUpload.length > 0 ? 'primary' : 'secondary'}
+                    disabled={filesToUpload.length === 0 || isUploading}
+                    onClick={this.handleUpload}
+                >
+                    {isUploading ? `Uploading ${uploadProgress}%` : 'Upload'}
+                </UiButton>
+            </>
+        );
+
+        return (
+            <UiModal
+                isOpen={isUploadModalOpen}
+                title="Upload Images"
+                onClose={() => !isUploading && this.closeUploadModal()}
+                actions={actions}
+            >
+                <div>
+                    <div
+                        className={classNames(styles.uploadDropZone, {
+                            [styles.disabled]: isUploading // Add styling for disabled state
+                        })}
+                        onDrop={this.handleDrop}
+                        onDragOver={this.handleDragOver}
+                        onClick={() => !isUploading && document.getElementById('image-upload-input')?.click()}
+                        style={isUploading ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+                    >
+                        <p>{isUploading ? 'Uploading files...' : 'Drag & drop images here, or click to select'}</p>
+                        <input
+                            type="file"
+                            id="image-upload-input"
+                            multiple
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={this.handleFileSelect}
+                            disabled={isUploading}
+                        />
+                    </div>
+                    {filesToUpload.length > 0 && (
+                        <div className={styles.uploadFileList}>
+                            {filesToUpload.map((file, index) => (
+                                <UiTarget
+                                    key={`${file.name}-${index}`}
+                                    onRemove={() => this.removeFile(index)}
+                                    removeTitle="Remove image"
+                                    disabled={isUploading}
+                                >
+                                    <div className={styles.uploadFileItem}>
+                                        <img
+                                            src={URL.createObjectURL(file)}
+                                            alt={file.name}
+                                            className={styles.uploadFilePreview}
+                                            onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)}
+                                        />
+                                        <span>{file.name}</span>
+                                    </div>
+                                </UiTarget>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </UiModal>
+        );
+    }
+
+    renderEditModal() {
+        const { editingImage, editDescriptionValue, isSavingDescription, isGeneratingDescription, generationTimer } = this.state;
+        const { sessionId, turn } = this.props;
+
+        if (!editingImage) return null;
+
+        const isBusy = isSavingDescription || isGeneratingDescription;
+
+        const actions = (
+            <>
+                <UiButton
+                    variant="secondary"
+                    onClick={this.closeEditModal}
+                    disabled={isBusy}
+                >
+                    Cancel
+                </UiButton>
+                <UiButton
+                    variant="primary"
+                    onClick={this.handleSaveDescription}
+                    disabled={isBusy}
+                >
+                    {isSavingDescription ? 'Saving...' : 'Save'}
+                </UiButton>
+            </>
+        );
+
+        return (
+            <UiModal
+                isOpen={!!editingImage}
+                title="Edit Image Description"
+                onClose={() => !isBusy && this.closeEditModal()}
+                actions={actions}
+            >
+                <div className={styles.editModalContent}>
+                    <div className={styles.editImageContainer}>
+                        <img
+                            src={`/api/sessions/${sessionId}/turns/${turn}/static/${editingImage.filename}`}
+                            alt={editingImage.filename}
+                            className={styles.editImagePreview}
+                        />
+                    </div>
+                    <div className={styles.editFormGroup}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label className={styles.editLabel} style={{ marginBottom: 0 }}>
+                                Description
+                            </label>
+                            {isGeneratingDescription ? (
+                                <span style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+                                    Generating... ({generationTimer}s)
+                                </span>
+                            ) : (
+                                <UiButton
+                                    variant="secondary"
+                                    size="small"
+                                    onClick={this.handleGenerateDescription}
+                                    disabled={isBusy}
+                                >
+                                    Generate
+                                </UiButton>
+                            )}
+                        </div>
+                        <textarea
+                            className={styles.editDescriptionInput}
+                            value={editDescriptionValue}
+                            onChange={this.handleDescriptionChange}
+                            placeholder="Enter image description..."
+                            disabled={isBusy}
+                        />
+                    </div>
+                </div>
+            </UiModal>
+        );
+    }
+
     render() {
         const { sessionId, turn, activeTab } = this.props;
         const {
@@ -573,7 +960,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 ? `/api/sessions/${sessionId}/turns/${turn}/static/index.html`
                 : 'about:blank';
 
-        const visibleImages = this.state.images;
+        const visibleImages = this.state.showUnusedOnly
+            ? this.state.images.filter(img => !img.isUsed)
+            : this.state.images;
 
         // Resolve content for current turn
         const currentFiles = turnCache[turn] || { html: null, css: null, js: null };
@@ -617,36 +1006,94 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 </div>
 
                 {/* IMAGES TAB CONTAINER */}
-                <div className={styles.imagesPanel} style={{ display: activeTab === 'images' ? 'block' : 'none' }}>
-                    {loading.images ? (
-                        <div className={styles.loading}>Loading images...</div>
-                    ) : visibleImages.length === 0 ? (
-                        <div className={styles.noImages}>
-                            No images found for this version
+                <div className={styles.previewContainer} style={{ display: activeTab === 'images' ? 'flex' : 'none' }}>
+                    <div className={styles.toolbar}>
+                        <div className={styles.deviceControls}>
+                            <UiCheckbox
+                                checked={this.state.showUnusedOnly}
+                                onChange={this.toggleShowUnusedOnly}
+                                label="Unused only"
+                            />
                         </div>
-                    ) : (
-                        <div className={styles.imageGrid}>
-                            {visibleImages.map((img) => (
-                                <div
-                                    key={img.filename}
-                                    className={styles.imageTile}
+                        <div className={styles.actions}>
+                            <UiButton
+                                variant="secondary"
+                                size="icon"
+                                onClick={this.openUploadModal}
+                                title="Upload images"
+                            >
+                                <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
                                 >
-                                    <img
-                                        src={`/api/sessions/${sessionId}/turns/${turn}/static/${img.filename}`}
-                                        alt={img.description}
-                                        className={styles.imageThumb}
-                                    />
-                                    <div className={styles.imageDesc}>
-                                        {img.description}
-                                    </div>
-                                </div>
-                            ))}
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                            </UiButton>
                         </div>
-                    )}
+                    </div>
+                    <div className={styles.imagesPanel}>
+                        {loading.images ? (
+                            <div className={styles.loading}>Loading images...</div>
+                        ) : visibleImages.length === 0 ? (
+                            <div className={styles.noImages}>
+                                No images found for this version
+                            </div>
+                        ) : (
+                            <div className={styles.imageGrid}>
+                                {visibleImages.map((img) => (
+                                    <div
+                                        key={img.filename}
+                                        className={styles.imageTile}
+                                        onClick={() => this.handleImageClick(img)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <img
+                                            src={`/api/sessions/${sessionId}/turns/${turn}/static/${img.filename}`}
+                                            alt={img.description}
+                                            className={styles.imageThumb}
+                                        />
+                                        <div className={styles.imageDesc}>
+                                            <div className={styles.imageMeta}>
+                                                {img.width && img.height && (
+                                                    <div className={styles.resolutionBadge}>
+                                                        {img.width}x{img.height}
+                                                    </div>
+                                                )}
+                                                {img.isUsed !== undefined && (
+                                                    <span
+                                                        className={classNames(styles.usageBadge, {
+                                                            [styles.usageBadgeUsed]: img.isUsed,
+                                                            [styles.usageBadgeUnused]: !img.isUsed,
+                                                        })}
+                                                    >
+                                                        {img.isUsed ? 'Used' : 'Unused'}
+                                                    </span>
+                                                )}
+                                                {(!img.description || img.description.trim() === '') && (
+                                                    <span className={styles.badgeNoDescription}>
+                                                        No description
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {img.description}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* PREVIEW TAB CONTAINER */}
-                <div style={{ display: activeTab === 'preview' ? 'flex' : 'none', flexDirection: 'column', height: '100%', flex: 1, overflow: 'hidden' }}>
+                <div className={styles.previewContainer} style={{ display: activeTab === 'preview' ? 'flex' : 'none' }}>
                     <div className={styles.toolbar}>
                         <div className={styles.deviceControls}>
                             <UiCheckbox
@@ -765,6 +1212,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         </div>
                     );
                 })}
+                {this.renderUploadModal()}
+                {this.renderEditModal()}
             </div>
         );
     }

@@ -3,6 +3,7 @@ import { ChatAttachment, ChatMessage, LlmProvider, SessionData } from '../types/
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
+import { ImageService } from './image/ImageService';
 import { formatContentForUi } from '../utils/chat';
 import fs from 'fs';
 import path from 'path';
@@ -18,6 +19,7 @@ export class ChatService {
         private readonly sessionStore: SessionStore,
         private readonly sseService: SseService,
         private readonly llmFactory: LlmFactory,
+        private readonly imageService: ImageService,
     ) { }
 
     async handleUserMessage(
@@ -261,6 +263,7 @@ export class ChatService {
                     generation.files,
                     generation.targetVersion,
                 );
+                await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
             } else {
                 // No changes to files/version, just append messages
             }

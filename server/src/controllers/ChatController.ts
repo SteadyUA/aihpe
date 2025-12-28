@@ -668,6 +668,118 @@ export class ChatController {
                 .json({ message: 'Не удалось обновить файл' });
         }
     }
+    @Post('/api/sessions/:sessionId/turns/:turn/images')
+    async uploadGalleryImage(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Req() req: Request,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        const storage = multer.memoryStorage(); // Or temp disk storage
+        const upload = multer({
+            storage: storage,
+            limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+        }).single('file');
+
+        return new Promise((resolve) => {
+            upload(req, res, async (err) => {
+                if (err) {
+                    console.error('File upload failed', err);
+                    return resolve(
+                        res.status(500).json({ message: 'File upload failed' }),
+                    );
+                }
+                if (!req.file) {
+                    return resolve(
+                        res.status(400).json({ message: 'No file provided' }),
+                    );
+                }
+
+                try {
+                    const metadata = await this.imageService.saveUploadedImage(sessionId, version, req.file);
+                    resolve(res.json(metadata));
+                } catch (error) {
+                    console.error('Failed to save uploaded image', error);
+                    resolve(res.status(500).json({ message: 'Failed to save image' }));
+                }
+            });
+        });
+    }
+
+    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    async updateImageDescription(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Body() body: { description: string },
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        if (typeof body.description !== 'string') {
+            return res.status(400).json({ message: 'Description is required' });
+        }
+
+        try {
+            await this.imageService.updateImageDescription(sessionId, version, filename, body.description);
+            // Return updated list? Or just 200? Let's return the updated image or 200.
+            return res.status(200).json({ message: 'Description updated' });
+        } catch (error: any) {
+            console.error('Failed to update image description', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to update image description' });
+        }
+    }
+
+    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename/describe')
+    async generateImageDescription(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        try {
+            const description = await this.imageService.describeImage(sessionId, version, filename);
+            return res.status(200).json({ description });
+        } catch (error: any) {
+            console.error('Failed to generate image description', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to generate image description', details: error.message });
+        }
+    }
+
     @Get('/api/sessions/:sessionId/turns/:turn/images')
     async getImages(
         @Param('sessionId') sessionId: string,
