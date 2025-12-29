@@ -25,7 +25,9 @@ export function createApp(): express.Express {
         next();
     });
 
-    const publicDir = path.resolve(__dirname, '..', 'public');
+    const localPublic = path.join(__dirname, 'public');
+    const siblingPublic = path.join(__dirname, '..', 'public');
+    const publicDir = require('fs').existsSync(localPublic) ? localPublic : siblingPublic;
     app.use(express.static(publicDir));
 
     useExpressServer(app, {
