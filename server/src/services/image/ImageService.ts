@@ -303,6 +303,43 @@ export class ImageService {
         }
     }
 
+    async deleteImage(sessionId: string, version: number, filename: string): Promise<void> {
+        const metadataList = this.loadMetadata(sessionId, version);
+        const imageIndex = metadataList.findIndex(img => img.filename === filename);
+
+        if (imageIndex === -1) {
+            throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
+        }
+
+        const image = metadataList[imageIndex];
+        if (image.isUsed) {
+            throw new Error(`Cannot delete used image ${filename}`);
+        }
+
+        // Remove from metadata
+        metadataList.splice(imageIndex, 1);
+        const metaPath = this.getMetadataPath(sessionId, version);
+        try {
+            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
+        } catch (e) {
+            console.error(`Failed to update metadata after deleting ${filename}`, e);
+            throw new Error('Failed to update metadata');
+        }
+
+        // Delete file
+        const versionDir = this.resolveVersionDir(sessionId, version);
+        const filePath = path.join(versionDir, filename);
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        } catch (e) {
+            console.error(`Failed to delete image file ${filename}`, e);
+            // We removed it from metadata, so it's "deleted" logically. 
+            // We might want to warn but not fail entirely if file was missing/locked.
+        }
+    }
+
     private saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): void {
         let current = this.loadMetadata(sessionId, version);
         // Remove existing entry if any to support updates

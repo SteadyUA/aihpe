@@ -18,7 +18,7 @@
     line-height: normal;
 }
 
-.select:hover {
+.select:hover:not(:disabled) {
     border-color: var(--accent);
 }
 

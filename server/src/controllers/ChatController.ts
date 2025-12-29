@@ -751,6 +751,38 @@ export class ChatController {
         }
     }
 
+    @Delete('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    async deleteImage(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        try {
+            await this.imageService.deleteImage(sessionId, version, filename);
+            return res.status(200).json({ message: 'Image deleted' });
+        } catch (error: any) {
+            console.error('Failed to delete image', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            if (error.message.includes('used')) {
+                return res.status(400).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to delete image' });
+        }
+    }
+
     @Post('/api/sessions/:sessionId/turns/:turn/images/:filename/describe')
     async generateImageDescription(
         @Param('sessionId') sessionId: string,

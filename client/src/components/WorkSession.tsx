@@ -1,6 +1,6 @@
 import React from 'react';
 import { Chat } from './Chat';
-import { Preview } from './Preview';
+import { Workarea } from './Workarea';
 import { Session, LlmProvider, ChatAttachment } from '../types';
 import { ElementPicker } from '../lib/ElementPicker';
 
@@ -17,12 +17,12 @@ interface WorkSessionProps {
     onUpload?: (file: File) => Promise<ChatAttachment>;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
-    onSaveUnsent?: (data: { input?: string }) => void;
+    onSaveUnsent?: (data: { input?: string | null }) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
     private picker: ElementPicker;
-    private previewRef: React.RefObject<Preview | null>;
+    private previewRef: React.RefObject<Workarea | null>;
 
     constructor(props: WorkSessionProps) {
         super(props);
@@ -208,7 +208,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSaveUnsent={onSaveUnsent}
                 />
 
-                <Preview
+                <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
                     turn={currentTurn}
