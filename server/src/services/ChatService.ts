@@ -3,6 +3,7 @@ import { ChatAttachment, ChatMessage, LlmProvider, SessionData } from '../types/
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
+import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
 import { formatContentForUi } from '../utils/chat';
 import fs from 'fs';
@@ -20,6 +21,7 @@ export class ChatService {
         private readonly sseService: SseService,
         private readonly llmFactory: LlmFactory,
         private readonly imageService: ImageService,
+        private readonly projectService: ProjectService,
     ) { }
 
     async handleUserMessage(
@@ -149,6 +151,11 @@ export class ChatService {
             effectiveInstructions = `Обработай вложенные скриншоты выбранных элементов: ${selectorsSummary}.`;
         }
 
+        // Fetch project context
+        const project = this.projectService.getProject(currentSessionData.projectId);
+        const projectGoal = project?.goal;
+        const imageGenerationPref = project?.imageGenerationPref;
+
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
             let thoughtBuffer = '';
@@ -162,6 +169,8 @@ export class ChatService {
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
                 currentVersion: currentSessionData.currentVersion,
+                projectGoal,
+                imageGenerationPref,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {

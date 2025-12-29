@@ -4,10 +4,11 @@ import {
     Get,
     JsonController,
     Param,
+    Patch,
     Post,
     Req,
     Res,
-    UseBefore,
+    UseBefore, // eslint-disable-line @typescript-eslint/no-unused-vars
 } from 'routing-controllers';
 import { Request, Response } from 'express';
 import multer from 'multer';
@@ -28,6 +29,7 @@ import { Service } from 'typedi';
 import path from 'path';
 import fs from 'fs';
 import { ChatService } from '../services/ChatService';
+import { ProjectService } from '../services/ProjectService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
 
@@ -103,12 +105,47 @@ class UnsentDataRequest {
     provider?: LlmProvider;
 }
 
+class CreateSessionRequest {
+    @IsString()
+    @IsNotEmpty()
+    projectId!: string;
+}
+
+class CreateProjectRequest {
+    @IsString()
+    @IsNotEmpty()
+    goal!: string;
+
+    @IsOptional()
+    @IsString()
+    imageGenerationPref?: string;
+
+    @IsOptional()
+    @IsString()
+    defaultProvider?: LlmProvider;
+}
+
+class UpdateProjectRequest {
+    @IsOptional()
+    @IsString()
+    goal?: string;
+
+    @IsOptional()
+    @IsString()
+    imageGenerationPref?: string;
+
+    @IsOptional()
+    @IsString()
+    defaultProvider?: LlmProvider;
+}
+
 @Service()
 @JsonController()
 export class ChatController {
     constructor(
         private readonly chatService: ChatService,
         private readonly sessionStore: SessionStore,
+        private readonly projectService: ProjectService,
         private readonly sseService: SseService,
         private readonly imageService: ImageService,
     ) {
@@ -127,18 +164,78 @@ export class ChatController {
         return response;
     }
 
+    @Post('/api/projects')
+    createProject(@Body() body: CreateProjectRequest) {
+        return this.projectService.createProject(body.goal, body.imageGenerationPref, body.defaultProvider);
+    }
+
+    @Get('/api/projects/:projectId')
+    getProject(@Param('projectId') projectId: string, @Res() response: Response) {
+        const project = this.projectService.getProject(projectId);
+        if (!project) {
+            return response.status(404).json({ message: 'Project not found' });
+        }
+
+        const sessionIds = this.projectService.getProjectSessions(projectId);
+        const sessions = sessionIds.reduce((acc, id) => {
+            const s = this.sessionStore.getOrCreate(id);
+            // Strict check: verify the session actually belongs to this project.
+            // If the session was resurrected (created fresh with empty projectId) or mismatched, exclude it.
+            // We verify if s.projectId matches, OR if it's a legacy session we might want to allow it?
+            // But for new logic, checking projectId is safer to avoid ghost sessions.
+            if (s.projectId === projectId) {
+                acc.push({ sessionId: s.id, group: s.group });
+            }
+            return acc;
+        }, [] as { sessionId: string, group: number }[]);
+
+        return {
+            goal: project.goal,
+            imageGenerationPref: project.imageGenerationPref,
+            defaultProvider: project.defaultProvider,
+            sessions,
+        };
+    }
+
+    @Patch('/api/projects/:projectId')
+    updateProject(
+        @Param('projectId') projectId: string,
+        @Body() body: UpdateProjectRequest,
+    ) {
+        return this.projectService.updateProject(projectId, body);
+    }
+
     @Post('/api/sessions')
-    createSession(@Res() response: Response) {
-        const { id, group } = this.sessionStore.prepareCreate();
+    createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
+        const { projectId } = body;
+        const { id, group } = this.sessionStore.prepareCreate(); // prepareCreate doesn't need projectId
 
         // Start creation in background
         setImmediate(async () => {
             try {
-                await this.sessionStore.executeCreate(id, group);
+                // Determine provider: explicitly requested > project default > 'openai' (default in session store)
+                // SessionStore.executeCreate handles defaults if undefined is passed, but we want project default logic.
+                const project = this.projectService.getProject(projectId);
+                const provider = project?.defaultProvider; // If project has a default, pass it.
+
+                // If executeCreate accepted provider, we'd pass it here. 
+                // Currently executeCreate doesn't take provider arg, it defaults to 'openai' inside.
+                // We need to update SessionStore to accept provider or update session after creation.
+                // Looking at SessionStore.executeCreate(id, projectId, group) -> it calls createFreshSession -> defaults to 'openai'.
+
+                await this.sessionStore.executeCreate(id, projectId, group);
+
+                // If we have a project default provider, update the session immediately
+                if (provider) {
+                    this.sessionStore.upsert(id, { provider });
+                }
+
+                this.projectService.addSessionToProject(projectId, id);
                 this.sseService.emitSessionCreated({
                     sourceSessionId: 'system',
                     newSessionId: id,
                     group,
+                    projectId,
                 });
             } catch (error) {
                 console.error('Background session creation failed', error);
@@ -156,8 +253,9 @@ export class ChatController {
             group,
             currentVersion: 0,
             history: [],
-            files: {}, // Empty/Minimal files for client compliance if needed
+            files: {},
             updatedAt: new Date().toISOString(),
+            projectId,
         });
     }
 
@@ -215,7 +313,7 @@ export class ChatController {
         );
     }
 
-    @Post('/api/sessions/:sessionId/images')
+    @Post('/api/sessions/:sessionId/uploads')
     async uploadImage(
         @Param('sessionId') sessionId: string,
         @Req() req: Request,
@@ -296,6 +394,53 @@ export class ChatController {
         });
     }
 
+    @Delete('/api/sessions/:sessionId/uploads/:filename')
+    deleteUploadedFile(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        // Sanitize
+        if (!/^[a-zA-Z0-9-_\. \(\)]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const uploadDir = path.join(sessionRoot, safeId, 'uploads');
+        const filePath = path.join(uploadDir, filename);
+
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+
+                // Update metadata
+                const metadataPath = path.join(uploadDir, 'uploads.json');
+                if (fs.existsSync(metadataPath)) {
+                    try {
+                        const content = fs.readFileSync(metadataPath, 'utf-8');
+                        const metadata = JSON.parse(content);
+                        if (metadata[filename]) {
+                            delete metadata[filename];
+                            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+                        }
+                    } catch (e) {
+                        console.error('Failed to update uploads metadata', e);
+                    }
+                }
+
+                return response.status(200).json({ message: 'File deleted' });
+            } catch (error) {
+                console.error('Failed to delete file', error);
+                return response.status(500).json({ message: 'Failed to delete file' });
+            }
+        }
+
+        return response.status(404).send('File not found');
+    }
+
     @Get('/api/sessions/:sessionId/uploads/:filename')
     getUploadedFile(
         @Param('sessionId') sessionId: string,
@@ -354,6 +499,30 @@ export class ChatController {
     @Delete('/api/sessions/:sessionId')
     deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
+            // Attempt to get session to find its project
+            // Use snapshot or getOrCreate. Since we are deleting, we just need metadata.
+            // If it doesn't exist on disk, getOrCreate might create a fresh one, which is fine as it returns default props,
+            // but we want to avoid creating files if we are about to delete.
+            // But SessionStore.getOrCreate DOES create files.
+            // We should use a method that returns undefined if not found, OR check if it exists.
+            // But for now, getOrCreate is standard. If it creates a temp one, we delete it anyway.
+            // Better: use sessionStore.snapshot(sessionId) ?? loadFromDisk logic?
+            // Actually, if we just want to clean up, retrieving it first is safer to ensure consistency.
+
+            // Wait, if it didn't exist, getOrCreate creates it with empty projectId.
+            // Effectively we wouldn't remove it from any project.
+            // But we have the projectId in the Project Entity!
+            // BUT ChatController doesn't know the projectId from the request params.
+            // So relying on the session file is necessary.
+            // If the session file is corrupted/missing, we might fail to clean up the project reference?
+            // This suggests a data integrity issue if file is missing but project has reference.
+            // For now, let's proceed with getOrCreate to read the projectId.
+
+            const session = this.sessionStore.getOrCreate(sessionId);
+            if (session.projectId) {
+                this.projectService.removeSessionFromProject(session.projectId, sessionId);
+            }
+
             this.sessionStore.deleteSession(sessionId);
             return response.status(200).json({ message: 'Session deleted' });
         } catch (error) {
@@ -574,10 +743,18 @@ export class ChatController {
             setImmediate(async () => {
                 try {
                     await this.sessionStore.executeCloneAtTurn(id, sessionId, turn);
+
+                    // Add new session to project (using source session's project)
+                    const sourceSession = this.sessionStore.getOrCreate(sessionId);
+                    if (sourceSession.projectId) {
+                        this.projectService.addSessionToProject(sourceSession.projectId, id);
+                    }
+
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
                         newSessionId: id,
                         group,
+                        projectId: sourceSession.projectId,
                     });
                 } catch (error) {
                     console.error('Background session cloning failed', error);

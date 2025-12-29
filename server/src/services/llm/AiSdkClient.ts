@@ -54,7 +54,7 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt();
+        const systemPrompt = this.buildSystemPrompt(request.projectGoal, request.imageGenerationPref);
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
@@ -498,14 +498,21 @@ export class AiSdkClient implements LlmClient {
         }
     }
 
-    private buildSystemPrompt(): string {
-        const imageInstructions = `- Image generation is ENABLED. You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.`;
+    private buildSystemPrompt(projectGoal?: string, imageGenerationPref?: string): string {
 
-        return `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
+        let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
-Your goal is to fulfill the user's request by modifying these files.
+Your goal is to fulfill the user's request by modifying these files.`;
 
-Strategy:
+        if (projectGoal) {
+            prompt += `\n\nCONTEXT - PROJECT GOAL:\nThe user is working on a project with the following goal:\n"${projectGoal}"\nKeep this goal in mind when making decisions about design and functionality.`;
+        }
+
+        if (imageGenerationPref) {
+            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\nUser has specified the following preferences for generating images:\n"${imageGenerationPref}"\nApply these preferences when generating or editing images.`;
+        }
+
+        prompt += `\n\nStrategy:
 1. Use 'read_file' to examine the current content of relevant files. Provide a 'summary' explaining why you need to read it.
 2. Use 'edit_file' to apply specific changes. You should favor targeted edits using unique string replacements to save context window. Provide a 'summary' explaining the change.
 3. If you need to make multiple changes, perform them in steps.
@@ -516,8 +523,9 @@ Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - If the user asks for variants, use 'generate_variants'.
-${imageInstructions}
+- You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.
 `;
+        return prompt;
     }
 
     private buildMessages(request: GeneratePageRequest): ModelMessage[] {

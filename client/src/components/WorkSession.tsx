@@ -15,6 +15,7 @@ interface WorkSessionProps {
     onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
+    onDeleteAttachment?: (attachment: ChatAttachment) => void;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
     onSaveUnsent?: (data: { input?: string | null }) => void;
@@ -30,15 +31,32 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.previewRef = React.createRef();
     }
 
+    getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
+        // Prepare to hide: Save scroll position before display becomes none
+        if (prevProps.isVisible && !this.props.isVisible) {
+            this.previewRef.current?.saveScroll();
+        }
+        return null;
+    }
+
     componentDidUpdate(prevProps: WorkSessionProps) {
         // 1. Handle Session Switch (Visibility Change)
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();
-        } else if (!prevProps.isVisible && this.props.isVisible && this.props.session.selection) {
-            // Became visible -> restore selection
-            // We interpret visibility change as "show existing iframe", so we try to restore immediately.
-            // If the iframe reloads upon becoming visible, onLoad will also fire, which is fine (redundant but harmless).
-            this.visualizeSelection(this.props.session.selection);
+        } else if (!prevProps.isVisible && this.props.isVisible) {
+            // Became visible -> restore scroll & selection
+            this.previewRef.current?.restoreScroll();
+
+            if (this.props.session.selection) {
+                // We interpret visibility change as "show existing iframe", so we try to restore immediately.
+                // If the iframe reloads upon becoming visible, onLoad will also fire, which is fine (redundant but harmless).
+                this.visualizeSelection(this.props.session.selection);
+            }
+        } else if (prevProps.isVisible && this.props.isVisible && this.props.session.selection && !prevProps.session.selection) {
+            // Just selection added while visible? (Handled in step 4 usually, but original code had a check here?)
+            // Original: } else if (!prevProps.isVisible && this.props.isVisible && this.props.session.selection) {
+            // My change above covered the "became visible" part. 
+            // The original code mixed visibility and selection check.
         }
 
         // 2. Handle Turn Switch
@@ -141,6 +159,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onProviderChange,
             onUndo,
             onUpload,
+            onDeleteAttachment,
             onAttachmentChange,
             unsentInput,
             onSaveUnsent
@@ -202,6 +221,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onProviderChange={onProviderChange}
                     onUndo={onUndo}
                     onUpload={onUpload}
+                    onDeleteAttachment={onDeleteAttachment}
                     attachment={session.attachment}
                     onAttachmentChange={onAttachmentChange}
                     unsentInput={unsentInput}

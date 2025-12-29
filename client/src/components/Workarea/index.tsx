@@ -103,6 +103,14 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.monacoConfigured = false;
     }
 
+    public saveScroll = () => {
+        this.previewRef.current?.saveScroll();
+    }
+
+    public restoreScroll = () => {
+        this.previewRef.current?.restoreScroll();
+    }
+
     public clearCache = (turn: number) => {
         this.setState(prev => {
             const newCache = { ...prev.turnCache };

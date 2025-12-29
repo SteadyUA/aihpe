@@ -18,8 +18,19 @@ export interface ChatMessage {
 
 export type LlmProvider = 'openai' | 'google';
 
+export interface Project {
+    id: string;
+    goal: string;
+    imageGenerationPref?: string;
+    defaultProvider?: LlmProvider;
+    sessionIds: string[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 export interface SessionData {
     id: string;
+    projectId: string;
     files: SessionFiles;
     history: ChatMessage[];
     context: ChatMessage[];

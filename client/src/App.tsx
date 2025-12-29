@@ -8,8 +8,10 @@ import { SessionStore } from './store/SessionStore';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
+import { ProjectCreationModal } from './components/ProjectCreationModal';
+import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { withRouter, RouterProps } from './components/withRouter';
-import { Session, TabType, LlmProvider, ChatAttachment } from './types';
+import { ChatAttachment, TabType, Session, Project, LlmProvider } from './types';
 
 interface AppProps extends RouterProps { }
 
@@ -19,6 +21,13 @@ interface AppState {
     activeSessionId: string | null;
     isConnected: boolean;
     sessionToDelete: string | null;
+    // Project State
+    projectId: string | null;
+    projectGoal: string;
+    projectImageGenerationPref?: string;
+    projectDefaultProvider?: LlmProvider;
+    showProjectCreation: boolean;
+    showProjectSettings: boolean;
 }
 
 class App extends React.Component<AppProps, AppState> {
@@ -32,69 +41,101 @@ class App extends React.Component<AppProps, AppState> {
             activeSessionId: null,
             isConnected: false,
             sessionToDelete: null,
+            projectId: null,
+            projectGoal: '',
+            projectImageGenerationPref: '',
+            projectDefaultProvider: 'openai',
+            showProjectCreation: false,
+            showProjectSettings: false,
         };
 
     }
 
     componentDidMount() {
-        // Load from SessionStore
-        try {
-            const sessionIds = SessionStore.loadSessions();
-            const activeSessionId = SessionStore.loadActiveSessionId();
-            const groups = SessionStore.loadGroups();
+        // Load Project ID
+        const projectId = SessionStore.loadProjectId();
 
-            if (sessionIds.length > 0) {
-                const sessionsMap: Record<string, Session> = {};
-
-                sessionIds.forEach(id => {
-                    sessionsMap[id] = {
-                        id,
-                        status: 'unloaded',
-                        messages: [],
-                        statusMessages: [],
-                        requestStartTime: null,
-                        currentTurn: 0,
-                        activeTurn: null,
-
-                        activeTab: 'preview',
-                        selection: null,
-                        provider: 'openai', // Default to openai locally until fetched? Or just optional
-                        isPicking: false,
-                        pendingRefreshTurn: null,
-                        group: groups[id] ?? 0, // Default to 0 if missing from store
-                        unsent: {} // Default empty unsent
-                    };
-                });
-
-                this.setState({
-                    sessions: sessionsMap,
-                    sessionOrder: sessionIds,
-                    activeSessionId, // Will be overridden by URL if present
-                }, () => {
-                    this.handleInitialRouting();
-                });
-            } else {
-                // Auto-create session on startup if none exist
-                this.createSession();
-            }
-        } catch (e) {
-            console.error('Failed to load from SessionStore', e);
+        if (projectId) {
+            this.setState({ projectId }, () => {
+                this.fetchProject(projectId);
+            });
+        } else {
+            this.setState({ showProjectCreation: true });
         }
 
         // Setup persistent SSE connection
         this.setupSse();
     }
 
-    handleInitialRouting = () => {
+    fetchProject = async (projectId: string) => {
+        try {
+            // Fetch project details
+            const res = await fetch(`/api/projects/${projectId}`);
+            if (!res.ok) throw new Error('Failed to fetch project');
+
+            // Expected response: { goal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
+            const data: { goal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
+
+            const sessionsMap: Record<string, Session> = {};
+            const sessionOrder: string[] = [];
+
+            data.sessions.forEach(({ sessionId, group }) => {
+                sessionOrder.push(sessionId);
+                sessionsMap[sessionId] = {
+                    id: sessionId,
+                    projectId,
+                    status: 'unloaded',
+                    messages: [],
+                    statusMessages: [],
+                    requestStartTime: null,
+                    currentTurn: 0,
+                    activeTurn: null,
+                    activeTab: 'preview',
+                    selection: null,
+                    isPicking: false,
+                    pendingRefreshTurn: null,
+                    group: group ?? 0,
+                    unsent: {},
+                    provider: 'openai'
+                };
+            });
+
+            this.setState({
+                sessions: sessionsMap,
+                sessionOrder,
+                projectId,
+                projectGoal: data.goal,
+                projectImageGenerationPref: data.imageGenerationPref,
+                projectDefaultProvider: data.defaultProvider
+            }, () => {
+                const activeSessionId = this.handleInitialRouting();
+
+                // If no sessions, create one
+                if (sessionOrder.length === 0) {
+                    this.createSession();
+                } else if (!activeSessionId && sessionOrder.length > 0) {
+                    // If routing didn't pick one (e.g. root URL), pick first
+                    this.switchSession(sessionOrder[0]);
+                }
+            });
+
+        } catch (e) {
+            console.error('Failed to load project', e);
+            // If failed (e.g. 404), maybe reset project ID?
+            // For now, assume network error or valid project.
+        }
+    }
+
+    handleInitialRouting = (): string | null => {
         const { searchParams } = this.props.router;
         const params = this.props.router.params as Record<string, string | undefined>;
         const sessionIdFromUrl = params['sessionId'];
         const turnFromUrl = searchParams.get('turn');
         const tabFromUrl = searchParams.get('tab') as TabType;
 
-        let targetSessionId = sessionIdFromUrl || this.state.activeSessionId;
+        let targetSessionId: string | null = null;
 
-        // If URL has session ID, use it. If not, rely on state (loaded from store) or default.
+        // Verify URL session exists in project
         if (sessionIdFromUrl && this.state.sessions[sessionIdFromUrl]) {
             targetSessionId = sessionIdFromUrl;
         }
@@ -115,7 +156,13 @@ class App extends React.Component<AppProps, AppState> {
             this.setState({ activeSessionId: targetSessionId }, () => {
                 this.handleSessionChange(targetSessionId);
             });
+            return targetSessionId;
+        } else if (sessionIdFromUrl) {
+            // URL session invalid for this project -> redirect to first if available
+            // Handled by calling function
+            return null;
         }
+        return null;
     }
 
     componentDidUpdate(prevProps: AppProps, prevState: AppState) {
@@ -152,14 +199,8 @@ class App extends React.Component<AppProps, AppState> {
         // 2. Handle State Changes => Sync to URL
         // Active Session changed
         if (prevState.activeSessionId !== activeSessionId) {
-            SessionStore.saveActiveSessionId(activeSessionId);
+            // Removed localStorage persistence for activeSessionId
             if (activeSessionId) {
-                // If we switched session, we want to replace the URL entirely to match that session's state
-                // However, we might just want to push new session ID and keep default query params?
-                // Or restore query params if we store them in session state?
-                // The implementation plan says sync state -> URL.
-                // If I click a session, activeSessionId changes.
-                // I should navigate to `/session/${activeSessionId}` + params from that session state.
                 const session = sessions[activeSessionId];
                 if (session) {
                     this.handleSessionChange(activeSessionId);
@@ -183,20 +224,62 @@ class App extends React.Component<AppProps, AppState> {
             }
         }
 
-        // Persistence
-        if (prevState.sessionOrder !== this.state.sessionOrder) {
-            SessionStore.saveSessions(this.state.sessionOrder);
-            if (this.state.sessionOrder.length === 0 && prevState.sessionOrder.length > 0) {
-                this.createSession();
-            }
-        }
-
-        const prevGroups = this.extractGroups(prevState.sessions);
-        const currGroups = this.extractGroups(this.state.sessions);
-        if (JSON.stringify(prevGroups) !== JSON.stringify(currGroups)) {
-            SessionStore.saveGroups(currGroups);
-        }
+        // Persistence removed (SessionStore.saveSessions/saveGroups deleted)
     }
+
+    handleCreateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+        try {
+            const res = await fetch('/api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+            });
+            if (!res.ok) throw new Error('Failed to create project');
+
+            const project: Project = await res.json();
+            SessionStore.saveProjectId(project.id);
+
+            this.setState({
+                projectId: project.id,
+                showProjectCreation: false,
+                projectGoal: project.goal,
+                projectImageGenerationPref: project.imageGenerationPref,
+                projectDefaultProvider: project.defaultProvider
+            }, () => {
+                // Fetch to init session list (will be empty, then createSession)
+                this.fetchProject(project.id);
+            });
+        } catch (e) {
+            console.error('Failed to create project', e);
+        }
+    };
+
+    handleUpdateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+        const { projectId } = this.state;
+        if (!projectId) return;
+
+        try {
+            const res = await fetch(`/api/projects/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+            });
+            if (!res.ok) throw new Error('Failed to update project');
+
+            // Update local state
+            this.setState({
+                projectGoal: goal,
+                projectImageGenerationPref: imageGenerationPref,
+                projectDefaultProvider: defaultProvider
+            });
+        } catch (e) {
+            console.error('Failed to update project', e);
+        }
+    };
+
+    toggleProjectSettings = () => {
+        this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
+    };
 
     updateUrl = (sessionId: string, turn: number | null, tab: TabType) => {
         const params = new URLSearchParams();
@@ -332,6 +415,7 @@ class App extends React.Component<AppProps, AppState> {
                 // New session from elsewhere
                 const newSession: Session = {
                     id: data.newSessionId,
+                    projectId: data.projectId ?? this.state.projectId ?? '',
                     status: 'idle',
                     messages: [],
                     statusMessages: [],
@@ -342,7 +426,7 @@ class App extends React.Component<AppProps, AppState> {
                     activeTab: 'preview',
                     selection: null,
                     isPicking: false,
-                    provider: 'openai',
+                    // provider: 'openai', // REMOVED default
                     group: data.group ?? 0,
                     pendingRefreshTurn: null,
                     unsent: {}
@@ -412,7 +496,7 @@ class App extends React.Component<AppProps, AppState> {
                             // Restore unsent state if present and currently empty/default
                             selection: (data.unsent?.selection) ?? session.selection,
                             attachment: (data.unsent?.attachment) ?? session.attachment,
-                            // Use unsent provider if available, otherwise data.provider (from session), otherwise 'openai'
+                            // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                         }
                     }
@@ -444,7 +528,11 @@ class App extends React.Component<AppProps, AppState> {
             // We can't really add a session to the map without an ID yet.
             // So we wait for the ID from server.
 
-            App.creatingSessionPromise = fetch('/api/sessions', { method: 'POST' }).then(res => res.json());
+            App.creatingSessionPromise = fetch('/api/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId: this.state.projectId })
+            }).then(res => res.json());
             const session = await App.creatingSessionPromise;
             App.creatingSessionPromise = null;
 
@@ -467,6 +555,7 @@ class App extends React.Component<AppProps, AppState> {
             const newSession: Session = {
                 id: sessionData.id,
                 status: 'idle', // Ready to use
+                projectId: sessionData.projectId ?? this.state.projectId!, // Use created/source project ID
                 messages: [],
                 statusMessages: [],
                 requestStartTime: null,
@@ -476,7 +565,7 @@ class App extends React.Component<AppProps, AppState> {
                 activeTab: 'preview',
                 selection: null,
                 isPicking: false,
-                provider: sessionData.provider ?? 'openai',
+                provider: sessionData.provider,
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
                 unsent: sessionData.unsent ?? {}
@@ -745,7 +834,7 @@ class App extends React.Component<AppProps, AppState> {
             // Explicitly clear unsent data via API or handled by server?
             // Server ChatService should clear it.
             // Client state should also be cleared to reflect that.
-            // But if we want to be safe, we can clear it locally.
+            // But if we want to be safe, we can clear it.
             // However, ChatService handles it.
             // Wait, if we rely on ChatService clearing it, we need to know WHEN it's cleared.
             // Since we receive SSE status updates, maybe we don't need to manually clear unsent here if we fetch?
@@ -774,7 +863,7 @@ class App extends React.Component<AppProps, AppState> {
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await fetch(`/api/sessions/${activeSessionId}/images`, {
+        const res = await fetch(`/api/sessions/${activeSessionId}/uploads`, {
             method: 'POST',
             body: formData
         });
@@ -791,6 +880,25 @@ class App extends React.Component<AppProps, AppState> {
             id: data.filename,
             originalName: data.originalName
         };
+    };
+
+    handleDeleteAttachment = async (attachment: ChatAttachment) => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        try {
+            await fetch(`/api/sessions/${activeSessionId}/uploads/${attachment.filename}`, {
+                method: 'DELETE'
+            });
+
+            // Clear from state
+            this.updateSession(activeSessionId, { attachment: undefined });
+            // Clear from unsent explicitly to ensure server sync
+            this.handleSaveUnsent(activeSessionId, { attachment: null });
+
+        } catch (error) {
+            console.error('Failed to delete attachment', error);
+        }
     };
 
     handleAttachmentChange = (attachment?: ChatAttachment) => {
@@ -819,7 +927,13 @@ class App extends React.Component<AppProps, AppState> {
             sessionOrder,
             activeSessionId,
             isConnected,
-            sessionToDelete
+            sessionToDelete,
+            showProjectCreation,
+            showProjectSettings,
+            projectId,
+            projectGoal,
+            projectImageGenerationPref,
+            projectDefaultProvider
         } = this.state;
 
 
@@ -840,6 +954,19 @@ class App extends React.Component<AppProps, AppState> {
 
         return (
             <div className={styles.app}>
+                <ProjectCreationModal
+                    isOpen={showProjectCreation}
+                    onCreate={this.handleCreateProject}
+                />
+                <ProjectSettingsModal
+                    isOpen={showProjectSettings}
+                    projectId={projectId || ''}
+                    currentGoal={projectGoal}
+                    currentImageGenerationPref={projectImageGenerationPref}
+                    currentDefaultProvider={projectDefaultProvider}
+                    onUpdate={this.handleUpdateProject}
+                    onClose={() => this.setState({ showProjectSettings: false })}
+                />
                 <ConfirmationModal
                     isOpen={!!sessionToDelete}
                     title="Close Session"
@@ -858,6 +985,7 @@ class App extends React.Component<AppProps, AppState> {
                         groups={groups}
                         pendingSessions={pendingSessions}
                         isConnected={isConnected}
+                        onProjectSettings={this.toggleProjectSettings}
                     />
                 </div>
 
@@ -880,6 +1008,7 @@ class App extends React.Component<AppProps, AppState> {
                                 onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
                                 onUpload={this.handleUpload}
+                                onDeleteAttachment={this.handleDeleteAttachment}
                                 onAttachmentChange={this.handleAttachmentChange}
                                 unsentInput={session.unsent?.input ?? undefined}
                                 onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}

@@ -19,6 +19,16 @@ export interface ImageAttachment {
 
 export type ChatAttachment = ImageAttachment;
 
+export interface Project {
+    id: string;
+    goal: string;
+    imageGenerationPref?: string;
+    defaultProvider?: LlmProvider;
+    sessionIds: string[];
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface UnsentData {
     input?: string | null;
     attachment?: ChatAttachment | null;
@@ -30,6 +40,7 @@ export type LlmProvider = 'openai' | 'google';
 
 export interface Session {
     id: string;
+    projectId: string; // New field
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
     messages: MessageData[];
     statusMessages: string[];

@@ -6,7 +6,7 @@ import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData } from 
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -21,6 +21,7 @@ type PersistedSession = {
     lastTurn?: number;
     provider?: LlmProvider;
     unsent?: UnsentData;
+    projectId?: string;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -106,9 +107,9 @@ export class SessionStore {
         return 0;
     }
 
-    create(): SessionData {
+    create(projectId: string): SessionData {
         const id = randomUUID();
-        const session = this.createFreshSession(id);
+        const session = this.createFreshSession(id, projectId);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);
@@ -120,8 +121,8 @@ export class SessionStore {
         return { id, group };
     }
 
-    async executeCreate(id: string, group: number): Promise<SessionData> {
-        const session = this.createFreshSession(id, group);
+    async executeCreate(id: string, projectId: string, group: number): Promise<SessionData> {
+        const session = this.createFreshSession(id, projectId, group);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);
@@ -153,6 +154,7 @@ export class SessionStore {
             currentVersion: source.currentVersion,
             lastTurn: source.lastTurn,
             provider: source.provider,
+            projectId: source.projectId,
         };
 
         clearPersistedSessionData(targetId);
@@ -249,6 +251,7 @@ export class SessionStore {
             currentVersion: targetVersion,
             lastTurn: normalizedTurn,
             provider: source.provider, // Copy provider settings
+            projectId: source.projectId,
         };
 
         clearPersistedSessionData(targetId);
@@ -369,9 +372,10 @@ export class SessionStore {
     }
 
 
-    private createFreshSession(sessionId: string, group?: number): SessionData {
+    private createFreshSession(sessionId: string, projectId: string, group?: number): SessionData {
         return {
             id: sessionId,
+            projectId,
             files: { ...EMPTY_FILES },
             history: [],
             context: [],
@@ -408,7 +412,12 @@ export class SessionStore {
             return cloneSession(loaded);
         }
 
-        const fresh = this.createFreshSession(sessionId);
+        // If not found and generic create requested, defaulting to empty project? 
+        // This path (auto-creation without explicit create call) is dangerous now as we need projectId.
+        // Usually getOrCreate is called for EXISTING sessions or implicitly created ones.
+        // If we strictly require projectId, we cannot create a FRESH session here without knowing it.
+        // But for compatibility, let's assume we fallback to legacy/empty project.
+        const fresh = this.createFreshSession(sessionId, '');
 
         this.sessions.set(sessionId, fresh);
         this.persistSession(fresh);
@@ -661,6 +670,7 @@ export class SessionStore {
             context: update.context ?? session.context,
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
+            provider: update.provider ?? session.provider,
         };
 
         this.sessions.set(sessionId, merged);
@@ -703,6 +713,7 @@ export class SessionStore {
 
             const session: SessionData = {
                 id: parsed.id || sessionId,
+                projectId: parsed.projectId || '',
                 files,
                 history: [],
                 context: [],
@@ -783,6 +794,7 @@ export class SessionStore {
             );
             const payload: PersistedSession = {
                 id: session.id,
+                projectId: session.projectId,
                 updatedAt: session.updatedAt.toISOString(),
                 group: session.group,
                 currentVersion: session.currentVersion,
@@ -1037,5 +1049,6 @@ function cloneSession(session: SessionData): SessionData {
         lastTurn: session.lastTurn,
         provider: session.provider,
         unsent: session.unsent ? { ...session.unsent } : undefined,
+        projectId: session.projectId,
     };
 }

@@ -9,6 +9,8 @@ export interface GeneratePageRequest {
     allowVariants?: boolean;
     currentVersion: number;
     onProgress?: (chunk: string) => void;
+    projectGoal?: string;
+    imageGenerationPref?: string;
 }
 
 export interface VariantRequest {

@@ -213,6 +213,7 @@ interface ChatProps {
     onProviderChange?: (provider: LlmProvider) => void;
     onUndo?: () => Promise<{ restoredInput?: string } | void>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
+    onDeleteAttachment?: (attachment: ChatAttachment) => void;
     attachment?: ChatAttachment;
     onAttachmentChange?: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
@@ -345,29 +346,30 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.setState({ input: e.target.value });
     };
 
+    performUpload = async (file: File) => {
+        if (!this.props.onUpload) return;
+
+        this.setState({ isUploading: true });
+        try {
+            const attachment = await this.props.onUpload(file);
+            // Single file limit: Replace any existing
+            if (this.props.onAttachmentChange) {
+                this.props.onAttachmentChange(attachment);
+            }
+        } catch (error) {
+            console.error('Upload failed', error);
+        } finally {
+            this.setState({ isUploading: false });
+        }
+    }
+
     handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (
             e.target.files &&
-            e.target.files.length > 0 &&
-            this.props.onUpload
+            e.target.files.length > 0
         ) {
             const file = e.target.files[0];
-            this.setState({ isUploading: true });
-            if (this.props.onUpload) {
-                try {
-                    const attachment = await this.props.onUpload(file);
-                    // Single file limit: Replace any existing
-                    if (this.props.onAttachmentChange) {
-                        this.props.onAttachmentChange(attachment);
-                    }
-                } catch (error) {
-                    console.error('Upload failed', error);
-                } finally {
-                    this.setState({ isUploading: false });
-                }
-            } else {
-                this.setState({ isUploading: false });
-            }
+            await this.performUpload(file);
             // Reset input
             if (this.fileInputRef.current) {
                 this.fileInputRef.current.value = '';
@@ -375,7 +377,37 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
+    handlePaste = async (e: React.ClipboardEvent) => {
+        // 1. Check for files in clipboard
+        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+            // Find the first image file
+            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
+            if (file) {
+                e.preventDefault(); // Prevent default paste behavior (e.g. pasting file name)
+                await this.performUpload(file);
+                return;
+            }
+        }
+
+        // 2. Check items if no direct file object (sometimes screenshots are items but not "files" property in some contexts, though typically they appear in files)
+        // Usually items API covers it.
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                const blob = items[i].getAsFile();
+                if (blob) {
+                    e.preventDefault();
+                    await this.performUpload(blob);
+                    return;
+                }
+            }
+        }
+    };
+
     removeAttachment = () => {
+        if (this.props.attachment && this.props.onDeleteAttachment) {
+            this.props.onDeleteAttachment(this.props.attachment);
+        }
         if (this.props.onAttachmentChange) {
             this.props.onAttachmentChange(undefined);
         }
@@ -567,6 +599,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <textarea
                         value={input}
                         onChange={this.handleInputChange}
+                        onPaste={this.handlePaste}
                         placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
                         rows={4}
                         disabled={isFormDisabled}

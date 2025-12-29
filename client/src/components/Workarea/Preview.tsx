@@ -35,8 +35,10 @@ interface PreviewState {
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
+    // Static store to persist scroll positions across unmounts/remounts per session
+    private static scrollStore: Record<string, { x: number; y: number }> = {};
+    private thottledScrollHandler: (() => void) | null = null;
     private iframeRef: React.RefObject<HTMLIFrameElement | null>;
-    private preservedScroll: { x: number; y: number } | null = null;
 
     constructor(props: PreviewProps) {
         super(props);
@@ -47,51 +49,134 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.iframeRef = React.createRef();
     }
 
+    componentDidMount() {
+        // No initial action needed, restoration happens on iframe load
+    }
+
+    componentWillUnmount() {
+        this.saveScrollPosition();
+        this.cleanupScrollListener();
+    }
+
     getSnapshotBeforeUpdate(prevProps: PreviewProps) {
+        // If we represent a diff session or diff turn, save current scroll
+        if (
+            prevProps.sessionId !== this.props.sessionId ||
+            prevProps.turn !== this.props.turn
+        ) {
+            this.saveScrollPosition();
+        }
+        // If becoming inactive (tab switch), save scroll
+        if (prevProps.active && !this.props.active) {
+            this.saveScrollPosition(true);
+        }
         // If we are about to switch version within the same session
         if (
             prevProps.sessionId === this.props.sessionId &&
             prevProps.turn !== this.props.turn &&
             prevProps.active
         ) {
-            const iframe = this.iframeRef.current;
-            if (iframe && iframe.contentWindow) {
-                try {
-                    return {
-                        x: iframe.contentWindow.scrollX,
-                        y: iframe.contentWindow.scrollY,
-                    };
-                } catch (e) {
-                    // Ignored
-                }
-            }
+            // Logic handled by saveScrollPosition above, but we keep this for legacy alignment if needed,
+            // though saveScrollPosition writes to static store now.
         }
         return null;
     }
 
-    componentDidUpdate(prevProps: PreviewProps, _prevState: PreviewState, snapshot: any) {
-        if (snapshot) {
-            this.preservedScroll = snapshot;
-        } else {
-            this.preservedScroll = null;
+    componentDidUpdate(prevProps: PreviewProps, _prevState: PreviewState, _snapshot: any) {
+        // If became active (tab switch), restore scroll
+        if (!prevProps.active && this.props.active) {
+            this.restoreScroll();
         }
     }
 
-    handleIframeLoad = () => {
-        if (this.preservedScroll) {
-            const iframe = this.iframeRef.current;
-            if (iframe && iframe.contentWindow) {
-                try {
-                    iframe.contentWindow.scrollTo(
-                        this.preservedScroll.x,
-                        this.preservedScroll.y,
-                    );
-                } catch (e) {
-                    // Ignored
+    saveScrollPosition = (force: boolean = false) => {
+        const { sessionId, active } = this.props;
+        if (!sessionId) return;
+
+        // Dont save if we are hidden or inactive, as scroll values might be 0
+        if (!active && !force) return;
+
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+            // Double check if we are truly visible to avoid saving 0s
+            // (width logic is handled by 'active' prop usually, but safeguards help)
+            if (iframe.offsetWidth === 0 && iframe.offsetHeight === 0 && !force) return;
+
+            try {
+                const x = iframe.contentWindow.scrollX;
+                const y = iframe.contentWindow.scrollY;
+                if (x !== undefined && y !== undefined) {
+                    Preview.scrollStore[sessionId] = { x, y };
                 }
+            } catch (e) {
+                // Ignored (cross-origin or closed)
             }
-            this.preservedScroll = null;
         }
+    };
+
+    public saveScroll = () => this.saveScrollPosition(true);
+
+    public restoreScroll = () => {
+        const { sessionId } = this.props;
+        const iframe = this.iframeRef.current;
+        if (sessionId && iframe && iframe.contentWindow) {
+            const saved = Preview.scrollStore[sessionId];
+            if (saved) {
+                try {
+                    iframe.contentWindow.scrollTo(saved.x, saved.y);
+                } catch (e) { }
+            }
+        }
+    }
+
+    cleanupScrollListener = () => {
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow && this.thottledScrollHandler) {
+            try {
+                iframe.contentWindow.removeEventListener('scroll', this.thottledScrollHandler);
+            } catch (e) {
+                // Ignored
+            }
+        }
+        this.thottledScrollHandler = null;
+    }
+
+    throttle = (func: () => void, limit: number) => {
+        let inThrottle: boolean;
+        return () => {
+            if (!inThrottle) {
+                func();
+                inThrottle = true;
+                setTimeout(() => (inThrottle = false), limit);
+            }
+        };
+    };
+
+    handleScroll = () => {
+        this.saveScrollPosition();
+    }
+
+    handleIframeLoad = () => {
+        const { sessionId } = this.props;
+        const iframe = this.iframeRef.current;
+
+        if (sessionId && iframe && iframe.contentWindow) {
+            try {
+                // 1. Restore scroll if exists
+                const saved = Preview.scrollStore[sessionId];
+                if (saved) {
+                    iframe.contentWindow.scrollTo(saved.x, saved.y);
+                }
+
+                // 2. Attach scroll listener
+                // First cleanup old if any (though iframe reload usually wipes listeners on window)
+                this.thottledScrollHandler = this.throttle(this.handleScroll, 200);
+                iframe.contentWindow.addEventListener('scroll', this.thottledScrollHandler);
+            } catch (e) {
+                // Ignored
+            }
+        }
+
         if (this.props.onLoad) {
             this.props.onLoad();
         }
