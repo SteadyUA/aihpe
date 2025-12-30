@@ -258,7 +258,7 @@ export class AiSdkClient implements LlmClient {
         if (request.allowVariants) {
             tools.generate_variants = tool({
                 description:
-                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state.',
+                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state. IMPORTANT: Check conversation history for previous "generate_variants" calls. Do NOT propose variants that have already been generated. Ensure new variants are distinct from any previously generated variants in this session.',
                 inputSchema: z.object({
                     count: z
                         .number()

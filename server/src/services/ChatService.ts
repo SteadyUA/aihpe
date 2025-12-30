@@ -195,16 +195,28 @@ export class ChatService {
 
             if (generation.variantRequest) {
                 const { count, instructions } = generation.variantRequest;
-                const variantsCreated = [];
 
-                // Remove the user message from context as per requirements
-                // We do not want to influence the context with the variant generation request
+                // 1. Update Source Session Context
+                // Persist the tool call (generation.newMessages) in the context
+                // This ensures the model knows it has already proposed variants if the user asks again
                 const currentSession = this.sessionStore.getOrCreate(sessionId);
-                const cleanedContext = currentSession.context.filter(
-                    (msg) => !(msg.role === 'user' && msg.turn === newTurn),
-                );
+
+                // The triggering User message is the last one in the current context
+                const triggerUserMsg = currentSession.context[currentSession.context.length - 1];
+
+                // Prepare new messages (Tool Call) with correct turn and version
+                const toolCallMessages: ChatMessage[] = (generation.newMessages || []).map(msg => ({
+                    ...msg,
+                    turn: newTurn,
+                    version: currentSession.currentVersion,
+                    // Ensure createdAt is a Date
+                    createdAt: new Date(msg.createdAt)
+                }));
+
+                // Upsert source session: Add tool messages to CONTEXT only
+                // (User requested History to remain as "Created variants..." summary only)
                 this.sessionStore.upsert(sessionId, {
-                    context: cleanedContext,
+                    context: [...currentSession.context, ...toolCallMessages],
                 });
 
                 this.notifyStatus(
@@ -214,31 +226,43 @@ export class ChatService {
                 );
 
                 for (let i = 0; i < count; i++) {
-                    const sessionData = this.sessionStore.getOrCreate(sessionId);
-                    const currentTurn = sessionData.lastTurn ?? 0;
-                    const targetTurn = Math.max(0, currentTurn - 1);
-
+                    // Clone from BEFORE the user request (targetTurn)
+                    const targetTurn = Math.max(0, newTurn - 1);
                     const { id: variantId } = this.sessionStore.prepareClone(sessionId);
                     const variantGroup = Math.floor(Math.random() * 32);
 
+                    // validSession is the session state UP TO targetTurn (clean history/context)
                     const newSession = await this.sessionStore.executeCloneAtTurn(variantId, sessionId, targetTurn);
 
-                    // Update group to be random as requested
+                    // 2. Inject Context into Variant Session
+                    // We want the new session to "know" about the request and the tool call
+                    // So we append [User Request] + [Tool Call] to its context
+                    // And update its lastTurn so the next message comes after them
+
+                    const contextToInject = [triggerUserMsg, ...toolCallMessages];
+
                     this.sessionStore.upsert(newSession.id, {
                         group: variantGroup,
+                        context: [...newSession.context, ...contextToInject],
+                        lastTurn: newTurn, // Advance turn to match the injected messages
                     });
+
+                    // Add the new session to the project
+                    if (session.projectId) {
+                        this.projectService.addSessionToProject(session.projectId, newSession.id);
+                    }
 
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
                         newSessionId: newSession.id,
                         group: variantGroup,
+                        projectId: session.projectId,
                     });
-
-                    variantsCreated.push(newSession.id);
 
                     // Trigger generation for the new session in the background
                     const variantInstruction =
                         instructions[i] || effectiveInstructions;
+
                     this.handleUserMessage(
                         newSession.id,
                         variantInstruction,
@@ -257,7 +281,7 @@ export class ChatService {
                     sessionId,
                     summary,
                     session.currentVersion,
-                    false, // Do not add to context
+                    false, // Do not add to context (we already added the real tool call)
                 );
 
                 return {

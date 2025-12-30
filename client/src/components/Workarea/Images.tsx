@@ -44,6 +44,7 @@ interface ImagesState {
     // Delete State
     isConfirmingDelete: boolean;
     isDeleting: boolean;
+    generateDescriptionOnUpload: boolean;
 }
 
 export class Images extends React.Component<ImagesProps, ImagesState> {
@@ -70,6 +71,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
             isConfirmingDelete: false,
             isDeleting: false,
+            generateDescriptionOnUpload: false,
         };
         window.addEventListener('paste', this.handlePaste);
     }
@@ -123,11 +125,11 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
     // --- Upload Logic ---
 
     openUploadModal = () => {
-        this.setState({ isUploadModalOpen: true, filesToUpload: [] });
+        this.setState({ isUploadModalOpen: true, filesToUpload: [], generateDescriptionOnUpload: false });
     };
 
     closeUploadModal = () => {
-        this.setState({ isUploadModalOpen: false, filesToUpload: [] });
+        this.setState({ isUploadModalOpen: false, filesToUpload: [], generateDescriptionOnUpload: false });
     };
 
     handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,6 +206,9 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         for (const file of filesToUpload) {
             const formData = new FormData();
+            if (this.state.generateDescriptionOnUpload) {
+                formData.append('generateDescription', 'true');
+            }
             formData.append('file', file);
             try {
                 await fetch(`/api/sessions/${sessionId}/turns/${turn}/images`, {
@@ -217,7 +222,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             this.setState({ uploadProgress: Math.round((completed / total) * 100) });
         }
 
-        this.setState({ uploadProgress: -1, isUploadModalOpen: false, filesToUpload: [] });
+        this.setState({ uploadProgress: -1, isUploadModalOpen: false, filesToUpload: [], generateDescriptionOnUpload: false });
         this.fetchImages();
     };
 
@@ -407,6 +412,14 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                             style={{ display: 'none' }}
                             onChange={this.handleFileSelect}
                             disabled={isUploading}
+                        />
+                    </div>
+                    <div className={styles.uploadOptions} style={{ marginTop: '0.5rem' }}>
+                        <UiCheckbox
+                            checked={this.state.generateDescriptionOnUpload}
+                            onChange={(checked) => this.setState({ generateDescriptionOnUpload: checked })}
+                            label="Generate description"
+                            variant="danger"
                         />
                     </div>
                     {filesToUpload.length > 0 && (

@@ -133,7 +133,6 @@
     cursor: pointer;
     transition: all 0.2s;
     background: #f8fafc;
-    margin-bottom: 1rem;
 }
 
 .uploadDropZone:hover,
@@ -152,8 +151,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: 200px;
+    max-height: 220px;
     overflow-y: auto;
+    margin-top: 0.5rem;
 }
 
 .uploadFileItem {

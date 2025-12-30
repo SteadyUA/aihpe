@@ -884,6 +884,21 @@ export class ChatController {
 
                 try {
                     const metadata = await this.imageService.saveUploadedImage(sessionId, version, req.file);
+
+                    // Handle description generation
+                    const generateDescription = req.body.generateDescription === 'true';
+                    if (generateDescription) {
+                        try {
+                            const description = await this.imageService.describeImage(sessionId, version, metadata.filename);
+                            await this.imageService.updateImageDescription(sessionId, version, metadata.filename, description);
+                            // Optionally update metadata object for response, though frontend refetches
+                            metadata.description = description;
+                        } catch (descError) {
+                            console.error('Failed to generate description during upload', descError);
+                            // We don't fail the upload if description generation fails, but we might want to log it
+                        }
+                    }
+
                     resolve(res.json(metadata));
                 } catch (error) {
                     console.error('Failed to save uploaded image', error);
