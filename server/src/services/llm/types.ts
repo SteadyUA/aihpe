@@ -5,11 +5,12 @@ export interface GeneratePageRequest {
     instructions: string;
     files: SessionFiles;
     conversation: ChatMessage[];
-    attachments?: ChatAttachment[];
+    attachment?: ChatAttachment;
     allowVariants?: boolean;
-    imageGenerationAllowed?: boolean;
     currentVersion: number;
     onProgress?: (chunk: string) => void;
+    projectGoal?: string;
+    imageGenerationPref?: string;
 }
 
 export interface VariantRequest {

@@ -6,6 +6,7 @@ import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
 import { ImageService } from '../image/ImageService';
 import { SessionStore } from '../session/SessionStore';
+import { LlmProvider } from '../../types/chat';
 
 @Service()
 export class LlmFactory {
@@ -15,9 +16,15 @@ export class LlmFactory {
     @Inject()
     private sessionStore!: SessionStore;
 
-    getClient(): LlmClient {
-        const modelId = process.env.MODEL || 'gpt-4o';
-        const isGemini = modelId.startsWith('gemini');
+    getClient(provider: LlmProvider = 'openai'): LlmClient {
+        let modelId = '';
+        if (provider === 'google') {
+            modelId = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+        } else {
+            modelId = process.env.OPENAI_MODEL || 'gpt-4o';
+        }
+
+        const isGemini = provider === 'google';
 
         let model: LanguageModel | undefined;
         // Determine approximate context window

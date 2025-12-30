@@ -1,7 +1,7 @@
 import React from 'react';
 import { Chat } from './Chat';
-import { Preview } from './Preview';
-import { Session } from '../types';
+import { Workarea } from './Workarea';
+import { Session, LlmProvider, ChatAttachment } from '../types';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
@@ -11,13 +11,19 @@ interface WorkSessionProps {
     onUpdateSession: (updates: Partial<Session>) => void;
     onCloneTurn: (turn: number) => void;
     onPreviewTurn: (turn: number) => void;
-    onToggleImageGeneration: (allowed: boolean) => void;
+
+    onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
+    onUpload?: (file: File) => Promise<ChatAttachment>;
+    onDeleteAttachment?: (attachment: ChatAttachment) => void;
+    onAttachmentChange: (attachment?: ChatAttachment) => void;
+    unsentInput?: string;
+    onSaveUnsent?: (data: { input?: string | null }) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
     private picker: ElementPicker;
-    private previewRef: React.RefObject<Preview | null>;
+    private previewRef: React.RefObject<Workarea | null>;
 
     constructor(props: WorkSessionProps) {
         super(props);
@@ -25,23 +31,40 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.previewRef = React.createRef();
     }
 
+    getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
+        // Prepare to hide: Save scroll position before display becomes none
+        if (prevProps.isVisible && !this.props.isVisible) {
+            this.previewRef.current?.saveScroll();
+        }
+        return null;
+    }
+
     componentDidUpdate(prevProps: WorkSessionProps) {
         // 1. Handle Session Switch (Visibility Change)
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();
-        } else if (!prevProps.isVisible && this.props.isVisible && this.props.session.selection) {
-            // Became visible -> restore selection
-            const selector = this.props.session.selection;
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 100);
+        } else if (!prevProps.isVisible && this.props.isVisible) {
+            // Became visible -> restore scroll & selection
+            this.previewRef.current?.restoreScroll();
+
+            if (this.props.session.selection) {
+                // We interpret visibility change as "show existing iframe", so we try to restore immediately.
+                // If the iframe reloads upon becoming visible, onLoad will also fire, which is fine (redundant but harmless).
+                this.visualizeSelection(this.props.session.selection);
+            }
+        } else if (prevProps.isVisible && this.props.isVisible && this.props.session.selection && !prevProps.session.selection) {
+            // Just selection added while visible? (Handled in step 4 usually, but original code had a check here?)
+            // Original: } else if (!prevProps.isVisible && this.props.isVisible && this.props.session.selection) {
+            // My change above covered the "became visible" part. 
+            // The original code mixed visibility and selection check.
         }
 
         // 2. Handle Turn Switch
         const prevTurn = prevProps.session.activeTurn ?? prevProps.session.currentTurn;
         const currentTurn = this.props.session.activeTurn ?? this.props.session.currentTurn;
+        const turnChanged = prevTurn !== currentTurn;
 
-        if (prevTurn !== currentTurn) {
+        if (turnChanged) {
             this.stopPicking();
         }
 
@@ -54,19 +77,23 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.props.onUpdateSession({ pendingRefreshTurn: null });
         }
 
-        // 4. Handle Selection Restoration (e.g. after Undo)
+        // 4. Handle Selection Restoration (e.g. after Undo or Picking)
         if (this.props.session.selection && this.props.session.selection !== prevProps.session.selection) {
-            // We need to wait for iframe to be ready/rendered if turn also changed?
-            // But usually preview is persistent.
-            // We use a small timeout to let the iframe settle if it was reloading? 
-            // Or just call selection restoration logic.
-            // We can reuse `restoreSelection` logic but without updating session (since it's already updated).
-            // Actually `restoreSelection` updates session. We just want to visualize it.
-            const selector = this.props.session.selection;
-            // Use timeout to ensure DOM is ready if it's a new turn
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 500);
+            // If selection changed WITHOUT a turn change or tab change, we must update manually.
+            // If turn/tab changed, the iframe will reload and trigger onLoad, so we don't need to do anything here.
+            const tabChanged = prevProps.session.activeTab !== this.props.session.activeTab;
+
+            if (!turnChanged && !tabChanged) {
+                this.visualizeSelection(this.props.session.selection);
+            }
+        }
+
+        // 5. Handle Tab Switch Side Effects
+        if (prevProps.session.activeTab !== this.props.session.activeTab) {
+            if (this.props.session.activeTab !== 'preview') {
+                this.stopPicking();
+            }
+            // If switching TO preview, iframe reloads -> onLoad handles restoration
         }
     }
 
@@ -79,16 +106,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.picker.selectBySelector(iframe, selector);
     };
 
-    handlePreviewTabChange = (tab: any) => {
-        // 3. Handle Preview Tab Switch
-        if (tab !== 'preview') {
-            this.stopPicking();
-        } else if (this.props.session.selection) {
-            // Restore selection if returning to preview
-            const selector = this.props.session.selection;
-            setTimeout(() => {
-                this.visualizeSelection(selector);
-            }, 100);
+    handlePreviewLoad = () => {
+        if (this.props.session.selection) {
+            this.visualizeSelection(this.props.session.selection);
         }
     };
 
@@ -135,11 +155,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onSend,
             onCloneTurn,
             onPreviewTurn,
-            onToggleImageGeneration,
-            onUndo
+
+            onProviderChange,
+            onUndo,
+            onUpload,
+            onDeleteAttachment,
+            onAttachmentChange,
+            unsentInput,
+            onSaveUnsent
         } = this.props;
 
-        if (session.status === 'pending') {
+        if (session.status === 'pending' || session.status === 'unloaded') {
             return (
                 <div style={{
                     display: isVisible ? 'flex' : 'none',
@@ -147,7 +173,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: '#666'
+                    color: '#666',
+                    gridColumn: '1 / -1' // Span all columns to center in the full view
                 }}>
                     <div className="loader">Loading...</div>
                     <style>{`
@@ -189,16 +216,25 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onCloneTurn={onCloneTurn}
                     activeTurn={session.activeTurn}
                     onPreviewTurn={onPreviewTurn}
-                    imageGenerationAllowed={session.imageGenerationAllowed ?? true}
-                    onToggleImageGeneration={onToggleImageGeneration}
+
+                    provider={session.provider}
+                    onProviderChange={onProviderChange}
                     onUndo={onUndo}
+                    onUpload={onUpload}
+                    onDeleteAttachment={onDeleteAttachment}
+                    attachment={session.attachment}
+                    onAttachmentChange={onAttachmentChange}
+                    unsentInput={unsentInput}
+                    onSaveUnsent={onSaveUnsent}
                 />
 
-                <Preview
+                <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
                     turn={currentTurn}
-                    onTabChange={this.handlePreviewTabChange}
+                    activeTab={session.activeTab}
+                    onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
+                    onLoad={this.handlePreviewLoad}
                 />
             </div>
         );

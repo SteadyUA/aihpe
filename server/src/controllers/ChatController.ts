@@ -4,12 +4,16 @@ import {
     Get,
     JsonController,
     Param,
+    Patch,
     Post,
     Req,
     Res,
+    UseBefore, // eslint-disable-line @typescript-eslint/no-unused-vars
 } from 'routing-controllers';
 import { Request, Response } from 'express';
+import multer from 'multer';
 import archiver from 'archiver';
+import crypto from 'crypto';
 import {
     IsArray,
     IsIn,
@@ -25,29 +29,34 @@ import { Service } from 'typedi';
 import path from 'path';
 import fs from 'fs';
 import { ChatService } from '../services/ChatService';
+import { ProjectService } from '../services/ProjectService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
-import { ChatAttachment } from '../types/chat';
+
+import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
 
-class ScreenshotAttachmentRequest {
+class AttachmentRequest {
     @IsString()
     @IsNotEmpty()
-    @IsIn(['screenshot'])
-    type!: 'screenshot';
+    @IsIn(['image'])
+    type!: 'image';
 
     @IsOptional()
     @IsString()
     id?: string;
 
     @IsString()
-    @IsNotEmpty()
-    selector!: string;
+    @IsOptional()
+    originalName?: string;
 
     @IsString()
     @IsNotEmpty()
-    @Matches(/^data:image\/[a-z0-9.+-]+;base64,/i)
-    dataUrl!: string;
+    filename!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    url!: string;
 }
 
 class SelectionRequest {
@@ -62,20 +71,72 @@ class ChatRequest {
     sessionId!: string;
 
     @IsString()
-    @ValidateIf((o) => !o.attachments || o.attachments.length === 0)
+    @ValidateIf((o) => !o.attachment)
     @IsNotEmpty()
     message?: string;
 
     @IsOptional()
-    @IsArray()
-    @ValidateNested({ each: true })
-    @Type(() => ScreenshotAttachmentRequest)
-    attachments?: ScreenshotAttachmentRequest[];
+    @ValidateNested()
+    @Type(() => AttachmentRequest)
+    attachment?: AttachmentRequest;
 
     @IsOptional()
     @ValidateNested()
     @Type(() => SelectionRequest)
     selection?: SelectionRequest;
+}
+
+class UnsentDataRequest {
+    @IsOptional()
+    @IsString()
+    input?: string;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => AttachmentRequest)
+    attachment?: AttachmentRequest;
+
+    @IsOptional()
+    @IsString()
+    selection?: string;
+
+    @IsOptional()
+    @IsString()
+    provider?: LlmProvider;
+}
+
+class CreateSessionRequest {
+    @IsString()
+    @IsNotEmpty()
+    projectId!: string;
+}
+
+class CreateProjectRequest {
+    @IsString()
+    @IsNotEmpty()
+    goal!: string;
+
+    @IsOptional()
+    @IsString()
+    imageGenerationPref?: string;
+
+    @IsOptional()
+    @IsString()
+    defaultProvider?: LlmProvider;
+}
+
+class UpdateProjectRequest {
+    @IsOptional()
+    @IsString()
+    goal?: string;
+
+    @IsOptional()
+    @IsString()
+    imageGenerationPref?: string;
+
+    @IsOptional()
+    @IsString()
+    defaultProvider?: LlmProvider;
 }
 
 @Service()
@@ -84,6 +145,7 @@ export class ChatController {
     constructor(
         private readonly chatService: ChatService,
         private readonly sessionStore: SessionStore,
+        private readonly projectService: ProjectService,
         private readonly sseService: SseService,
         private readonly imageService: ImageService,
     ) {
@@ -102,18 +164,78 @@ export class ChatController {
         return response;
     }
 
+    @Post('/api/projects')
+    createProject(@Body() body: CreateProjectRequest) {
+        return this.projectService.createProject(body.goal, body.imageGenerationPref, body.defaultProvider);
+    }
+
+    @Get('/api/projects/:projectId')
+    getProject(@Param('projectId') projectId: string, @Res() response: Response) {
+        const project = this.projectService.getProject(projectId);
+        if (!project) {
+            return response.status(404).json({ message: 'Project not found' });
+        }
+
+        const sessionIds = this.projectService.getProjectSessions(projectId);
+        const sessions = sessionIds.reduce((acc, id) => {
+            const s = this.sessionStore.getOrCreate(id);
+            // Strict check: verify the session actually belongs to this project.
+            // If the session was resurrected (created fresh with empty projectId) or mismatched, exclude it.
+            // We verify if s.projectId matches, OR if it's a legacy session we might want to allow it?
+            // But for new logic, checking projectId is safer to avoid ghost sessions.
+            if (s.projectId === projectId) {
+                acc.push({ sessionId: s.id, group: s.group });
+            }
+            return acc;
+        }, [] as { sessionId: string, group: number }[]);
+
+        return {
+            goal: project.goal,
+            imageGenerationPref: project.imageGenerationPref,
+            defaultProvider: project.defaultProvider,
+            sessions,
+        };
+    }
+
+    @Patch('/api/projects/:projectId')
+    updateProject(
+        @Param('projectId') projectId: string,
+        @Body() body: UpdateProjectRequest,
+    ) {
+        return this.projectService.updateProject(projectId, body);
+    }
+
     @Post('/api/sessions')
-    createSession(@Res() response: Response) {
-        const { id, group } = this.sessionStore.prepareCreate();
+    createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
+        const { projectId } = body;
+        const { id, group } = this.sessionStore.prepareCreate(); // prepareCreate doesn't need projectId
 
         // Start creation in background
         setImmediate(async () => {
             try {
-                await this.sessionStore.executeCreate(id, group);
+                // Determine provider: explicitly requested > project default > 'openai' (default in session store)
+                // SessionStore.executeCreate handles defaults if undefined is passed, but we want project default logic.
+                const project = this.projectService.getProject(projectId);
+                const provider = project?.defaultProvider; // If project has a default, pass it.
+
+                // If executeCreate accepted provider, we'd pass it here. 
+                // Currently executeCreate doesn't take provider arg, it defaults to 'openai' inside.
+                // We need to update SessionStore to accept provider or update session after creation.
+                // Looking at SessionStore.executeCreate(id, projectId, group) -> it calls createFreshSession -> defaults to 'openai'.
+
+                await this.sessionStore.executeCreate(id, projectId, group);
+
+                // If we have a project default provider, update the session immediately
+                if (provider) {
+                    this.sessionStore.upsert(id, { provider });
+                }
+
+                this.projectService.addSessionToProject(projectId, id);
                 this.sseService.emitSessionCreated({
                     sourceSessionId: 'system',
                     newSessionId: id,
                     group,
+                    projectId,
                 });
             } catch (error) {
                 console.error('Background session creation failed', error);
@@ -131,26 +253,225 @@ export class ChatController {
             group,
             currentVersion: 0,
             history: [],
-            files: {}, // Empty/Minimal files for client compliance if needed
+            files: {},
             updatedAt: new Date().toISOString(),
-            imageGenerationAllowed: true, // Default
+            projectId,
         });
     }
 
 
 
+    @Post('/api/sessions/:sessionId/unsent')
+    saveUnsent(
+        @Param('sessionId') sessionId: string,
+        @Body() body: UnsentDataRequest,
+    ) {
+        const session = this.sessionStore.getOrCreate(sessionId);
+
+        // Filter out undefined values from body to ensure we don't overwrite existing data with undefined
+        // This is crucial for partial updates (e.g. saving input shouldn't clear selection)
+        // Initialize updates using the Current state (avoiding spread in the final upsert)
+        const updates: Partial<UnsentDataRequest> = { ...(session.unsent || {}) };
+
+        // Define a helper or just check each field. 
+        // If value is null, remove it from updates (clearing the field).
+        // If value is defined (and not null), update it.
+        // If value is undefined, ignore (preserve existing).
+
+        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider'];
+
+        for (const field of fields) {
+            const value = body[field];
+            if (value !== undefined) {
+                if (value === null) {
+                    delete updates[field];
+                } else {
+                    updates[field] = value as any;
+                }
+            }
+        }
+
+        this.sessionStore.upsert(sessionId, {
+            unsent: updates
+        });
+
+        return { status: 'saved' };
+    }
+
     @Post('/api/sessions/:sessionId/chat')
     sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; selection?: { selector: string } },
+        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider },
     ) {
         return this.chatService.handleUserMessage(
             sessionId,
             body.message,
-            [],
+            body.attachment,
             true, // allowVariants
             body.selection,
+            body.provider,
         );
+    }
+
+    @Post('/api/sessions/:sessionId/uploads')
+    async uploadImage(
+        @Param('sessionId') sessionId: string,
+        @Req() req: Request,
+        @Res() res: Response,
+    ) {
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const uploadDir = path.join(sessionRoot, safeId, 'uploads');
+
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        const storage = multer.diskStorage({
+            destination: (req, file, cb) => {
+                cb(null, uploadDir);
+            },
+            filename: (req, file, cb) => {
+                const ext = path.extname(file.originalname);
+                const uniqueName = crypto.randomUUID() + ext;
+                cb(null, uniqueName);
+            },
+        });
+
+        const upload = multer({ storage: storage }).single('file');
+
+        return new Promise((resolve, reject) => {
+            upload(req, res, (err) => {
+                if (err) {
+                    console.error('File upload failed', err);
+                    return resolve(
+                        res.status(500).json({ message: 'File upload failed' }),
+                    );
+                }
+                if (!req.file) {
+                    return resolve(
+                        res.status(400).json({ message: 'No file provided' }),
+                    );
+                }
+
+                // Metadata handling
+                const metadataPath = path.join(uploadDir, 'uploads.json');
+                let metadata: Record<string, any> = {};
+                try {
+                    if (fs.existsSync(metadataPath)) {
+                        const content = fs.readFileSync(metadataPath, 'utf-8');
+                        metadata = JSON.parse(content);
+                    }
+                } catch (e) {
+                    console.error('Failed to read uploads metadata', e);
+                }
+
+                metadata[req.file.filename] = {
+                    originalName: req.file.originalname,
+                    timestamp: Date.now(),
+                    mimeType: req.file.mimetype,
+                    size: req.file.size
+                };
+
+                try {
+                    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+                } catch (e) {
+                    console.error('Failed to write uploads metadata', e);
+                }
+
+                const fileUrl = `/api/sessions/${sessionId}/uploads/${req.file.filename}`;
+                resolve(
+                    res.json({
+                        filename: req.file.filename,
+                        url: fileUrl,
+                        type: 'image',
+                        originalName: req.file.originalname,
+                    }),
+                );
+            });
+        });
+    }
+
+    @Delete('/api/sessions/:sessionId/uploads/:filename')
+    deleteUploadedFile(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        // Sanitize
+        if (!/^[a-zA-Z0-9-_\. \(\)]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const uploadDir = path.join(sessionRoot, safeId, 'uploads');
+        const filePath = path.join(uploadDir, filename);
+
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+
+                // Update metadata
+                const metadataPath = path.join(uploadDir, 'uploads.json');
+                if (fs.existsSync(metadataPath)) {
+                    try {
+                        const content = fs.readFileSync(metadataPath, 'utf-8');
+                        const metadata = JSON.parse(content);
+                        if (metadata[filename]) {
+                            delete metadata[filename];
+                            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+                        }
+                    } catch (e) {
+                        console.error('Failed to update uploads metadata', e);
+                    }
+                }
+
+                return response.status(200).json({ message: 'File deleted' });
+            } catch (error) {
+                console.error('Failed to delete file', error);
+                return response.status(500).json({ message: 'Failed to delete file' });
+            }
+        }
+
+        return response.status(404).send('File not found');
+    }
+
+    @Get('/api/sessions/:sessionId/uploads/:filename')
+    getUploadedFile(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        // Sanitize
+        if (!/^[a-zA-Z0-9-_\. \(\)]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const sessionRoot =
+            process.env.SESSION_ROOT?.trim() ||
+            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const filePath = path.join(sessionRoot, safeId, 'uploads', filename);
+
+        if (fs.existsSync(filePath)) {
+            const ext = path.extname(filename).toLowerCase();
+            let contentType = 'application/octet-stream';
+            if (ext === '.png') contentType = 'image/png';
+            if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+            if (ext === '.gif') contentType = 'image/gif';
+            if (ext === '.webp') contentType = 'image/webp';
+
+            response.setHeader('Content-Type', contentType);
+            return fs.createReadStream(filePath);
+        }
+
+        console.log(`[getUploadedFile] File not found: ${filePath}`);
+        return response.status(404).send('File not found');
     }
 
     @Get('/api/sessions/:sessionId')
@@ -158,52 +479,50 @@ export class ChatController {
         const snapshot =
             this.sessionStore.snapshot(sessionId) ??
             this.sessionStore.getOrCreate(sessionId);
+
+        const history = this.sessionStore.getAllHistory(sessionId) || [];
+
         return {
             id: snapshot.id,
-            // files and history removed. Fetch files via static routes and history via history route.
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
             currentTurn: snapshot.lastTurn ?? 0,
-            imageGenerationAllowed: snapshot.imageGenerationAllowed ?? true,
+            provider: snapshot.provider ?? 'openai',
+            history,
+            unsent: snapshot.unsent,
         };
     }
 
-    @Get('/api/sessions/:sessionId/history')
-    getHistory(
-        @Param('sessionId') sessionId: string,
-        @Res() response: Response,
-    ) {
-        const history = this.sessionStore.getAllHistory(sessionId);
-        if (!history) {
-            return response.status(404).json({ message: 'History not found' });
-        }
-        return history;
-    }
 
-    @Post('/api/sessions/:sessionId/settings')
-    updateSettings(
-        @Param('sessionId') sessionId: string,
-        @Body() body: { imageGenerationAllowed: boolean },
-    ) {
-        const updated = this.sessionStore.updateImageGenerationAllowed(
-            sessionId,
-            body.imageGenerationAllowed,
-        );
-        return {
-            id: updated.id,
-            files: updated.files,
-            history: updated.history,
-            updatedAt: updated.updatedAt.toISOString(),
-            group: updated.group,
-            currentVersion: updated.currentVersion,
-            imageGenerationAllowed: updated.imageGenerationAllowed,
-        };
-    }
 
     @Delete('/api/sessions/:sessionId')
     deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
+            // Attempt to get session to find its project
+            // Use snapshot or getOrCreate. Since we are deleting, we just need metadata.
+            // If it doesn't exist on disk, getOrCreate might create a fresh one, which is fine as it returns default props,
+            // but we want to avoid creating files if we are about to delete.
+            // But SessionStore.getOrCreate DOES create files.
+            // We should use a method that returns undefined if not found, OR check if it exists.
+            // But for now, getOrCreate is standard. If it creates a temp one, we delete it anyway.
+            // Better: use sessionStore.snapshot(sessionId) ?? loadFromDisk logic?
+            // Actually, if we just want to clean up, retrieving it first is safer to ensure consistency.
+
+            // Wait, if it didn't exist, getOrCreate creates it with empty projectId.
+            // Effectively we wouldn't remove it from any project.
+            // But we have the projectId in the Project Entity!
+            // BUT ChatController doesn't know the projectId from the request params.
+            // So relying on the session file is necessary.
+            // If the session file is corrupted/missing, we might fail to clean up the project reference?
+            // This suggests a data integrity issue if file is missing but project has reference.
+            // For now, let's proceed with getOrCreate to read the projectId.
+
+            const session = this.sessionStore.getOrCreate(sessionId);
+            if (session.projectId) {
+                this.projectService.removeSessionFromProject(session.projectId, sessionId);
+            }
+
             this.sessionStore.deleteSession(sessionId);
             return response.status(200).json({ message: 'Session deleted' });
         } catch (error) {
@@ -424,10 +743,18 @@ export class ChatController {
             setImmediate(async () => {
                 try {
                     await this.sessionStore.executeCloneAtTurn(id, sessionId, turn);
+
+                    // Add new session to project (using source session's project)
+                    const sourceSession = this.sessionStore.getOrCreate(sessionId);
+                    if (sourceSession.projectId) {
+                        this.projectService.addSessionToProject(sourceSession.projectId, id);
+                    }
+
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
                         newSessionId: id,
                         group,
+                        projectId: sourceSession.projectId,
                     });
                 } catch (error) {
                     console.error('Background session cloning failed', error);
@@ -518,6 +845,165 @@ export class ChatController {
                 .json({ message: 'Не удалось обновить файл' });
         }
     }
+    @Post('/api/sessions/:sessionId/turns/:turn/images')
+    async uploadGalleryImage(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Req() req: Request,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        const storage = multer.memoryStorage(); // Or temp disk storage
+        const upload = multer({
+            storage: storage,
+            limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+        }).single('file');
+
+        return new Promise((resolve) => {
+            upload(req, res, async (err) => {
+                if (err) {
+                    console.error('File upload failed', err);
+                    return resolve(
+                        res.status(500).json({ message: 'File upload failed' }),
+                    );
+                }
+                if (!req.file) {
+                    return resolve(
+                        res.status(400).json({ message: 'No file provided' }),
+                    );
+                }
+
+                try {
+                    const metadata = await this.imageService.saveUploadedImage(sessionId, version, req.file);
+
+                    // Handle description generation
+                    const generateDescription = req.body.generateDescription === 'true';
+                    if (generateDescription) {
+                        try {
+                            const description = await this.imageService.describeImage(sessionId, version, metadata.filename);
+                            await this.imageService.updateImageDescription(sessionId, version, metadata.filename, description);
+                            // Optionally update metadata object for response, though frontend refetches
+                            metadata.description = description;
+                        } catch (descError) {
+                            console.error('Failed to generate description during upload', descError);
+                            // We don't fail the upload if description generation fails, but we might want to log it
+                        }
+                    }
+
+                    resolve(res.json(metadata));
+                } catch (error) {
+                    console.error('Failed to save uploaded image', error);
+                    resolve(res.status(500).json({ message: 'Failed to save image' }));
+                }
+            });
+        });
+    }
+
+    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    async updateImageDescription(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Body() body: { description: string },
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        if (typeof body.description !== 'string') {
+            return res.status(400).json({ message: 'Description is required' });
+        }
+
+        try {
+            await this.imageService.updateImageDescription(sessionId, version, filename, body.description);
+            // Return updated list? Or just 200? Let's return the updated image or 200.
+            return res.status(200).json({ message: 'Description updated' });
+        } catch (error: any) {
+            console.error('Failed to update image description', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to update image description' });
+        }
+    }
+
+    @Delete('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    async deleteImage(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        try {
+            await this.imageService.deleteImage(sessionId, version, filename);
+            return res.status(200).json({ message: 'Image deleted' });
+        } catch (error: any) {
+            console.error('Failed to delete image', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            if (error.message.includes('used')) {
+                return res.status(400).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to delete image' });
+        }
+    }
+
+    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename/describe')
+    async generateImageDescription(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() res: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return res.status(400).json({ message: 'Invalid turn' });
+        }
+
+        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
+        if (version === undefined) {
+            return res.status(404).json({ message: 'Turn not found' });
+        }
+
+        try {
+            const description = await this.imageService.describeImage(sessionId, version, filename);
+            return res.status(200).json({ description });
+        } catch (error: any) {
+            console.error('Failed to generate image description', error);
+            if (error.message.includes('not found')) {
+                return res.status(404).json({ message: error.message });
+            }
+            return res.status(500).json({ message: 'Failed to generate image description', details: error.message });
+        }
+    }
+
     @Get('/api/sessions/:sessionId/turns/:turn/images')
     async getImages(
         @Param('sessionId') sessionId: string,

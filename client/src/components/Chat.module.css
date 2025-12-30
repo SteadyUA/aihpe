@@ -222,6 +222,71 @@
     background: var(--panel-bg);
 }
 
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+
+
+/* ElementPicker internal container or button should target this if needed, 
+   but since ElementPicker is a component, we rely on it having a container/button that we can style here or pass class to.
+   Assuming ElementPicker renders a container/button. If it has a wrapper div, we target it. 
+*/
+/* Hack: If ElementPicker renders a div/button directly in toolbar */
+
+
+.elementPicker {
+    flex: 1;
+    margin-bottom: 0 !important;
+    /* Override component default */
+}
+
+
+.attachmentList {
+    display: flex;
+    flex-direction: column;
+    /* Stack if multiple, but single limit enforced */
+    width: 100%;
+    margin-bottom: 8px;
+    max-height: 160px;
+}
+
+.imagePreview,
+.screenshotPreview {
+    display: block;
+    /* 3:4 aspect ratio handled by image or container? */
+    /* Set max dimensions to keep it reasonable while centered */
+    max-width: 100%;
+    max-height: 150px;
+    object-fit: contain;
+    /* Ensure full image is visible */
+    background: transparent;
+}
+
+.attachmentName {
+    display: none;
+    /* Hide text name */
+}
+
+/* Message Thumbnail Styling */
+.messageThumbnail {
+    display: block;
+    margin-top: 8px;
+    max-width: 150px;
+    max-height: 150px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.messageThumbnail:hover {
+    opacity: 0.9;
+}
+
 .chatForm textarea {
     display: block;
     width: 100%;
@@ -231,60 +296,27 @@
     font-family: var(--font-sans);
     font-size: 0.95rem;
     resize: none;
-    margin-bottom: 8px;
-    transition: border-color 0.2s;
+    background: var(--secondary);
+    color: var(--text-primary);
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chatForm textarea:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
 }
 
 .formActions {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    margin-top: 8px;
 }
 
-.submitButton {
-    background: var(--accent);
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s;
-}
 
-.submitButton:hover {
-    background: var(--accent-hover);
-}
 
-.submitButton:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
 
-.secondaryButton {
-    background: white;
-    border: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.secondaryButton:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
 
 
 

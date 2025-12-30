@@ -1,5 +1,7 @@
 import React from 'react';
 import styles from './ElementPicker.module.css';
+import { UiButton } from './UiButton';
+import { UiTarget } from './UiTarget';
 
 export interface ElementPickerProps {
     /** The currently selected element selector, if any */
@@ -14,6 +16,8 @@ export interface ElementPickerProps {
     onClear?: () => void;
     /** Whether the picker is disabled */
     disabled?: boolean;
+    /** Optional class name */
+    className?: string;
 }
 
 export class ElementPicker extends React.Component<ElementPickerProps> {
@@ -25,45 +29,45 @@ export class ElementPicker extends React.Component<ElementPickerProps> {
             onCancel,
             onClear,
             disabled,
+            className,
         } = this.props;
+
+        const containerClass = `${styles.pickerContainer} ${className || ''}`.trim();
 
         if (selection) {
             return (
-                <div className={styles.pickerContainer}>
-                    <div className={styles.selectionBanner}>
+                <div className={containerClass}>
+                    <UiTarget onRemove={onClear} removeTitle="Clear selection" disabled={disabled}>
                         <code className={styles.selectionValue}>{selection}</code>
-                        <button type="button" onClick={onClear} className={styles.clearButton} title="Clear selection">×</button>
-                    </div>
+                    </UiTarget>
                 </div>
             );
         }
 
         return (
-            <div className={styles.pickerContainer}>
+            <div className={containerClass}>
                 {isPicking ? (
-                    <button
+                    <UiButton
                         type="button"
-                        className={styles.pickerButton}
+                        variant="danger"
                         onClick={onCancel}
                         title="Cancel selection"
-                        style={{
-                            borderColor: 'var(--danger)',
-                            color: 'var(--danger)',
-                        }}
                         disabled={disabled}
+                        className={styles.pickerButtonFull}
                     >
                         <span>Cancel Selection</span>
-                    </button>
+                    </UiButton>
                 ) : (
-                    <button
+                    <UiButton
                         type="button"
-                        className={styles.pickerButton}
+                        variant="secondary"
                         onClick={onPick}
                         title="Select an element in preview"
                         disabled={disabled}
+                        className={styles.pickerButtonFull}
                     >
                         <span>Pick Element</span>
-                    </button>
+                    </UiButton>
                 )}
             </div>
         );

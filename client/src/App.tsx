@@ -8,9 +8,12 @@ import { SessionStore } from './store/SessionStore';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
-interface AppProps { }
+import { ProjectCreationModal } from './components/ProjectCreationModal';
+import { ProjectSettingsModal } from './components/ProjectSettingsModal';
+import { withRouter, RouterProps } from './components/withRouter';
+import { ChatAttachment, TabType, Session, Project, LlmProvider } from './types';
 
-import { Session } from './types';
+interface AppProps extends RouterProps { }
 
 interface AppState {
     sessions: Record<string, Session>;
@@ -18,9 +21,16 @@ interface AppState {
     activeSessionId: string | null;
     isConnected: boolean;
     sessionToDelete: string | null;
+    // Project State
+    projectId: string | null;
+    projectGoal: string;
+    projectImageGenerationPref?: string;
+    projectDefaultProvider?: LlmProvider;
+    showProjectCreation: boolean;
+    showProjectSettings: boolean;
 }
 
-export default class App extends React.Component<AppProps, AppState> {
+class App extends React.Component<AppProps, AppState> {
     private evtSource: EventSource | null = null;
 
     constructor(props: AppProps) {
@@ -31,82 +41,262 @@ export default class App extends React.Component<AppProps, AppState> {
             activeSessionId: null,
             isConnected: false,
             sessionToDelete: null,
+            projectId: null,
+            projectGoal: '',
+            projectImageGenerationPref: '',
+            projectDefaultProvider: 'openai',
+            showProjectCreation: false,
+            showProjectSettings: false,
         };
 
     }
 
     componentDidMount() {
-        // Load from SessionStore
-        try {
-            const sessionIds = SessionStore.loadSessions();
-            const activeSessionId = SessionStore.loadActiveSessionId();
-            const groups = SessionStore.loadGroups();
+        // Load Project ID
+        const projectId = SessionStore.loadProjectId();
 
-            if (sessionIds.length > 0) {
-                const sessionsMap: Record<string, Session> = {};
-
-                sessionIds.forEach(id => {
-                    sessionsMap[id] = {
-                        id,
-                        status: 'idle',
-                        messages: [],
-                        statusMessages: [],
-                        requestStartTime: null,
-                        currentTurn: 0,
-                        activeTurn: null,
-                        imageGenerationAllowed: true,
-                        selection: null,
-                        isPicking: false,
-                        pendingRefreshTurn: null,
-                        group: groups[id] ?? 0 // Default to 0 if missing from store
-                    };
-                });
-
-                this.setState({
-                    sessions: sessionsMap,
-                    sessionOrder: sessionIds,
-                    activeSessionId,
-                }, () => {
-                    // Fetch active session data after mounting
-                    if (activeSessionId) {
-                        this.handleSessionChange(activeSessionId);
-                    }
-                });
-            } else {
-                // Auto-create session on startup if none exist
-                this.createSession();
-            }
-        } catch (e) {
-            console.error('Failed to load from SessionStore', e);
+        if (projectId) {
+            this.setState({ projectId }, () => {
+                this.fetchProject(projectId);
+            });
+        } else {
+            this.setState({ showProjectCreation: true });
         }
 
         // Setup persistent SSE connection
         this.setupSse();
     }
 
-    componentDidUpdate(_prevProps: AppProps, prevState: AppState) {
-        if (prevState.activeSessionId !== this.state.activeSessionId) {
-            SessionStore.saveActiveSessionId(this.state.activeSessionId);
-            // We handle data fetching in the switch method or here. 
-            // Better to handle it when the switch actually happens or state updates.
+    fetchProject = async (projectId: string) => {
+        try {
+            // Fetch project details
+            const res = await fetch(`/api/projects/${projectId}`);
+            if (!res.ok) throw new Error('Failed to fetch project');
+
+            // Expected response: { goal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
+            const data: { goal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
+
+            const sessionsMap: Record<string, Session> = {};
+            const sessionOrder: string[] = [];
+
+            data.sessions.forEach(({ sessionId, group }) => {
+                sessionOrder.push(sessionId);
+                sessionsMap[sessionId] = {
+                    id: sessionId,
+                    projectId,
+                    status: 'unloaded',
+                    messages: [],
+                    statusMessages: [],
+                    requestStartTime: null,
+                    currentTurn: 0,
+                    activeTurn: null,
+                    activeTab: 'preview',
+                    selection: null,
+                    isPicking: false,
+                    pendingRefreshTurn: null,
+                    group: group ?? 0,
+                    unsent: {},
+                    provider: 'openai'
+                };
+            });
+
+            this.setState({
+                sessions: sessionsMap,
+                sessionOrder,
+                projectId,
+                projectGoal: data.goal,
+                projectImageGenerationPref: data.imageGenerationPref,
+                projectDefaultProvider: data.defaultProvider
+            }, () => {
+                const activeSessionId = this.handleInitialRouting();
+
+                // If no sessions, create one
+                if (sessionOrder.length === 0) {
+                    this.createSession();
+                } else if (!activeSessionId && sessionOrder.length > 0) {
+                    // If routing didn't pick one (e.g. root URL), pick first
+                    this.switchSession(sessionOrder[0]);
+                }
+            });
+
+        } catch (e) {
+            console.error('Failed to load project', e);
+            // If failed (e.g. 404), maybe reset project ID?
+            // For now, assume network error or valid project.
+        }
+    }
+
+    handleInitialRouting = (): string | null => {
+        const { searchParams } = this.props.router;
+        const params = this.props.router.params as Record<string, string | undefined>;
+        const sessionIdFromUrl = params['sessionId'];
+        const turnFromUrl = searchParams.get('turn');
+        const tabFromUrl = searchParams.get('tab') as TabType;
+
+        let targetSessionId: string | null = null;
+
+        // Verify URL session exists in project
+        if (sessionIdFromUrl && this.state.sessions[sessionIdFromUrl]) {
+            targetSessionId = sessionIdFromUrl;
         }
 
-        if (prevState.sessionOrder !== this.state.sessionOrder) {
-            SessionStore.saveSessions(this.state.sessionOrder);
+        if (targetSessionId) {
+            // Apply URL params to the session state immediately
+            if (this.state.sessions[targetSessionId]) {
+                const updates: Partial<Session> = {};
+                if (turnFromUrl) updates.activeTurn = parseInt(turnFromUrl, 10);
+                if (tabFromUrl) updates.activeTab = tabFromUrl;
 
-            // Auto-create if all sessions were removed
-            if (this.state.sessionOrder.length === 0 && prevState.sessionOrder.length > 0) {
-                this.createSession();
+                if (Object.keys(updates).length > 0) {
+                    this.updateSession(targetSessionId, updates);
+                }
+            }
+
+            // Set active and fetch
+            this.setState({ activeSessionId: targetSessionId }, () => {
+                this.handleSessionChange(targetSessionId);
+            });
+            return targetSessionId;
+        } else if (sessionIdFromUrl) {
+            // URL session invalid for this project -> redirect to first if available
+            // Handled by calling function
+            return null;
+        }
+        return null;
+    }
+
+    componentDidUpdate(prevProps: AppProps, prevState: AppState) {
+        const { activeSessionId, sessions } = this.state;
+        const { router } = this.props;
+
+        // 1. Handle URL Changes (Back/Forward) => Sync to State
+        if (prevProps.router.location !== router.location) {
+            const params = router.params as Record<string, string | undefined>;
+            const newSessionId = params['sessionId'];
+            const newTurn = router.searchParams.get('turn');
+            const newTab = router.searchParams.get('tab') as TabType;
+
+            // Session change via URL
+            if (newSessionId && newSessionId !== activeSessionId && sessions[newSessionId]) {
+                this.setState({ activeSessionId: newSessionId });
+            }
+
+            // Turn/Tab change via URL for current session
+            if (activeSessionId && sessions[activeSessionId]) {
+                const session = sessions[activeSessionId];
+                const cleanTurn = newTurn ? parseInt(newTurn, 10) : null;
+                const cleanTab = newTab || 'preview';
+
+                if (session.activeTurn !== cleanTurn || session.activeTab !== cleanTab) {
+                    this.updateSession(activeSessionId, {
+                        activeTurn: cleanTurn,
+                        activeTab: cleanTab
+                    });
+                }
             }
         }
 
-        // Save groups whenever they change in any session
-        // This is a bit expensive to check deep equality, but manageable for small number of sessions.
-        // Or we can just save whenever sessions change.
-        const prevGroups = this.extractGroups(prevState.sessions);
-        const currGroups = this.extractGroups(this.state.sessions);
-        if (JSON.stringify(prevGroups) !== JSON.stringify(currGroups)) {
-            SessionStore.saveGroups(currGroups);
+        // 2. Handle State Changes => Sync to URL
+        // Active Session changed
+        if (prevState.activeSessionId !== activeSessionId) {
+            // Removed localStorage persistence for activeSessionId
+            if (activeSessionId) {
+                const session = sessions[activeSessionId];
+                if (session) {
+                    this.handleSessionChange(activeSessionId);
+
+                    // Only navigate if URL doesn't match (avoid double nav)
+                    const params = router.params as Record<string, string | undefined>;
+                    if (params['sessionId'] !== activeSessionId) {
+                        this.updateUrl(activeSessionId, session.activeTurn, session.activeTab);
+                    }
+                }
+            }
+        }
+
+        // Session State (Turn/Tab) changed
+        if (activeSessionId && sessions[activeSessionId]) {
+            const prevSession = prevState.sessions[activeSessionId];
+            const currSession = sessions[activeSessionId];
+
+            if (prevSession && (prevSession.activeTurn !== currSession.activeTurn || prevSession.activeTab !== currSession.activeTab)) {
+                this.updateUrl(activeSessionId, currSession.activeTurn, currSession.activeTab);
+            }
+        }
+
+        // Persistence removed (SessionStore.saveSessions/saveGroups deleted)
+    }
+
+    handleCreateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+        try {
+            const res = await fetch('/api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+            });
+            if (!res.ok) throw new Error('Failed to create project');
+
+            const project: Project = await res.json();
+            SessionStore.saveProjectId(project.id);
+
+            this.setState({
+                projectId: project.id,
+                showProjectCreation: false,
+                projectGoal: project.goal,
+                projectImageGenerationPref: project.imageGenerationPref,
+                projectDefaultProvider: project.defaultProvider
+            }, () => {
+                // Fetch to init session list (will be empty, then createSession)
+                this.fetchProject(project.id);
+            });
+        } catch (e) {
+            console.error('Failed to create project', e);
+        }
+    };
+
+    handleUpdateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+        const { projectId } = this.state;
+        if (!projectId) return;
+
+        try {
+            const res = await fetch(`/api/projects/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+            });
+            if (!res.ok) throw new Error('Failed to update project');
+
+            // Update local state
+            this.setState({
+                projectGoal: goal,
+                projectImageGenerationPref: imageGenerationPref,
+                projectDefaultProvider: defaultProvider
+            });
+        } catch (e) {
+            console.error('Failed to update project', e);
+        }
+    };
+
+    toggleProjectSettings = () => {
+        this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
+    };
+
+    updateUrl = (sessionId: string, turn: number | null, tab: TabType) => {
+        const params = new URLSearchParams();
+        if (turn !== null) params.set('turn', turn.toString());
+        if (tab && tab !== 'preview') params.set('tab', tab); // Default tab is preview, unnecessary to show
+
+        // Use replace if just tab changed? Use push if session changed?
+        // Let's use navigate.
+        const path = `/session/${sessionId}`;
+        const search = params.toString() ? `?${params.toString()}` : '';
+
+        // Check if we need to update to avoid redundant pushes
+        const currentPath = this.props.router.location.pathname;
+        const currentSearch = this.props.router.location.search;
+
+        if (currentPath !== path || currentSearch !== search) {
+            this.props.router.navigate(`${path}${search}`);
         }
     }
 
@@ -185,7 +375,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 } else if (data.status === 'completed') {
                     updatedSession.status = 'idle';
                     updatedSession.requestStartTime = null;
-                    updatedSession.requestStartTime = null;
+
                     // Trigger fetch to get latest messages/turn
                     setTimeout(() => this.fetchSession(sessionId, true), 0);
                 } else if (data.status === 'error') {
@@ -225,17 +415,21 @@ export default class App extends React.Component<AppProps, AppState> {
                 // New session from elsewhere
                 const newSession: Session = {
                     id: data.newSessionId,
+                    projectId: data.projectId ?? this.state.projectId ?? '',
                     status: 'idle',
                     messages: [],
                     statusMessages: [],
                     requestStartTime: null,
                     currentTurn: 0,
                     activeTurn: null,
-                    imageGenerationAllowed: true,
+
+                    activeTab: 'preview',
                     selection: null,
                     isPicking: false,
+                    // provider: 'openai', // REMOVED default
                     group: data.group ?? 0,
-                    pendingRefreshTurn: null
+                    pendingRefreshTurn: null,
+                    unsent: {}
                 };
 
                 // Calculate new order
@@ -272,18 +466,11 @@ export default class App extends React.Component<AppProps, AppState> {
             const res = await fetch(`/api/sessions/${id}`);
             const data = await res.json();
 
-            // Fetch history separately
+            // Fetch history is now included in the main session endpoint
             // New API always returns full history, no version needed
-            const historyRes = await fetch(`/api/sessions/${id}/history`);
-            let history = [];
+            const history = data.history || [];
             // Use currentTurn directly from API
             const lastTurn = data.currentTurn ?? 0;
-
-            if (historyRes.ok) {
-                history = await historyRes.json();
-            } else {
-                console.warn(`Failed to fetch history for session ${id}`);
-            }
 
             this.setState(prevState => {
                 const session = prevState.sessions[id];
@@ -299,11 +486,18 @@ export default class App extends React.Component<AppProps, AppState> {
                             ...session,
                             messages: history,
                             currentTurn: lastTurn,
-                            imageGenerationAllowed: data.imageGenerationAllowed ?? true,
-                            // If status was pending, now it is definitively idle/ready
-                            status: session.status === 'pending' ? 'idle' : session.status,
+
+                            // If status was pending or unloaded, now it is definitively idle/ready
+                            status: (session.status === 'pending' || session.status === 'unloaded') ? 'idle' : session.status,
                             // Set pendingRefreshTurn only if completion triggered this fetch
-                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn
+                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,
+                            unsent: data.unsent || session.unsent || {},
+
+                            // Restore unsent state if present and currently empty/default
+                            selection: (data.unsent?.selection) ?? session.selection,
+                            attachment: (data.unsent?.attachment) ?? session.attachment,
+                            // Use server data as authority. Unsent overrides persisted.
+                            provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                         }
                     }
                 };
@@ -334,7 +528,11 @@ export default class App extends React.Component<AppProps, AppState> {
             // We can't really add a session to the map without an ID yet.
             // So we wait for the ID from server.
 
-            App.creatingSessionPromise = fetch('/api/sessions', { method: 'POST' }).then(res => res.json());
+            App.creatingSessionPromise = fetch('/api/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId: this.state.projectId })
+            }).then(res => res.json());
             const session = await App.creatingSessionPromise;
             App.creatingSessionPromise = null;
 
@@ -357,16 +555,20 @@ export default class App extends React.Component<AppProps, AppState> {
             const newSession: Session = {
                 id: sessionData.id,
                 status: 'idle', // Ready to use
+                projectId: sessionData.projectId ?? this.state.projectId!, // Use created/source project ID
                 messages: [],
                 statusMessages: [],
                 requestStartTime: null,
                 currentTurn: sessionData.currentTurn ?? 0,
                 activeTurn: null,
-                imageGenerationAllowed: sessionData.imageGenerationAllowed ?? true,
+
+                activeTab: 'preview',
                 selection: null,
                 isPicking: false,
+                provider: sessionData.provider,
                 group: sessionData.group ?? 0,
-                pendingRefreshTurn: null
+                pendingRefreshTurn: null,
+                unsent: sessionData.unsent ?? {}
             };
 
             // Calculate new order
@@ -432,8 +634,64 @@ export default class App extends React.Component<AppProps, AppState> {
                 ...prev.sessions,
                 [id]: { ...prev.sessions[id], ...updates }
             }
-        }));
+        }), () => {
+            // Auto-save triggers
+            if (updates.selection !== undefined) {
+                // Pass null to clear if updates.selection is null/empty, otherwise value
+                this.handleSaveUnsent(id, { selection: updates.selection ? updates.selection : null });
+            }
+        });
     }
+
+    handleSaveUnsent = async (sessionId?: string, data?: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null }) => {
+        const targetId = sessionId || this.state.activeSessionId;
+        if (!targetId || !data) return;
+
+        // Optimistic update of unsent in state
+        this.setState(prev => {
+            const session = prev.sessions[targetId];
+            if (!session) return null;
+
+            // Helper to merge unsent data: if val is null, remove key. if val is undefined, keep. if val defined, update.
+            const currentUnsent = { ...(session.unsent || {}) };
+            if (data.input !== undefined) {
+                if (data.input === null) delete currentUnsent.input;
+                else currentUnsent.input = data.input;
+            }
+            if (data.attachment !== undefined) {
+                if (data.attachment === null) delete currentUnsent.attachment;
+                else currentUnsent.attachment = data.attachment;
+            }
+            if (data.selection !== undefined) {
+                if (data.selection === null) delete currentUnsent.selection;
+                else currentUnsent.selection = data.selection;
+            }
+            if (data.provider !== undefined) {
+                if (data.provider === null) delete currentUnsent.provider;
+                else currentUnsent.provider = data.provider;
+            }
+
+            return {
+                sessions: {
+                    ...prev.sessions,
+                    [targetId]: {
+                        ...session,
+                        unsent: currentUnsent
+                    }
+                }
+            };
+        });
+
+        try {
+            await fetch(`/api/sessions/${targetId}/unsent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } catch (e) {
+            console.error('Failed to save unsent data', e);
+        }
+    };
 
     handleUndo = async () => {
         const { activeSessionId } = this.state;
@@ -447,7 +705,7 @@ export default class App extends React.Component<AppProps, AppState> {
             if (data.success) {
                 // If there's a selection restored, update it locally immediately so UI reflects it
                 if (data.restoredSelection) {
-                    this.updateSession(activeSessionId, { selection: data.restoredSelection.selector });
+                    this.updateSession(activeSessionId, { selection: data.restoredSelection });
                 }
 
                 // Fetch updated session state (history, versions, etc.)
@@ -474,7 +732,9 @@ export default class App extends React.Component<AppProps, AppState> {
 
     switchSession = (id: string) => {
         this.setState({ activeSessionId: id }, () => {
-            this.handleSessionChange(id);
+            // handleSessionChange call is now redundant here if we rely on componentDidUpdate/URL sync
+            // But for immediate response we can keep it, or just let the URL update trigger it.
+            // Let's let the URL update trigger clean routing.
         });
     };
 
@@ -535,14 +795,25 @@ export default class App extends React.Component<AppProps, AppState> {
         const session = sessions[activeSessionId];
         if (!session) return;
 
+        const attachment = session.attachment;
+
         const selectionData = session.selection ? { selector: session.selection } : undefined;
+
+        const optimisticContent = text;
 
         // Optimistic update
         this.updateSession(activeSessionId, {
             status: 'busy',
             messages: [
                 ...session.messages,
-                { role: 'user', content: text, selection: selectionData, turn: session.currentTurn + 1 }
+                {
+                    role: 'user',
+                    content: optimisticContent,
+                    selection: selectionData,
+                    turn: session.currentTurn + 1,
+                    attachment: attachment, // Include attachment for immediate rendering
+                    createdAt: new Date().toISOString() // Include timestamp
+                }
             ],
             selection: null, // Clear selection
             activeTurn: null // Reset time travel
@@ -554,29 +825,96 @@ export default class App extends React.Component<AppProps, AppState> {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: text,
+                    attachment,
                     selection: selectionData,
+                    provider: session.provider,
                 }),
+            });
+            this.updateSession(activeSessionId, { attachment: undefined }); // Clear attachment
+            // Explicitly clear unsent data via API or handled by server?
+            // Server ChatService should clear it.
+            // Client state should also be cleared to reflect that.
+            // But if we want to be safe, we can clear it.
+            // However, ChatService handles it.
+            // Wait, if we rely on ChatService clearing it, we need to know WHEN it's cleared.
+            // Since we receive SSE status updates, maybe we don't need to manually clear unsent here if we fetch?
+            // But to be responsive, we should clear it.
+            this.setState(prev => {
+                const s = prev.sessions[activeSessionId];
+                return {
+                    sessions: {
+                        ...prev.sessions,
+                        [activeSessionId]: {
+                            ...s,
+                            unsent: undefined
+                        }
+                    }
+                };
             });
         } catch (e) {
             this.updateSession(activeSessionId, { status: 'error' });
         }
     };
 
-    toggleImageGeneration = async (allowed: boolean) => {
+    handleUpload = async (file: File): Promise<ChatAttachment> => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) throw new Error("No active session");
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`/api/sessions/${activeSessionId}/uploads`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!res.ok) {
+            throw new Error('Upload failed');
+        }
+
+        const data = await res.json();
+        return {
+            type: 'image',
+            filename: data.filename,
+            url: data.url,
+            id: data.filename,
+            originalName: data.originalName
+        };
+    };
+
+    handleDeleteAttachment = async (attachment: ChatAttachment) => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
 
-        this.updateSession(activeSessionId, { imageGenerationAllowed: allowed });
-
         try {
-            await fetch(`/api/sessions/${activeSessionId}/settings`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageGenerationAllowed: allowed }),
+            await fetch(`/api/sessions/${activeSessionId}/uploads/${attachment.filename}`, {
+                method: 'DELETE'
             });
+
+            // Clear from state
+            this.updateSession(activeSessionId, { attachment: undefined });
+            // Clear from unsent explicitly to ensure server sync
+            this.handleSaveUnsent(activeSessionId, { attachment: null });
+
         } catch (error) {
-            console.error('Failed to update session settings', error);
+            console.error('Failed to delete attachment', error);
         }
+    };
+
+    handleAttachmentChange = (attachment?: ChatAttachment) => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        this.updateSession(activeSessionId, { attachment });
+        this.handleSaveUnsent(activeSessionId, { attachment: attachment ?? null });
+    };
+
+    handleProviderChange = async (provider: LlmProvider) => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        this.updateSession(activeSessionId, { provider });
+        this.handleSaveUnsent(activeSessionId, { provider });
     };
 
 
@@ -589,7 +927,13 @@ export default class App extends React.Component<AppProps, AppState> {
             sessionOrder,
             activeSessionId,
             isConnected,
-            sessionToDelete
+            sessionToDelete,
+            showProjectCreation,
+            showProjectSettings,
+            projectId,
+            projectGoal,
+            projectImageGenerationPref,
+            projectDefaultProvider
         } = this.state;
 
 
@@ -610,6 +954,19 @@ export default class App extends React.Component<AppProps, AppState> {
 
         return (
             <div className={styles.app}>
+                <ProjectCreationModal
+                    isOpen={showProjectCreation}
+                    onCreate={this.handleCreateProject}
+                />
+                <ProjectSettingsModal
+                    isOpen={showProjectSettings}
+                    projectId={projectId || ''}
+                    currentGoal={projectGoal}
+                    currentImageGenerationPref={projectImageGenerationPref}
+                    currentDefaultProvider={projectDefaultProvider}
+                    onUpdate={this.handleUpdateProject}
+                    onClose={() => this.setState({ showProjectSettings: false })}
+                />
                 <ConfirmationModal
                     isOpen={!!sessionToDelete}
                     title="Close Session"
@@ -628,6 +985,7 @@ export default class App extends React.Component<AppProps, AppState> {
                         groups={groups}
                         pendingSessions={pendingSessions}
                         isConnected={isConnected}
+                        onProjectSettings={this.toggleProjectSettings}
                     />
                 </div>
 
@@ -646,8 +1004,14 @@ export default class App extends React.Component<AppProps, AppState> {
                                 onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
                                 onCloneTurn={this.cloneTurn}
                                 onPreviewTurn={this.previewTurn}
-                                onToggleImageGeneration={this.toggleImageGeneration}
+
+                                onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
+                                onUpload={this.handleUpload}
+                                onDeleteAttachment={this.handleDeleteAttachment}
+                                onAttachmentChange={this.handleAttachmentChange}
+                                unsentInput={session.unsent?.input ?? undefined}
+                                onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
                             />
                         );
                     })
@@ -656,3 +1020,5 @@ export default class App extends React.Component<AppProps, AppState> {
         );
     }
 }
+
+export default withRouter(App);

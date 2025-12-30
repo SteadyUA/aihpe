@@ -54,7 +54,7 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt(request.imageGenerationAllowed);
+        const systemPrompt = this.buildSystemPrompt(request.projectGoal, request.imageGenerationPref);
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
@@ -194,64 +194,71 @@ export class AiSdkClient implements LlmClient {
 
         // Add image tools
         tools.list_images = tool({
-            description: 'List available images in the current session. Use this to see if a suitable image already exists before generating a new one.',
+            description: 'List available UNUSED images in the current session. Returns image filenames and their geometry (width/height). Use this to find existing unused assets.',
             inputSchema: z.object({
                 summary: z.string().describe('Explain why you are listing images. This will be shown to the user.'),
             }),
             execute: async ({ summary }: { summary: string }) => {
                 try {
                     const images = await this.imageService.listImages(request.sessionId, request.currentVersion);
-                    if (images.length === 0) {
-                        return 'No images found in this session.';
+                    const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
+
+                    if (unusedImages.length === 0) {
+                        return 'No unused images found in this session.';
                     }
-                    return JSON.stringify(images);
+                    return JSON.stringify(unusedImages.map((img) => ({
+                        filename: img.filename,
+                        description: img.description,
+                        width: img.width,
+                        height: img.height,
+                        model: img.model
+                    })));
                 } catch (error: any) {
                     return `Failed to list images: ${error.message}`;
                 }
             },
         });
 
-        if (request.imageGenerationAllowed) {
-            tools.generate_image = tool({
-                description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
-                inputSchema: z.object({
-                    description: z.string().describe('Detailed description of the image to generate'),
-                    summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
-                }),
-                execute: async ({ description, summary }: { description: string; summary: string }) => {
-                    try {
-                        const nextVersion = this.ensureNextVersion(request.sessionId);
-                        const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
-                        return `Image generated successfully: ${filename}`;
-                    } catch (error: any) {
-                        return `Failed to generate image: ${error.message}`;
-                    }
-                },
-            });
+        tools.generate_image = tool({
+            description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
+            inputSchema: z.object({
+                description: z.string().describe('Detailed description of the image to generate'),
+                summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
+            }),
+            execute: async ({ description, summary }: { description: string; summary: string }) => {
+                try {
+                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
+                    return `Image generated successfully: ${filename}`;
+                } catch (error: any) {
+                    return `Failed to generate image: ${error.message}`;
+                }
+            },
+        });
 
-            tools.edit_image = tool({
-                description: 'Regenerate an existing image. Use this when the user wants to change or improve an image. The new image will replace the old one with the same filename.',
-                inputSchema: z.object({
-                    filename: z.string().describe('The filename of the image to regenerate (e.g., "image.png")'),
-                    description: z.string().describe('The new detailed description for the image'),
-                    summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
-                }),
-                execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
-                    try {
-                        const nextVersion = this.ensureNextVersion(request.sessionId);
-                        const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, filename);
-                        return `Image updated successfully: ${savedFilename}`;
-                    } catch (error: any) {
-                        return `Failed to update image: ${error.message}`;
-                    }
-                },
-            });
-        }
+        tools.edit_image = tool({
+            description: 'Edit an existing image based on a description. Use this when the user wants to change specific elements of an image (e.g., "change background to forest") while keeping the main subject. The new image will replace the old one with the same filename.',
+            inputSchema: z.object({
+                filename: z.string().describe('The filename of the image to edit (e.g., "image.png"). Must exist in the session.'),
+                description: z.string().describe('The instruction for editing the image (e.g., "Change the background to a modern kitchen").'),
+                summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
+            }),
+            execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
+                try {
+                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    // Use currentVersion as source, nextVersion as target
+                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion);
+                    return `Image edited successfully: ${savedFilename}`;
+                } catch (error: any) {
+                    return `Failed to edit image: ${error.message}`;
+                }
+            },
+        });
 
         if (request.allowVariants) {
             tools.generate_variants = tool({
                 description:
-                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state.',
+                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state. IMPORTANT: Check conversation history for previous "generate_variants" calls. Do NOT propose variants that have already been generated. Ensure new variants are distinct from any previously generated variants in this session.',
                 inputSchema: z.object({
                     count: z
                         .number()
@@ -492,16 +499,21 @@ export class AiSdkClient implements LlmClient {
         }
     }
 
-    private buildSystemPrompt(imageGenerationAllowed: boolean = true): string {
-        const imageInstructions = imageGenerationAllowed
-            ? `- Image generation is ENABLED. You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.`
-            : `- Image generation is DISABLED. You can use 'list_images' to view what is available, BUT you CANNOT generate new images or edit existing ones. If user asks to generate/edit, explain it is disabled.`;
+    private buildSystemPrompt(projectGoal?: string, imageGenerationPref?: string): string {
 
-        return `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
+        let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
-Your goal is to fulfill the user's request by modifying these files.
+Your goal is to fulfill the user's request by modifying these files.`;
 
-Strategy:
+        if (projectGoal) {
+            prompt += `\n\nCONTEXT - PROJECT GOAL:\nThe user is working on a project with the following goal:\n"${projectGoal}"\nKeep this goal in mind when making decisions about design and functionality.`;
+        }
+
+        if (imageGenerationPref) {
+            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\nUser has specified the following preferences for generating images:\n"${imageGenerationPref}"\nApply these preferences when generating or editing images.`;
+        }
+
+        prompt += `\n\nStrategy:
 1. Use 'read_file' to examine the current content of relevant files. Provide a 'summary' explaining why you need to read it.
 2. Use 'edit_file' to apply specific changes. You should favor targeted edits using unique string replacements to save context window. Provide a 'summary' explaining the change.
 3. If you need to make multiple changes, perform them in steps.
@@ -512,20 +524,43 @@ Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - If the user asks for variants, use 'generate_variants'.
-${imageInstructions}
+- You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.
 `;
+        return prompt;
     }
 
     private buildMessages(request: GeneratePageRequest): ModelMessage[] {
         const messages: ModelMessage[] = [];
 
+        const processAttachment = (attachment?: any) => {
+            const contentParts: ImagePart[] = [];
+            if (attachment && attachment.dataUrl) {
+                contentParts.push({
+                    type: 'image',
+                    image: attachment.dataUrl,
+                });
+            }
+            return contentParts;
+        };
+
         for (const entry of request.conversation) {
-            if (entry.role === 'user') {
-                messages.push({ role: 'user', content: entry.content });
-            } else if (entry.role === 'assistant') {
-                // Check if content implies tool calls which might need strict shape?
-                // For now, assume stored content is compatible or just text
-                messages.push({ role: 'assistant', content: entry.content });
+            const role = entry.role;
+            if (role === 'user' || role === 'assistant') { // Assistant can also have images if multimodal model output supported, but mainly user
+                let content: any = entry.content;
+
+                // Check if we have attachments to inject
+                if (entry.attachment) {
+                    const attachmentParts = processAttachment(entry.attachment);
+                    if (attachmentParts.length > 0) {
+                        if (typeof content === 'string') {
+                            content = [{ type: 'text', text: content }, ...attachmentParts];
+                        } else if (Array.isArray(content)) {
+                            content = [...content, ...attachmentParts];
+                        }
+                    }
+                }
+
+                messages.push({ role: role as any, content });
             } else if (entry.role === 'tool') {
                 messages.push({ role: 'tool', content: entry.content });
             } else if (entry.role === 'system') {
@@ -537,16 +572,7 @@ ${imageInstructions}
             { type: 'text', text: request.instructions },
         ];
 
-        if (request.attachments && request.attachments.length > 0) {
-            for (const attachment of request.attachments) {
-                if (attachment.dataUrl) {
-                    content.push({
-                        type: 'image',
-                        image: attachment.dataUrl,
-                    });
-                }
-            }
-        }
+        content.push(...processAttachment(request.attachment));
 
         messages.push({
             role: 'user',

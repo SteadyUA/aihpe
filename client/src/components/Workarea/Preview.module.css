@@ -1,0 +1,57 @@
+/* Preview Panel Container */
+.previewContainer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Device Controls in Toolbar */
+.deviceControls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.deviceSelect {
+    min-width: 120px;
+}
+
+.deviceSelect:disabled {
+    display: none;
+}
+
+/* Preview Frame Wrapper */
+.frameWrapper {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1rem;
+    overflow: auto;
+    transition: padding 0.3s;
+}
+
+.frameWrapper.mobile {
+    padding: 2rem 0;
+}
+
+.frameWrapper iframe {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    height: 100%;
+    transition:
+        width 0.3s,
+        height 0.3s;
+}
+
+.frameWrapper.mobile iframe {
+    width: 375px;
+    border-radius: 20px;
+    border: 8px solid #1e293b;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}

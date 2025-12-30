@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, SessionData, SessionFiles } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -19,7 +19,9 @@ type PersistedSession = {
     group?: number;
     currentVersion?: number;
     lastTurn?: number;
-    imageGenerationAllowed?: boolean;
+    provider?: LlmProvider;
+    unsent?: UnsentData;
+    projectId?: string;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -105,9 +107,9 @@ export class SessionStore {
         return 0;
     }
 
-    create(): SessionData {
+    create(projectId: string): SessionData {
         const id = randomUUID();
-        const session = this.createFreshSession(id);
+        const session = this.createFreshSession(id, projectId);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);
@@ -119,8 +121,8 @@ export class SessionStore {
         return { id, group };
     }
 
-    async executeCreate(id: string, group: number): Promise<SessionData> {
-        const session = this.createFreshSession(id, group);
+    async executeCreate(id: string, projectId: string, group: number): Promise<SessionData> {
+        const session = this.createFreshSession(id, projectId, group);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);
@@ -151,7 +153,8 @@ export class SessionStore {
             group: source.group,
             currentVersion: source.currentVersion,
             lastTurn: source.lastTurn,
-            imageGenerationAllowed: source.imageGenerationAllowed,
+            provider: source.provider,
+            projectId: source.projectId,
         };
 
         clearPersistedSessionData(targetId);
@@ -247,7 +250,8 @@ export class SessionStore {
             group: source.group,
             currentVersion: targetVersion,
             lastTurn: normalizedTurn,
-            imageGenerationAllowed: true, // Reset or copy? Resetting seems safer for a "fork".
+            provider: source.provider, // Copy provider settings
+            projectId: source.projectId,
         };
 
         clearPersistedSessionData(targetId);
@@ -262,7 +266,7 @@ export class SessionStore {
     undoLastTurn(sessionId: string): {
         success: boolean;
         restoredInput?: string;
-        restoredSelection?: { selector: string };
+        restoredSelection?: string;
         previousTurn?: number;
     } {
         const session = this.getOrCreate(sessionId);
@@ -336,6 +340,12 @@ export class SessionStore {
             currentVersion: targetVersion,
             lastTurn: currentTurn - 1,
             updatedAt: new Date(),
+            unsent: {
+                ...session.unsent,
+                input: restoredInput,
+                selection: restoredSelection?.selector, // Extract selector string
+                attachment: userMessage?.attachment,
+            }
         };
 
         this.sessions.set(sessionId, updated);
@@ -344,7 +354,7 @@ export class SessionStore {
         return {
             success: true,
             restoredInput,
-            restoredSelection: restoredSelection ? { selector: restoredSelection.selector } : undefined,
+            restoredSelection: restoredSelection?.selector,
             previousTurn: currentTurn - 1
         };
     }
@@ -362,9 +372,10 @@ export class SessionStore {
     }
 
 
-    private createFreshSession(sessionId: string, group?: number): SessionData {
+    private createFreshSession(sessionId: string, projectId: string, group?: number): SessionData {
         return {
             id: sessionId,
+            projectId,
             files: { ...EMPTY_FILES },
             history: [],
             context: [],
@@ -372,15 +383,16 @@ export class SessionStore {
             group: group ?? Math.floor(Math.random() * 12),
             currentVersion: 0,
             lastTurn: 0,
-            imageGenerationAllowed: true,
+            provider: 'openai', // Default provider
+            unsent: {},
         };
     }
 
-    updateImageGenerationAllowed(sessionId: string, allowed: boolean): SessionData {
+    updateProvider(sessionId: string, provider: LlmProvider): SessionData {
         const session = this.getOrCreate(sessionId);
         const updated: SessionData = {
             ...session,
-            imageGenerationAllowed: allowed,
+            provider,
             updatedAt: new Date(),
         };
         this.sessions.set(sessionId, updated);
@@ -400,7 +412,12 @@ export class SessionStore {
             return cloneSession(loaded);
         }
 
-        const fresh = this.createFreshSession(sessionId);
+        // If not found and generic create requested, defaulting to empty project? 
+        // This path (auto-creation without explicit create call) is dangerous now as we need projectId.
+        // Usually getOrCreate is called for EXISTING sessions or implicitly created ones.
+        // If we strictly require projectId, we cannot create a FRESH session here without knowing it.
+        // But for compatibility, let's assume we fallback to legacy/empty project.
+        const fresh = this.createFreshSession(sessionId, '');
 
         this.sessions.set(sessionId, fresh);
         this.persistSession(fresh);
@@ -653,6 +670,7 @@ export class SessionStore {
             context: update.context ?? session.context,
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
+            provider: update.provider ?? session.provider,
         };
 
         this.sessions.set(sessionId, merged);
@@ -695,6 +713,7 @@ export class SessionStore {
 
             const session: SessionData = {
                 id: parsed.id || sessionId,
+                projectId: parsed.projectId || '',
                 files,
                 history: [],
                 context: [],
@@ -704,7 +723,8 @@ export class SessionStore {
                 group: parsed.group ?? 0,
                 currentVersion,
                 lastTurn: parsed.lastTurn ?? 0,
-                imageGenerationAllowed: parsed.imageGenerationAllowed ?? true, // Default to true if missing
+                provider: parsed.provider ?? 'openai',
+                unsent: parsed.unsent ?? {},
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -774,11 +794,13 @@ export class SessionStore {
             );
             const payload: PersistedSession = {
                 id: session.id,
+                projectId: session.projectId,
                 updatedAt: session.updatedAt.toISOString(),
                 group: session.group,
                 currentVersion: session.currentVersion,
                 lastTurn: session.lastTurn,
-                imageGenerationAllowed: session.imageGenerationAllowed,
+                provider: session.provider,
+                unsent: session.unsent,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1025,6 +1047,8 @@ function cloneSession(session: SessionData): SessionData {
         group: session.group,
         currentVersion: session.currentVersion,
         lastTurn: session.lastTurn,
-        imageGenerationAllowed: session.imageGenerationAllowed,
+        provider: session.provider,
+        unsent: session.unsent ? { ...session.unsent } : undefined,
+        projectId: session.projectId,
     };
 }

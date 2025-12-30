@@ -1,0 +1,44 @@
+.container {
+    position: relative;
+    display: inline-block;
+}
+
+.select {
+    appearance: none;
+    background-color: var(--secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 24px 4px 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    height: 28px;
+    line-height: normal;
+}
+
+.select:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
+}
+
+.select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.arrow {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-secondary);
+    width: 10px;
+    height: 10px;
+}

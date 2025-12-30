@@ -49,6 +49,10 @@
     transform: translateX(16px);
 }
 
+.danger .input:checked+.switch {
+    background: var(--danger, #ef4444);
+}
+
 .label {
     font-size: 0.9rem;
     white-space: nowrap;

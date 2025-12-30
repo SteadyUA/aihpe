@@ -11,11 +11,23 @@ useContainer(Container);
 export function createApp(): express.Express {
     const app = express();
 
+    app.set('etag', false);
     app.use(cors());
     // app.use(express.json());
     app.use(express.text());
 
-    const publicDir = path.resolve(__dirname, '..', 'public');
+    // Disable caching for API routes
+    app.use('/api', (req, res, next) => {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        res.set('Surrogate-Control', 'no-store');
+        next();
+    });
+
+    const localPublic = path.join(__dirname, 'public');
+    const siblingPublic = path.join(__dirname, '..', 'public');
+    const publicDir = require('fs').existsSync(localPublic) ? localPublic : siblingPublic;
     app.use(express.static(publicDir));
 
     useExpressServer(app, {

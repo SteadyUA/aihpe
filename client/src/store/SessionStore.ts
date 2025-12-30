@@ -1,58 +1,22 @@
 export class SessionStore {
-    private static SESSIONS_KEY = 'sessions';
-    private static ACTIVE_SESSION_KEY = 'activeSessionId';
-    private static GROUPS_KEY = 'sessionGroups';
+    private static PROJECT_ID_KEY = 'projectId';
 
-    static loadSessions(): string[] {
+    static loadProjectId(): string | null {
         try {
-            const saved = localStorage.getItem(this.SESSIONS_KEY);
-            return saved ? JSON.parse(saved) : [];
+            return localStorage.getItem(this.PROJECT_ID_KEY) || null;
         } catch (e) {
-            console.error('Failed to load sessions', e);
-            return [];
-        }
-    }
-
-    static saveSessions(sessions: string[]) {
-        try {
-            localStorage.setItem(this.SESSIONS_KEY, JSON.stringify(sessions));
-        } catch (e) {
-            console.error('Failed to save sessions', e);
-        }
-    }
-
-    static loadActiveSessionId(): string | null {
-        try {
-            return localStorage.getItem(this.ACTIVE_SESSION_KEY) || null;
-        } catch (e) {
-            console.error('Failed to load active session id', e);
+            console.error('Failed to load project id', e);
             return null;
         }
     }
 
-    static saveActiveSessionId(id: string | null) {
+    static saveProjectId(id: string) {
         try {
-            localStorage.setItem(this.ACTIVE_SESSION_KEY, id || '');
+            localStorage.setItem(this.PROJECT_ID_KEY, id);
         } catch (e) {
-            console.error('Failed to save active session id', e);
+            console.error('Failed to save project id', e);
         }
     }
 
-    static loadGroups(): Record<string, number> {
-        try {
-            const saved = localStorage.getItem(this.GROUPS_KEY);
-            return saved ? JSON.parse(saved) : {};
-        } catch (e) {
-            console.error('Failed to load groups', e);
-            return {};
-        }
-    }
-
-    static saveGroups(groups: Record<string, number>) {
-        try {
-            localStorage.setItem(this.GROUPS_KEY, JSON.stringify(groups));
-        } catch (e) {
-            console.error('Failed to save groups', e);
-        }
-    }
+    // Deprecated/Removed legacy session list storage methods
 }

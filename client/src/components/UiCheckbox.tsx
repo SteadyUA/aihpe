@@ -9,6 +9,7 @@ interface UiCheckboxProps {
     disabled?: boolean;
     title?: string;
     className?: string; // Allow external override/positioning
+    variant?: 'default' | 'danger';
 }
 
 export class UiCheckbox extends React.Component<UiCheckboxProps> {
@@ -19,12 +20,13 @@ export class UiCheckbox extends React.Component<UiCheckboxProps> {
     };
 
     render() {
-        const { checked, label, disabled, title, className } = this.props;
+        const { checked, label, disabled, title, className, variant = 'default' } = this.props;
 
         return (
             <label
                 className={classNames(styles.container, className, {
                     [styles.disabled]: disabled,
+                    [styles.danger]: variant === 'danger',
                 })}
                 title={title}
             >

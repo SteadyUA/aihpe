@@ -26,6 +26,7 @@ export interface SessionCreatedPayload {
     sourceSessionId: string;
     newSessionId: string;
     group?: number;
+    projectId?: string;
     timestamp?: string;
 }
 
