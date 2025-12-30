@@ -100,6 +100,128 @@ export class ImageService {
         }
     }
 
+
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number): Promise<string> {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY not configured');
+        }
+
+        console.log(`Editing image ${filename} for session ${sessionId} source v${sourceVersion} -> target v${targetVersion} with prompt: ${prompt}`);
+
+        // Resolve source file: check target version first (in case it was already modified in this turn)
+        let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
+        let sourcePath = path.join(sourceDir, filename);
+
+        if (!fs.existsSync(sourcePath)) {
+            // Fallback to source version
+            sourceDir = this.resolveVersionDir(sessionId, sourceVersion);
+            sourcePath = path.join(sourceDir, filename);
+        }
+
+        if (!fs.existsSync(sourcePath)) {
+            throw new Error(`Source image not found: ${filename}`);
+        }
+
+        const buffer = fs.readFileSync(sourcePath);
+        const base64Data = buffer.toString('base64');
+        const mimeType = this.getMimeType(filename);
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+
+        // Augment prompt to ask for description
+        const augmentedPrompt = `${prompt}\n\nAlso describe it in a single sentence so that I can use this description for alt-text or generating a similar image.`;
+
+        const body = {
+            contents: [{
+                parts: [
+                    { text: augmentedPrompt },
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Data
+                        }
+                    }
+                ]
+            }],
+            generationConfig: {
+                responseModalities: ["TEXT", "IMAGE"]
+            }
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log(data.candidates[0].content);
+
+            // Extract image and text from response
+            let newBase64Data: string | undefined;
+            let newDescription: string | undefined;
+
+            if (data.candidates?.[0]?.content?.parts) {
+                const parts = data.candidates[0].content.parts;
+
+                const imagePart = parts.find((p: any) => p.inlineData);
+                if (imagePart) {
+                    newBase64Data = imagePart.inlineData.data;
+                }
+
+                const textPart = parts.find((p: any) => p.text);
+                if (textPart) {
+                    newDescription = textPart.text;
+                }
+            }
+
+            if (!newBase64Data) {
+                throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
+            }
+
+            const versionDir = this.resolveVersionDir(sessionId, targetVersion);
+            this.ensureDirectory(versionDir);
+
+            // We overwrite the file in the target version location with the same filename
+            const savePath = path.join(versionDir, filename);
+            const newBuffer = Buffer.from(newBase64Data, 'base64');
+            fs.writeFileSync(savePath, newBuffer);
+
+            // Calculate dimensions of new image
+            let width, height;
+            try {
+                const dimensions = imageSize(newBuffer);
+                width = dimensions.width;
+                height = dimensions.height;
+            } catch (e) {
+                console.warn('Failed to calculate new image dimensions', e);
+            }
+
+            // Save metadata
+            this.saveMetadata(sessionId, targetVersion, {
+                filename,
+                description: newDescription || prompt, // Use generated description or fallback to prompt
+                createdAt: new Date().toISOString(),
+                model: this.modelId,
+                width,
+                height,
+                isUsed: true,
+            });
+
+            return filename;
+        } catch (error) {
+            console.error('Failed to edit image:', error);
+            throw new Error(`Failed to edit image: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {
         const versionDir = this.resolveVersionDir(sessionId, version);
         this.ensureDirectory(versionDir);

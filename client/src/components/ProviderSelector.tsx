@@ -1,6 +1,7 @@
 import React from 'react';
 import { UiDropdown } from './UiDropdown';
 import { LlmProvider } from '../types';
+import { LLM_PROVIDERS } from '../constants';
 
 interface ProviderSelectorProps {
     value?: LlmProvider;
@@ -8,11 +9,6 @@ interface ProviderSelectorProps {
     disabled?: boolean;
     className?: string;
 }
-
-const PROVIDER_OPTIONS = [
-    { value: 'openai', label: 'OpenAI (GPT)' },
-    { value: 'google', label: 'Google (Gemini)' },
-];
 
 export class ProviderSelector extends React.Component<ProviderSelectorProps> {
     handleChange = (newValue: string) => {
@@ -25,7 +21,7 @@ export class ProviderSelector extends React.Component<ProviderSelectorProps> {
         return (
             <UiDropdown
                 value={value}
-                options={PROVIDER_OPTIONS}
+                options={LLM_PROVIDERS}
                 onChange={this.handleChange}
                 disabled={disabled}
                 className={className}

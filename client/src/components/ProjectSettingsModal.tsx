@@ -3,6 +3,7 @@ import { UiModal } from './UiModal';
 import { UiButton } from './UiButton';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
+import { LLM_PROVIDERS } from '../constants';
 
 interface ProjectSettingsModalProps {
     isOpen: boolean;
@@ -106,8 +107,11 @@ export class ProjectSettingsModal extends Component<ProjectSettingsModalProps, P
                         value={defaultProvider}
                         onChange={(e) => this.setState({ defaultProvider: e.target.value as LlmProvider })}
                     >
-                        <option value="openai">OpenAI</option>
-                        <option value="google">Google</option>
+                        {LLM_PROVIDERS.map(provider => (
+                            <option key={provider.value} value={provider.value}>
+                                {provider.label}
+                            </option>
+                        ))}
                     </select>
                 </div>
             </UiModal>

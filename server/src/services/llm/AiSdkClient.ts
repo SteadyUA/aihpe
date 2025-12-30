@@ -237,19 +237,20 @@ export class AiSdkClient implements LlmClient {
         });
 
         tools.edit_image = tool({
-            description: 'Regenerate an existing image. Use this when the user wants to change or improve an image. The new image will replace the old one with the same filename.',
+            description: 'Edit an existing image based on a description. Use this when the user wants to change specific elements of an image (e.g., "change background to forest") while keeping the main subject. The new image will replace the old one with the same filename.',
             inputSchema: z.object({
-                filename: z.string().describe('The filename of the image to regenerate (e.g., "image.png")'),
-                description: z.string().describe('The new detailed description for the image'),
+                filename: z.string().describe('The filename of the image to edit (e.g., "image.png"). Must exist in the session.'),
+                description: z.string().describe('The instruction for editing the image (e.g., "Change the background to a modern kitchen").'),
                 summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
             }),
             execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const savedFilename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, filename);
-                    return `Image updated successfully: ${savedFilename}`;
+                    // Use currentVersion as source, nextVersion as target
+                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion);
+                    return `Image edited successfully: ${savedFilename}`;
                 } catch (error: any) {
-                    return `Failed to update image: ${error.message}`;
+                    return `Failed to edit image: ${error.message}`;
                 }
             },
         });
