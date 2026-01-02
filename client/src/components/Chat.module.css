@@ -31,6 +31,8 @@
     border-radius: 8px;
     font-size: 0.95rem;
     line-height: 1.5;
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .user .messageContent {
@@ -52,7 +54,7 @@
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
     padding: 0.1rem 0.4rem;
-    margin-bottom: 0.5rem;
+    margin-top: 0.75rem;
     font-family: var(--font-mono);
     font-size: 0.8em;
     color: white;
@@ -73,23 +75,28 @@
     border: 1px solid var(--border-color);
     color: var(--text-primary);
     border-bottom-right-radius: 2px;
-    padding-top: 0;
-    padding-bottom: 0;
 }
 
-.assistant p,
-.assistant ul,
-.assistant ol {
-    margin: 0.75rem 0;
+.messageContent p,
+.messageContent ul,
+.messageContent ol,
+.messageContent h1,
+.messageContent h2,
+.messageContent h3,
+.messageContent h4,
+.messageContent h5,
+.messageContent h6 {
+    margin: 0.5rem 0;
 }
 
-.assistant ul,
-.assistant ol {
-    padding-inline-start: 1rem;
+.messageContent ul,
+.messageContent ol {
+    padding-left: 1.5em;
 }
 
-.assistant li>ul,
-.assistant li>ol {
+.messageContent li>ul,
+.messageContent li>ol,
+.messageContent li>p {
     margin: 0;
 }
 
@@ -274,7 +281,7 @@
 /* Message Thumbnail Styling */
 .messageThumbnail {
     display: block;
-    margin-top: 8px;
+    margin: 0.75rem 0;
     max-width: 150px;
     max-height: 150px;
     border-radius: 4px;

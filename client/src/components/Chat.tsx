@@ -7,6 +7,7 @@ import { UiTarget } from './UiTarget';
 import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
+import { RichInput } from './RichInput';
 
 
 marked.setOptions({ breaks: true });
@@ -88,16 +89,12 @@ class Message extends React.Component<MessageProps> {
                     {/* Render Text Content */}
                     {/* Render Text Content */}
                     {(msg.content || (!msg.attachment && isUser)) && (
-                        isAssistant ? (
-                            <div
-                                className="message-text"
-                                dangerouslySetInnerHTML={{
-                                    __html: marked.parse(msg.content) as string,
-                                }}
-                            />
-                        ) : (
-                            <div className="message-text">{msg.content}</div>
-                        )
+                        <div
+                            className="message-text"
+                            dangerouslySetInnerHTML={{
+                                __html: marked.parse(msg.content) as string,
+                            }}
+                        />
                     )}
 
                     {/* Render Attachment as Thumbnail */}
@@ -344,6 +341,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         this.setState({ input: e.target.value });
+    };
+
+    handleRichInputChange = (value: string) => {
+        this.setState({ input: value });
     };
 
     performUpload = async (file: File) => {
@@ -596,12 +597,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         />
                     </div>
 
-                    <textarea
+                    <RichInput
                         value={input}
-                        onChange={this.handleInputChange}
+                        onChange={this.handleRichInputChange}
                         onPaste={this.handlePaste}
                         placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
-                        rows={4}
                         disabled={isFormDisabled}
                         tabIndex={1}
                         onBlur={() => {
