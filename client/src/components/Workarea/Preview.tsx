@@ -27,6 +27,7 @@ interface PreviewProps {
     active: boolean;
     onLoad?: () => void;
     reloadTrigger?: number;
+    isResizing?: boolean;
 }
 
 interface PreviewState {
@@ -322,14 +323,15 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         title="Preview"
                         sandbox="allow-scripts allow-same-origin allow-modals"
                         onLoad={this.handleIframeLoad}
-                        style={
-                            isMobile
+                        style={{
+                            ...(isMobile
                                 ? {
                                     width: `${device.width}px`,
                                     height: `${device.height}px`,
                                 }
-                                : {}
-                        }
+                                : {}),
+                            pointerEvents: this.props.isResizing ? 'none' : 'auto'
+                        }}
                     />
                 </div>
             </div>

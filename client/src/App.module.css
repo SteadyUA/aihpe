@@ -1,7 +1,8 @@
 /* Main App Layout */
 .app {
     display: grid;
-    grid-template-columns: 400px 1fr;
+    /* grid-template-columns: 400px 1fr;  Overridden by inline style for resize */
+    grid-template-columns: var(--chat-width, 400px) auto 1fr;
     grid-template-rows: auto 1fr;
     flex: 1;
     overflow: hidden;

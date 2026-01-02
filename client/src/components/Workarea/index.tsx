@@ -18,6 +18,7 @@ interface WorkareaProps {
     activeTab: TabType;
     onTabChange?: (tab: TabType) => void;
     onLoad?: () => void;
+    isResizing?: boolean;
 }
 
 const FILENAME_MAP: Record<AssetType, string> = {
@@ -457,6 +458,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     active={activeTab === 'preview'}
                     onLoad={onLoad}
                     reloadTrigger={iframeKey}
+                    isResizing={this.props.isResizing}
                 />
 
                 <Images

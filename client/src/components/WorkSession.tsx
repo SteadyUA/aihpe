@@ -2,6 +2,7 @@ import React from 'react';
 import { Chat } from './Chat';
 import { Workarea } from './Workarea';
 import { Session, LlmProvider, ChatAttachment } from '../types';
+import { ResizeHandle } from './ResizeHandle';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
@@ -19,6 +20,8 @@ interface WorkSessionProps {
     onAttachmentChange: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
     onSaveUnsent?: (data: { input?: string | null }) => void;
+    onResizeStart?: (e: React.MouseEvent) => void;
+    isResizing?: boolean;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -228,6 +231,13 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSaveUnsent={onSaveUnsent}
                 />
 
+                {this.props.onResizeStart && (
+                    <ResizeHandle
+                        onMouseDown={this.props.onResizeStart}
+                        isActive={this.props.isResizing}
+                    />
+                )}
+
                 <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
@@ -235,6 +245,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
+                    isResizing={this.props.isResizing}
                 />
             </div>
         );

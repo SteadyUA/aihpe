@@ -28,6 +28,8 @@ interface AppState {
     projectDefaultProvider?: LlmProvider;
     showProjectCreation: boolean;
     showProjectSettings: boolean;
+    chatWidth: number;
+    isResizing: boolean;
 }
 
 class App extends React.Component<AppProps, AppState> {
@@ -47,6 +49,8 @@ class App extends React.Component<AppProps, AppState> {
             projectDefaultProvider: 'openai',
             showProjectCreation: false,
             showProjectSettings: false,
+            chatWidth: parseInt(localStorage.getItem('chatWidth') || '400', 10),
+            isResizing: false,
         };
 
     }
@@ -917,6 +921,48 @@ class App extends React.Component<AppProps, AppState> {
         this.handleSaveUnsent(activeSessionId, { provider });
     };
 
+    // Resize Handlers
+    handleResizeStart = (e: React.MouseEvent) => {
+        e.preventDefault();
+        this.setState({ isResizing: true });
+        window.addEventListener('mousemove', this.handleResizeMove);
+        window.addEventListener('mouseup', this.handleResizeEnd);
+    };
+
+    handleResizeMove = (e: MouseEvent) => {
+        // Calculate new width based on mouse X relative to viewport
+        // Assuming session bar is roughly fixed or we can calculate offset?
+        // Session bar width is not fixed, but we can assume the grid starts after session bar?
+        // Wait, session bar is top or left?
+        // App.module.css says: grid-template-columns: 400px 1fr;
+        // The session bar is a separate component?
+        // Looking at App.tsx render: SessionBarWrapper grid-column: 1 / -1. It's properly on top/left depending on layout?
+        // Wrapper says grid-column: 1 / -1.
+        // App grid: rows: auto 1fr. Session bar is row 1.
+        // WorkSession (Chat+Workarea) is row 2?
+        // WorkSession display: contents.
+        // So Chat is col 1, Workarea is col 2.
+
+        // Mouse X is absolute.
+        // If there's no sidebar to the left of Chat, then Chat width approx MouseX.
+        // But let's be safer: get chat panel via ref? or just use e.clientX
+        // Since the App covers the screen and Chat is the first column, X coordinate roughly equals width.
+        // Constraints: min 200, max 800.
+
+        let newWidth = e.clientX;
+        if (newWidth < 250) newWidth = 250;
+        if (newWidth > 800) newWidth = 800; // or window.innerWidth * 0.6
+
+        this.setState({ chatWidth: newWidth });
+    };
+
+    handleResizeEnd = () => {
+        this.setState({ isResizing: false });
+        window.removeEventListener('mousemove', this.handleResizeMove);
+        window.removeEventListener('mouseup', this.handleResizeEnd);
+        localStorage.setItem('chatWidth', this.state.chatWidth.toString());
+    };
+
 
 
 
@@ -953,7 +999,14 @@ class App extends React.Component<AppProps, AppState> {
 
 
         return (
-            <div className={styles.app}>
+            <div
+                className={styles.app}
+                style={{
+                    gridTemplateColumns: `${this.state.chatWidth}px auto 1fr`,
+                    cursor: this.state.isResizing ? 'col-resize' : 'default',
+                    userSelect: this.state.isResizing ? 'none' : 'auto'
+                } as React.CSSProperties}
+            >
                 <ProjectCreationModal
                     isOpen={showProjectCreation}
                     onCreate={this.handleCreateProject}
@@ -1012,6 +1065,9 @@ class App extends React.Component<AppProps, AppState> {
                                 onAttachmentChange={this.handleAttachmentChange}
                                 unsentInput={session.unsent?.input ?? undefined}
                                 onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
+
+                                onResizeStart={this.handleResizeStart}
+                                isResizing={this.state.isResizing}
                             />
                         );
                     })
