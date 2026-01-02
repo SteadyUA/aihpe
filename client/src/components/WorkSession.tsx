@@ -31,6 +31,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     constructor(props: WorkSessionProps) {
         super(props);
         this.picker = new ElementPicker();
+        this.picker.setOnSelect(this.handleElementSelected);
         this.previewRef = React.createRef();
     }
 
@@ -95,18 +96,23 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         if (prevProps.session.activeTab !== this.props.session.activeTab) {
             if (this.props.session.activeTab !== 'preview') {
                 this.stopPicking();
+            } else {
+                // Switching TO preview. The iframe is preserved (hidden), so onLoad won't fire.
+                // We must manually restore the selection overlay.
+                if (this.props.session.selection) {
+                    this.visualizeSelection(this.props.session.selection);
+                }
             }
-            // If switching TO preview, iframe reloads -> onLoad handles restoration
         }
     }
 
-    visualizeSelection = (selector: string) => {
+    visualizeSelection = (selector: string, scrollTo: boolean = false) => {
         const previewInstance = this.previewRef.current;
         if (!previewInstance) return;
         const iframe = previewInstance.getIframe();
         if (!iframe) return;
 
-        this.picker.selectBySelector(iframe, selector);
+        this.picker.selectBySelector(iframe, selector, scrollTo);
     };
 
     handlePreviewLoad = () => {
@@ -117,6 +123,20 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
     componentWillUnmount() {
         this.picker.stop();
+    }
+
+    handleElementSelected = (selector: string) => {
+        // If we were in picking mode, stop it now
+        if (this.props.session.isPicking) {
+            this.picker.stop();
+            this.props.onUpdateSession({ isPicking: false });
+        }
+
+        // Update selection (e.g. from picking or from passive parent click)
+        this.props.onUpdateSession({ selection: selector });
+
+        // Ensure visualization is correct (especially after stop() clears it)
+        this.visualizeSelection(selector);
     }
 
     startPicking = () => {
@@ -131,9 +151,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
         this.props.onUpdateSession({ isPicking: true });
 
-        this.picker.start(iframe, (selector) => {
-            this.props.onUpdateSession({ selection: selector, isPicking: false });
-        });
+        this.picker.start(iframe);
     };
 
     stopPicking = () => {
@@ -142,7 +160,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     };
 
     restoreSelection = (selector: string) => {
-        this.visualizeSelection(selector);
+        this.visualizeSelection(selector, true);
         this.props.onUpdateSession({ selection: selector });
     };
 
