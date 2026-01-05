@@ -24,6 +24,12 @@ export class ProjectService {
             const data = JSON.parse(raw);
             if (Array.isArray(data)) {
                 for (const p of data) {
+                    // Migration: goal -> rulesAndGoal
+                    if ((p as any).goal && !p.rulesAndGoal) {
+                        p.rulesAndGoal = (p as any).goal;
+                        delete (p as any).goal;
+                    }
+
                     this.projects.set(p.id, {
                         ...p,
                         createdAt: new Date(p.createdAt),
@@ -44,11 +50,11 @@ export class ProjectService {
         fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     }
 
-    createProject(goal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider): Project {
+    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider): Project {
         const id = randomUUID();
         const project: Project = {
             id,
-            goal,
+            rulesAndGoal,
             imageGenerationPref,
             defaultProvider,
             sessionIds: [],
@@ -64,7 +70,7 @@ export class ProjectService {
         return this.projects.get(id);
     }
 
-    updateProject(id: string, updates: Partial<Pick<Project, 'goal' | 'imageGenerationPref' | 'defaultProvider'>>): Project {
+    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider'>>): Project {
         const project = this.projects.get(id);
         if (!project) {
             throw new Error(`Project ${id} not found`);

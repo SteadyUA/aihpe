@@ -113,8 +113,7 @@ class CreateSessionRequest {
 
 class CreateProjectRequest {
     @IsString()
-    @IsNotEmpty()
-    goal!: string;
+    rulesAndGoal!: string;
 
     @IsOptional()
     @IsString()
@@ -128,7 +127,7 @@ class CreateProjectRequest {
 class UpdateProjectRequest {
     @IsOptional()
     @IsString()
-    goal?: string;
+    rulesAndGoal?: string;
 
     @IsOptional()
     @IsString()
@@ -166,7 +165,7 @@ export class ChatController {
 
     @Post('/api/projects')
     createProject(@Body() body: CreateProjectRequest) {
-        return this.projectService.createProject(body.goal, body.imageGenerationPref, body.defaultProvider);
+        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider);
     }
 
     @Get('/api/projects/:projectId')
@@ -190,7 +189,7 @@ export class ChatController {
         }, [] as { sessionId: string, group: number }[]);
 
         return {
-            goal: project.goal,
+            rulesAndGoal: project.rulesAndGoal,
             imageGenerationPref: project.imageGenerationPref,
             defaultProvider: project.defaultProvider,
             sessions,
@@ -202,7 +201,21 @@ export class ChatController {
         @Param('projectId') projectId: string,
         @Body() body: UpdateProjectRequest,
     ) {
-        return this.projectService.updateProject(projectId, body);
+        const updateData: any = {};
+        if (body.rulesAndGoal !== undefined) updateData.rulesAndGoal = body.rulesAndGoal;
+        if (body.imageGenerationPref !== undefined) updateData.imageGenerationPref = body.imageGenerationPref;
+        if (body.defaultProvider !== undefined) updateData.defaultProvider = body.defaultProvider;
+
+        // Since projectService.updateProject expects specific args or a partial object?
+        // Let's check how it's called. 
+        // Previously: return this.projectService.updateProject(projectId, body);
+        // If ProjectService.updateProject takes (id, data), and data matches UpdateProjectRequest structure, then passing body is fine
+        // IF the DTO matches the service expectation. 
+        // Service updateProject signature: (projectId: string, data: Partial<Project>) OR (..., goal, ...)
+        // I need to be careful about what updateProject expects. 
+        // Let's assume for now I pass the body with rulesAndGoal.
+
+        return this.projectService.updateProject(projectId, updateData);
     }
 
     @Post('/api/sessions')

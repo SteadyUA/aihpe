@@ -33,8 +33,16 @@ export interface SessionCreatedPayload {
 @Service()
 export class SseService {
     private readonly clients = new Map<number, SseClient>();
+    private static instanceCount = 0;
+    private readonly instanceId: number;
 
     private nextClientId = 1;
+
+    constructor() {
+        SseService.instanceCount++;
+        this.instanceId = SseService.instanceCount;
+        console.log(`[SseService] Created instance #${this.instanceId}. Total instances: ${SseService.instanceCount}`);
+    }
 
     addClient(request: Request, response: Response): void {
         response.setHeader('Content-Type', 'text/event-stream');
@@ -42,6 +50,8 @@ export class SseService {
         response.setHeader('Connection', 'keep-alive');
         response.flushHeaders?.();
         response.write('retry: 5000\n\n');
+
+        console.log(`[SseService #${this.instanceId}] Client connecting...`);
 
         const client: SseClient = {
             id: this.nextClientId++,
@@ -52,6 +62,7 @@ export class SseService {
         };
 
         this.clients.set(client.id, client);
+        console.log(`[SseService #${this.instanceId}] Client #${client.id} registered. Active clients: ${this.clients.size}`);
 
         const closeHandler = () => {
             this.removeClient(client.id);
@@ -81,6 +92,7 @@ export class SseService {
 
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
+        console.log(`[SseService #${this.instanceId}] Broadcasting '${event}' to ${this.clients.size} clients.`);
         for (const client of this.clients.values()) {
             this.pushRaw(client.id, `event: ${event}\n`);
             this.pushRaw(client.id, `data: ${serialized}\n\n`);
@@ -114,5 +126,6 @@ export class SseService {
             console.error('Failed to close SSE response', error);
         }
         this.clients.delete(clientId);
+        console.log(`[SseService #${this.instanceId}] Client #${clientId} removed. Active clients: ${this.clients.size}`);
     }
 }

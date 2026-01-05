@@ -1,4 +1,4 @@
-import React, { Component } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UiModal } from './UiModal';
 import { UiButton } from './UiButton';
 import { RichInput } from './RichInput';
@@ -8,114 +8,100 @@ import { LLM_PROVIDERS } from '../constants';
 
 interface ProjectSettingsModalProps {
     isOpen: boolean;
-    projectId: string;
-    currentGoal: string;
+    projectId: string; // Kept for reference if needed, though not used directly in logic below
+    currentRulesAndGoal: string;
     currentImageGenerationPref?: string;
     currentDefaultProvider?: LlmProvider;
-    onUpdate: (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => Promise<void>;
+    onUpdate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => Promise<void>;
     onClose: () => void;
 }
 
-interface ProjectSettingsModalState {
-    goal: string;
-    imageGenerationPref: string;
-    defaultProvider: LlmProvider;
-    isSaving: boolean;
-}
+export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
+    isOpen,
+    currentRulesAndGoal,
+    currentImageGenerationPref,
+    currentDefaultProvider,
+    onUpdate,
+    onClose
+}) => {
+    const [rulesAndGoal, setRulesAndGoal] = useState(currentRulesAndGoal || '');
+    const [imageGenerationPref, setImageGenerationPref] = useState(currentImageGenerationPref || '');
+    const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(currentDefaultProvider || 'openai');
+    const [isSaving, setIsSaving] = useState(false);
 
-export class ProjectSettingsModal extends Component<ProjectSettingsModalProps, ProjectSettingsModalState> {
-    constructor(props: ProjectSettingsModalProps) {
-        super(props);
-        this.state = {
-            goal: props.currentGoal,
-            imageGenerationPref: props.currentImageGenerationPref || '',
-            defaultProvider: props.currentDefaultProvider || 'openai',
-            isSaving: false,
-        };
-    }
-
-    componentDidUpdate(prevProps: ProjectSettingsModalProps) {
-        if (prevProps.isOpen !== this.props.isOpen && this.props.isOpen) {
-            this.setState({
-                goal: this.props.currentGoal,
-                imageGenerationPref: this.props.currentImageGenerationPref || '',
-                defaultProvider: this.props.currentDefaultProvider || 'openai'
-            });
+    // Sync state when props change or modal opens
+    useEffect(() => {
+        if (isOpen) {
+            setRulesAndGoal(currentRulesAndGoal || '');
+            setImageGenerationPref(currentImageGenerationPref || '');
+            setDefaultProvider(currentDefaultProvider || 'openai');
         }
-    }
+    }, [isOpen, currentRulesAndGoal, currentImageGenerationPref, currentDefaultProvider]);
 
-    handleSave = async () => {
-        const { goal, imageGenerationPref, defaultProvider } = this.state;
-        if (!goal.trim()) return;
-
-        this.setState({ isSaving: true });
+    const handleSave = async () => {
+        setIsSaving(true);
         try {
-            await this.props.onUpdate(goal, imageGenerationPref, defaultProvider);
-            this.props.onClose();
+            await onUpdate(rulesAndGoal, imageGenerationPref, defaultProvider);
+            onClose();
         } finally {
-            this.setState({ isSaving: false });
+            setIsSaving(false);
         }
     };
 
-    render() {
-        const { isOpen, onClose } = this.props;
-        const { goal, imageGenerationPref, defaultProvider, isSaving } = this.state;
-
-        return (
-            <UiModal
-                isOpen={isOpen}
-                title="Project Settings"
-                onClose={onClose}
-                actions={
-                    <>
-                        <UiButton onClick={onClose} variant="secondary" disabled={isSaving}>
-                            Cancel
-                        </UiButton>
-                        <UiButton
-                            onClick={this.handleSave}
-                            variant="primary"
-                            disabled={!goal.trim() || isSaving}
-                        >
-                            {isSaving ? 'Saving...' : 'Save'}
-                        </UiButton>
-                    </>
-                }
-                className={styles.modal}
-            >
-                <div className={styles.field}>
-                    <label className={styles.label}>Project Goal</label>
-                    <RichInput
-                        value={goal}
-                        onChange={(value) => this.setState({ goal: value })}
-                        placeholder="Describe the goal of this project..."
-                        rows={2}
-                    />
-                </div>
-                <div className={styles.field}>
-                    <label className={styles.label}>Image Generation Preferences</label>
-                    <textarea
-                        className={styles.input}
-                        value={imageGenerationPref}
-                        onChange={(e) => this.setState({ imageGenerationPref: e.target.value })}
-                        placeholder="E.g. strict realism, no text, vibrant colors..."
-                        rows={2}
-                    />
-                </div>
-                <div className={styles.field}>
-                    <label className={styles.label}>Default Provider</label>
-                    <select
-                        className={styles.input}
-                        value={defaultProvider}
-                        onChange={(e) => this.setState({ defaultProvider: e.target.value as LlmProvider })}
+    return (
+        <UiModal
+            isOpen={isOpen}
+            title="Project Settings"
+            onClose={onClose}
+            actions={
+                <>
+                    <UiButton onClick={onClose} variant="secondary" disabled={isSaving}>
+                        Cancel
+                    </UiButton>
+                    <UiButton
+                        onClick={handleSave}
+                        variant="primary"
+                        disabled={isSaving}
                     >
-                        {LLM_PROVIDERS.map(provider => (
-                            <option key={provider.value} value={provider.value}>
-                                {provider.label}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-            </UiModal>
-        );
-    }
-}
+                        {isSaving ? 'Saving...' : 'Save'}
+                    </UiButton>
+                </>
+            }
+            className={styles.modal}
+        >
+            <div className={styles.field}>
+                <label className={styles.label}>Rules and Goal</label>
+                <RichInput
+                    value={rulesAndGoal}
+                    onChange={setRulesAndGoal}
+                    placeholder="Describe your project goal and any specific rules..."
+                    rows={2}
+                />
+            </div>
+            <div className={styles.field}>
+                <label className={styles.label}>Image Generation Preferences</label>
+                <textarea
+                    className={styles.input}
+                    value={imageGenerationPref}
+                    onChange={(e) => setImageGenerationPref(e.target.value)}
+                    placeholder="E.g. strict realism, no text, vibrant colors..."
+                    rows={2}
+                />
+            </div>
+            <div className={styles.field}>
+                <label className={styles.label}>Default Provider</label>
+                <select
+                    className={styles.input}
+                    value={defaultProvider}
+                    onChange={(e) => setDefaultProvider(e.target.value as LlmProvider)}
+                >
+                    {LLM_PROVIDERS.map(provider => (
+                        <option key={provider.value} value={provider.value}>
+                            {provider.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+        </UiModal>
+    );
+};

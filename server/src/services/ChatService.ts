@@ -153,7 +153,7 @@ export class ChatService {
 
         // Fetch project context
         const project = this.projectService.getProject(currentSessionData.projectId);
-        const projectGoal = project?.goal;
+        const rulesAndGoal = project?.rulesAndGoal;
         const imageGenerationPref = project?.imageGenerationPref;
 
         try {
@@ -169,7 +169,7 @@ export class ChatService {
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
                 currentVersion: currentSessionData.currentVersion,
-                projectGoal,
+                rulesAndGoal,
                 imageGenerationPref,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates

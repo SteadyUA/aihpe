@@ -23,7 +23,7 @@ interface AppState {
     sessionToDelete: string | null;
     // Project State
     projectId: string | null;
-    projectGoal: string;
+    projectRulesAndGoal: string;
     projectImageGenerationPref?: string;
     projectDefaultProvider?: LlmProvider;
     showProjectCreation: boolean;
@@ -44,7 +44,7 @@ class App extends React.Component<AppProps, AppState> {
             isConnected: false,
             sessionToDelete: null,
             projectId: null,
-            projectGoal: '',
+            projectRulesAndGoal: '',
             projectImageGenerationPref: '',
             projectDefaultProvider: 'openai',
             showProjectCreation: false,
@@ -77,8 +77,8 @@ class App extends React.Component<AppProps, AppState> {
             const res = await fetch(`/api/projects/${projectId}`);
             if (!res.ok) throw new Error('Failed to fetch project');
 
-            // Expected response: { goal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
-            const data: { goal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
+            // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
+            const data: { id: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
 
             const sessionsMap: Record<string, Session> = {};
             const sessionOrder: string[] = [];
@@ -108,7 +108,7 @@ class App extends React.Component<AppProps, AppState> {
                 sessions: sessionsMap,
                 sessionOrder,
                 projectId,
-                projectGoal: data.goal,
+                projectRulesAndGoal: data.rulesAndGoal || '',
                 projectImageGenerationPref: data.imageGenerationPref,
                 projectDefaultProvider: data.defaultProvider
             }, () => {
@@ -231,12 +231,12 @@ class App extends React.Component<AppProps, AppState> {
         // Persistence removed (SessionStore.saveSessions/saveGroups deleted)
     }
 
-    handleCreateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
         try {
             const res = await fetch('/api/projects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider })
             });
             if (!res.ok) throw new Error('Failed to create project');
 
@@ -246,7 +246,7 @@ class App extends React.Component<AppProps, AppState> {
             this.setState({
                 projectId: project.id,
                 showProjectCreation: false,
-                projectGoal: project.goal,
+                projectRulesAndGoal: project.rulesAndGoal,
                 projectImageGenerationPref: project.imageGenerationPref,
                 projectDefaultProvider: project.defaultProvider
             }, () => {
@@ -258,7 +258,7 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    handleUpdateProject = async (goal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+    handleUpdateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
         const { projectId } = this.state;
         if (!projectId) return;
 
@@ -266,13 +266,13 @@ class App extends React.Component<AppProps, AppState> {
             const res = await fetch(`/api/projects/${projectId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ goal, imageGenerationPref, defaultProvider })
+                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider })
             });
             if (!res.ok) throw new Error('Failed to update project');
 
             // Update local state
             this.setState({
-                projectGoal: goal,
+                projectRulesAndGoal: rulesAndGoal,
                 projectImageGenerationPref: imageGenerationPref,
                 projectDefaultProvider: defaultProvider
             });
@@ -969,17 +969,17 @@ class App extends React.Component<AppProps, AppState> {
 
     render() {
         const {
-            sessions,
-            sessionOrder,
-            activeSessionId,
-            isConnected,
-            sessionToDelete,
             showProjectCreation,
             showProjectSettings,
             projectId,
-            projectGoal,
+            projectRulesAndGoal,
             projectImageGenerationPref,
-            projectDefaultProvider
+            projectDefaultProvider,
+            activeSessionId,
+            isConnected,
+            sessionToDelete,
+            sessionOrder,
+            sessions
         } = this.state;
 
 
@@ -1007,19 +1007,23 @@ class App extends React.Component<AppProps, AppState> {
                     userSelect: this.state.isResizing ? 'none' : 'auto'
                 } as React.CSSProperties}
             >
+                {/* Modals */}
                 <ProjectCreationModal
                     isOpen={showProjectCreation}
                     onCreate={this.handleCreateProject}
                 />
-                <ProjectSettingsModal
-                    isOpen={showProjectSettings}
-                    projectId={projectId || ''}
-                    currentGoal={projectGoal}
-                    currentImageGenerationPref={projectImageGenerationPref}
-                    currentDefaultProvider={projectDefaultProvider}
-                    onUpdate={this.handleUpdateProject}
-                    onClose={() => this.setState({ showProjectSettings: false })}
-                />
+
+                {projectId && (
+                    <ProjectSettingsModal
+                        isOpen={showProjectSettings}
+                        projectId={projectId}
+                        currentRulesAndGoal={projectRulesAndGoal}
+                        currentImageGenerationPref={projectImageGenerationPref}
+                        currentDefaultProvider={projectDefaultProvider}
+                        onUpdate={this.handleUpdateProject}
+                        onClose={this.toggleProjectSettings}
+                    />
+                )}
                 <ConfirmationModal
                     isOpen={!!sessionToDelete}
                     title="Close Session"

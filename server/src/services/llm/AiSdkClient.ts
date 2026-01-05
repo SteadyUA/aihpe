@@ -54,7 +54,7 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt(request.projectGoal, request.imageGenerationPref);
+        const systemPrompt = this.buildSystemPrompt(request.rulesAndGoal, request.imageGenerationPref);
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
@@ -489,7 +489,8 @@ export class AiSdkClient implements LlmClient {
             };
         } catch (error) {
             console.error(
-                `Failed to generate page with ${this.modelId || 'unknown model'}`,
+
+                `Failed to generate page with ${this.modelId || 'unknown model'} `,
                 error,
             );
             return {
@@ -499,14 +500,14 @@ export class AiSdkClient implements LlmClient {
         }
     }
 
-    private buildSystemPrompt(projectGoal?: string, imageGenerationPref?: string): string {
+    private buildSystemPrompt(rulesAndGoal?: string, imageGenerationPref?: string): string {
 
         let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
 Your goal is to fulfill the user's request by modifying these files.`;
 
-        if (projectGoal) {
-            prompt += `\n\nCONTEXT - PROJECT GOAL:\nThe user is working on a project with the following goal:\n"${projectGoal}"\nKeep this goal in mind when making decisions about design and functionality.`;
+        if (rulesAndGoal) {
+            prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\nThe user has defined the following rules and goal for this project:\n"${rulesAndGoal}"\nKeep this in mind when making decisions about design and functionality.`;
         }
 
         if (imageGenerationPref) {
