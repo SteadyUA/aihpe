@@ -12,7 +12,6 @@ import {
     GeneratePageRequest,
     GeneratePageResult,
     LlmClient,
-    VariantRequest,
 } from './types';
 import { ImageService } from '../image/ImageService';
 
@@ -60,7 +59,6 @@ export class AiSdkClient implements LlmClient {
         // Local state for files
         let currentFiles = { ...request.files };
         let finalSummary = '';
-        let variantRequest: VariantRequest | undefined;
 
         // Tool definitions (kept for usage in loop)
         const tools: Record<string, any> = {
@@ -256,27 +254,23 @@ export class AiSdkClient implements LlmClient {
         });
 
         if (request.allowVariants) {
-            tools.generate_variants = tool({
+            tools.generate_variant = tool({
                 description:
-                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state. IMPORTANT: Check conversation history for previous "generate_variants" calls. Do NOT propose variants that have already been generated. Ensure new variants are distinct from any previously generated variants in this session.',
+                    'Generate A SINGLE variant of the page based on user request. Use this tool ONLY when the user explicitly asks for multiple options, variations, or different styles/designs (e.g. "show me 3 versions", "give me options"). Do NOT use this tool for standard edits, fixes, or updates to the current page (e.g. "change background to red" should use edit_file). You can call this tool multiple times to generate multiple variants. The instruction must be an actionable command that describes HOW to modify the current page to achieve the desired look.',
                 inputSchema: z.object({
-                    count: z
-                        .number()
-                        .min(2)
-                        .max(5)
-                        .describe('Number of variants to generate (max 5)'),
-                    instructions: z
-                        .array(z.string())
+                    instruction: z
+                        .string()
                         .describe(
-                            'Specific, actionable instructions for each variant.  Do NOT include "Variant 1", "Variant 2", etc. prefixes. focused on WHAT to change (e.g., "Change background to blue...", "Update font to...").',
+                            'Specific, actionable instruction for this variant. Focused on WHAT to change (e.g., "Change background to blue...", "Update font to...").',
                         ),
                 }),
                 execute: async (args: {
-                    count: number;
-                    instructions: string[];
+                    instruction: string;
                 }) => {
-                    variantRequest = args;
-                    return 'Variants generation requested.';
+                    if (request.onVariantRequest) {
+                        return await request.onVariantRequest(args.instruction);
+                    }
+                    return 'Variant generation not supported in this context.';
                 },
             });
         }
@@ -448,10 +442,10 @@ export class AiSdkClient implements LlmClient {
                         );
                         // Also stop if variants were generated
                         const variantsExecuted = toolCalls.some(
-                            (tc) => tc.toolName === 'generate_variants',
+                            (tc) => tc.toolName === 'generate_variant',
                         );
 
-                        if (summaryExecuted || variantsExecuted) {
+                        if (summaryExecuted) {
                             break;
                         }
                     }
@@ -483,7 +477,6 @@ export class AiSdkClient implements LlmClient {
             return {
                 summary: summaryText,
                 files: currentFiles,
-                variantRequest,
                 newMessages,
                 targetVersion: this.targetVersion,
             };
@@ -524,7 +517,9 @@ Your goal is to fulfill the user's request by modifying these files.`;
 Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
-- If the user asks for variants, use 'generate_variants'.
+- If the user asks for variants, use 'generate_variant'.
+- 'generate_variant' creates a NEW separate session. The tool result will give you the Session ID.
+- In your final 'summary', you MUST explicitly mention which Session ID correponds to which variant (e.g., "Blue version created in session X"). Do NOT ask the user to choose one to apply here; they are already created there.
 - You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.
 `;
         return prompt;

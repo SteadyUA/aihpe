@@ -25,6 +25,8 @@ interface MessageProps {
     isLastAssistant?: boolean;
     status?: string;
     onUndo?: () => void;
+    sessionIds?: string[];
+    onSwitchSession?: (id: string) => void;
 }
 
 const formatTime = (dateString?: string) => {
@@ -32,6 +34,30 @@ const formatTime = (dateString?: string) => {
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
+const processContent = (text: string, sessionIds: string[] = []) => {
+    if (!text) return '';
+
+    // Debug logging (temporary)
+    // console.log('Processing content:', { textLength: text.length, sessionIdsCount: sessionIds.length });
+
+    // Regex to find potential session IDs (UUID or 8-char prefix), possibly wrapped in backticks
+    return text.replace(/(`)?\b([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?)\b(`)?/g, (match, bt1, id, bt2) => {
+        // Case insensitive check
+        const matchLower = id.toLowerCase();
+
+        const foundId = sessionIds.find(existingId => {
+            const idLower = existingId.toLowerCase();
+            return idLower === matchLower || idLower.startsWith(matchLower);
+        });
+
+        if (foundId) {
+            console.log('Linking session:', { id, foundId });
+            return `[${id.substring(0, 8)}](#session-${foundId})`;
+        }
+        return match;
+    });
 };
 
 class Message extends React.Component<MessageProps> {
@@ -62,8 +88,6 @@ class Message extends React.Component<MessageProps> {
             [styles.dimmed]: isDimmed,
         });
 
-
-
         return (
             <div
                 className={messageClass}
@@ -73,7 +97,24 @@ class Message extends React.Component<MessageProps> {
                         : undefined
                 }
             >
-                <div className={styles.messageContent}>
+                <div
+                    className={styles.messageContent}
+                    onClick={(e) => {
+                        // Check if click was on a session link
+                        const target = e.target as HTMLElement;
+                        if (target.tagName === 'A') {
+                            const href = target.getAttribute('href');
+                            if (href && href.startsWith('#session-')) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const sessionId = href.replace('#session-', '');
+                                if (this.props.onSwitchSession) {
+                                    this.props.onSwitchSession(sessionId);
+                                }
+                            }
+                        }
+                    }}
+                >
                     {msg.selection && (
                         <div
                             className={styles.selectionChip}
@@ -87,12 +128,11 @@ class Message extends React.Component<MessageProps> {
                     )}
 
                     {/* Render Text Content */}
-                    {/* Render Text Content */}
                     {(msg.content || (!msg.attachment && isUser)) && (
                         <div
                             className="message-text"
                             dangerouslySetInnerHTML={{
-                                __html: marked.parse(msg.content) as string,
+                                __html: marked.parse(processContent(msg.content, this.props.sessionIds)) as string,
                             }}
                         />
                     )}
@@ -107,7 +147,9 @@ class Message extends React.Component<MessageProps> {
                                 title={msg.attachment.originalName || msg.attachment.filename}
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    window.open(msg.attachment!.url, '_blank');
+                                    if (msg.attachment) {
+                                        window.open(msg.attachment.url, '_blank');
+                                    }
                                 }}
                             />
                         </div>
@@ -215,6 +257,8 @@ interface ChatProps {
     onAttachmentChange?: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
     onSaveUnsent?: (data: { input?: string | null }) => void;
+    sessionIds?: string[];
+    onSwitchSession?: (id: string) => void;
 }
 
 interface ChatState {
@@ -434,6 +478,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             // Restore missing ones
             onClearSelection,
             onSelectChip,
+            sessionIds,
+            onSwitchSession
         } = this.props;
         const { input, elapsedSeconds, isUploading, isLoading } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
@@ -489,6 +535,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 isDimmed={shouldDim}
                                 isLastAssistant={i === lastAssistantIndex}
                                 onUndo={this.handleUndo}
+                                sessionIds={sessionIds}
+                                onSwitchSession={onSwitchSession}
                             />
                         );
                     })}

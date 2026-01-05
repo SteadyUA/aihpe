@@ -100,6 +100,27 @@
     margin: 0;
 }
 
+.messageContent a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.messageContent a:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+
+.user .messageContent a {
+    color: white;
+    text-decoration: underline;
+    opacity: 0.9;
+}
+
+.user .messageContent a:hover {
+    opacity: 1;
+}
+
 .hasVersion .messageContent {
     cursor: pointer;
     transition:

@@ -316,7 +316,6 @@ class App extends React.Component<AppProps, AppState> {
         if (this.evtSource) {
             this.evtSource.close();
         }
-
     }
 
     handleSessionChange = (newId: string | null) => {
@@ -463,7 +462,10 @@ class App extends React.Component<AppProps, AppState> {
                 this.fetchSession(data.newSessionId);
             });
         });
+
     };
+
+
 
     fetchSession = async (id: string, isCompletion: boolean = false) => {
         try {
@@ -1072,6 +1074,8 @@ class App extends React.Component<AppProps, AppState> {
 
                                 onResizeStart={this.handleResizeStart}
                                 isResizing={this.state.isResizing}
+                                sessionIds={Object.keys(sessions)}
+                                onSwitchSession={this.switchSession}
                             />
                         );
                     })

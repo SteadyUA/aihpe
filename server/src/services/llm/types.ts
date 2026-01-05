@@ -11,17 +11,14 @@ export interface GeneratePageRequest {
     onProgress?: (chunk: string) => void;
     rulesAndGoal?: string;
     imageGenerationPref?: string;
+    onVariantRequest?: (instruction: string) => Promise<string>;
 }
 
-export interface VariantRequest {
-    count: number;
-    instructions: string[];
-}
+
 
 export interface GeneratePageResult {
     summary: string;
     files: SessionFiles;
-    variantRequest?: VariantRequest;
     newMessages?: ChatMessage[];
     targetVersion?: number;
 }

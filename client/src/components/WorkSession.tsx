@@ -22,6 +22,8 @@ interface WorkSessionProps {
     onSaveUnsent?: (data: { input?: string | null }) => void;
     onResizeStart?: (e: React.MouseEvent) => void;
     isResizing?: boolean;
+    sessionIds: string[];
+    onSwitchSession: (id: string) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -190,7 +192,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onDeleteAttachment,
             onAttachmentChange,
             unsentInput,
-            onSaveUnsent
+            onSaveUnsent,
+            sessionIds,
+            onSwitchSession
         } = this.props;
 
         if (session.status === 'pending' || session.status === 'unloaded') {
@@ -254,6 +258,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onAttachmentChange={onAttachmentChange}
                     unsentInput={unsentInput}
                     onSaveUnsent={onSaveUnsent}
+                    sessionIds={sessionIds}
+                    onSwitchSession={onSwitchSession}
                 />
 
                 {this.props.onResizeStart && (
