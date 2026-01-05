@@ -79,6 +79,11 @@ export class SseService {
         this.broadcast('session-created', enriched);
     }
 
+
+    emitServerStop(): void {
+        this.broadcast('server-stop', { timestamp: new Date().toISOString() });
+    }
+
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
         for (const client of this.clients.values()) {

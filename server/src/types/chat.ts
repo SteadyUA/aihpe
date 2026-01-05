@@ -1,3 +1,7 @@
+import { ChatStatus } from '../services/SseService';
+
+export type SessionStatus = ChatStatus | 'idle';
+
 export interface SessionFiles {
     html: string;
     css: string;
@@ -40,6 +44,7 @@ export interface SessionData {
     lastTurn?: number;
     provider?: LlmProvider;
     unsent?: UnsentData;
+    status: SessionStatus;
 }
 
 export interface ImageAttachment {

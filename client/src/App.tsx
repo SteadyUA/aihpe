@@ -407,7 +407,7 @@ class App extends React.Component<AppProps, AppState> {
                         return {
                             sessions: {
                                 ...prevState.sessions,
-                                [data.newSessionId]: { ...s, status: 'idle', group: data.group ?? 0 }
+                                ...{ [data.newSessionId]: { ...s, status: 'idle', group: data.group ?? 0 } }
                             },
                             sessionOrder: prevState.sessionOrder
                         };
@@ -463,6 +463,21 @@ class App extends React.Component<AppProps, AppState> {
             });
         });
 
+        this.evtSource.addEventListener('server-stop', () => {
+            console.log('Server stopping, closing SSE connection');
+            if (this.evtSource) {
+                this.evtSource.close();
+                this.evtSource = null;
+            }
+            this.setState({ isConnected: false });
+
+            // Reconnect after 5 seconds
+            setTimeout(() => {
+                console.log('Attempting to reconnect SSE after server restart...');
+                this.setupSse();
+            }, 5000);
+        });
+
     };
 
 
@@ -493,8 +508,21 @@ class App extends React.Component<AppProps, AppState> {
                             messages: history,
                             currentTurn: lastTurn,
 
-                            // If status was pending or unloaded, now it is definitively idle/ready
-                            status: (session.status === 'pending' || session.status === 'unloaded') ? 'idle' : session.status,
+                            // Use server provided status directly, mapped to client types
+                            // Server: 'started' | 'generating' | 'completed' | 'error' | 'skipped' | 'idle'
+                            // Client: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded'
+                            status: (data.status === 'started' || data.status === 'generating') ? 'busy' :
+                                (data.status === 'error') ? 'error' :
+                                    'idle',
+                            // statusMessages: data.statusMessage ? [data.statusMessage] : [], // Field removed per user request
+                            // But we shoudln't clear statusMessages on simple fetch? or?
+                            // Logic before was: statusMessages: data.statusMessage ? [data.statusMessage] : [],
+                            // Since we removed statusMessage from data, this will be undefined.
+                            // If I leave [], it clears the status.
+                            // If status is busy, and we have no message, we just show Busy.
+                            // It's acceptable.
+                            statusMessages: [],
+
                             // Set pendingRefreshTurn only if completion triggered this fetch
                             pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,
                             unsent: data.unsent || session.unsent || {},

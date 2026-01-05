@@ -1,5 +1,5 @@
 import { Inject, Service } from 'typedi';
-import { ChatAttachment, ChatMessage, LlmProvider, SessionData } from '../types/chat';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionData, SessionStatus } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
@@ -358,6 +358,24 @@ export class ChatService {
             status,
             message,
             details,
+        });
+
+        // Map ChatStatus to SessionStatus for persistence
+        // ChatStatus: 'started' | 'generating' | 'completed' | 'error' | 'skipped'
+        // SessionStatus: ChatStatus | 'idle'
+
+        let newStatus: SessionStatus = status;
+        if (status === 'completed' || status === 'skipped') {
+            newStatus = 'idle';
+        } else if (status === 'started' || status === 'generating') {
+            // Keep as is, or map to 'busy'?
+            // Client uses 'busy' for 'started'.
+            // But we defined SessionStatus = ChatStatus | 'idle'. 
+            // So we store 'started'/'generating'. Client should handle 'started' as busy.
+        }
+
+        this.sessionStore.upsert(sessionId, {
+            status: newStatus,
         });
     }
 

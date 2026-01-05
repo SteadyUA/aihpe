@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -22,6 +22,7 @@ type PersistedSession = {
     provider?: LlmProvider;
     unsent?: UnsentData;
     projectId?: string;
+    status?: SessionStatus;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -155,6 +156,7 @@ export class SessionStore {
             lastTurn: source.lastTurn,
             provider: source.provider,
             projectId: source.projectId,
+            status: 'idle', // Clone starts idle? Or copy? Usually idle as it's a new session.
         };
 
         clearPersistedSessionData(targetId);
@@ -252,6 +254,7 @@ export class SessionStore {
             lastTurn: normalizedTurn,
             provider: source.provider, // Copy provider settings
             projectId: source.projectId,
+            status: 'idle',
         };
 
         clearPersistedSessionData(targetId);
@@ -385,6 +388,7 @@ export class SessionStore {
             lastTurn: 0,
             provider: 'openai', // Default provider
             unsent: {},
+            status: 'idle',
         };
     }
 
@@ -671,6 +675,7 @@ export class SessionStore {
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
             provider: update.provider ?? session.provider,
+            status: update.status ?? session.status,
         };
 
         this.sessions.set(sessionId, merged);
@@ -725,6 +730,7 @@ export class SessionStore {
                 lastTurn: parsed.lastTurn ?? 0,
                 provider: parsed.provider ?? 'openai',
                 unsent: parsed.unsent ?? {},
+                status: parsed.status ?? 'idle',
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -801,6 +807,7 @@ export class SessionStore {
                 lastTurn: session.lastTurn,
                 provider: session.provider,
                 unsent: session.unsent,
+                status: session.status,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1050,5 +1057,6 @@ function cloneSession(session: SessionData): SessionData {
         provider: session.provider,
         unsent: session.unsent ? { ...session.unsent } : undefined,
         projectId: session.projectId,
+        status: session.status,
     };
 }
