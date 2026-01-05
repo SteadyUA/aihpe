@@ -1,6 +1,6 @@
 export class ElementPicker {
     private iframe: HTMLIFrameElement | null = null;
-    private onSelect: ((selector: string) => void) | null = null;
+    private onSelect: ((selector: string | null) => void) | null = null;
     private selectedElement: HTMLElement | null = null;
 
     private overlayContainer: HTMLElement | null = null;
@@ -15,7 +15,7 @@ export class ElementPicker {
         resize: () => void;
     } | null = null;
 
-    setOnSelect(callback: (selector: string) => void) {
+    setOnSelect(callback: (selector: string | null) => void) {
         this.onSelect = callback;
     }
 
@@ -404,6 +404,42 @@ export class ElementPicker {
             infoSpan.textContent = `${tagName}${idId}${truncatedClass} | ${dims}`;
             tooltip.appendChild(infoSpan);
 
+            // 3. Clear Button (only if selectable)
+            if (showParent) {
+                const clearBtn = document.createElement('span');
+                clearBtn.innerHTML = `&times;`; // Times symbol (X)
+                // Or SVG:
+                // clearBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+                Object.assign(clearBtn.style, {
+                    cursor: 'pointer',
+                    borderRadius: '50%',
+                    width: '16px',
+                    height: '16px',
+                    marginLeft: '5px',
+                    marginBottom: '-4px',
+                    marginRight: '-4px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: '0.7',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    lineHeight: '1',
+                });
+                clearBtn.title = 'Clear selection';
+
+                clearBtn.onmouseenter = () => clearBtn.style.opacity = '1';
+                clearBtn.onmouseleave = () => clearBtn.style.opacity = '0.7';
+
+                clearBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.clearSelection();
+                    this.onSelect?.(null);
+                };
+                tooltip.appendChild(clearBtn);
+            }
+
             // Adjust position if top is clipped
             const rect = target.getBoundingClientRect();
             if (rect.top < 30) {
@@ -455,13 +491,37 @@ export class ElementPicker {
                 selector = `#${current.id}`;
                 path.unshift(selector);
                 break;
-            } else if (current.parentElement) {
-                const siblings = Array.from(
-                    current.parentElement.children,
-                ).filter((c) => c.tagName === current!.tagName);
-                if (siblings.length > 1) {
-                    const index = siblings.indexOf(current) + 1;
-                    selector += `:nth-of-type(${index})`;
+            } else {
+                let uniqueByClass = false;
+                const parent = current.parentElement;
+
+                // Try to use classes if they exist and allow getting a unique match among siblings
+                if (parent && current.className && typeof current.className === 'string' && current.className.trim().length > 0) {
+                    const classes = Array.from(current.classList);
+                    if (classes.length > 0) {
+                        // Use CSS.escape to handle weird characters in class names safely
+                        const escapedClasses = classes.map(c => CSS.escape(c));
+                        const classSelector = '.' + escapedClasses.join('.');
+                        const candidate = selector + classSelector;
+
+                        // Check if this candidate is unique among siblings
+                        const siblings = Array.from(parent.children);
+                        const matches = siblings.filter(s => s.matches && s.matches(candidate));
+
+                        if (matches.length === 1) {
+                            selector = candidate;
+                            uniqueByClass = true;
+                        }
+                    }
+                }
+
+                // Fallback to nth-of-type if classes aren't unique enough
+                if (!uniqueByClass && parent) {
+                    const siblings = Array.from(parent.children).filter((c) => c.tagName === current!.tagName);
+                    if (siblings.length > 1) {
+                        const index = siblings.indexOf(current) + 1;
+                        selector += `:nth-of-type(${index})`;
+                    }
                 }
             }
 

@@ -125,7 +125,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.picker.stop();
     }
 
-    handleElementSelected = (selector: string) => {
+    handleElementSelected = (selector: string | null) => {
         // If we were in picking mode, stop it now
         if (this.props.session.isPicking) {
             this.picker.stop();
@@ -135,8 +135,15 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         // Update selection (e.g. from picking or from passive parent click)
         this.props.onUpdateSession({ selection: selector });
 
-        // Ensure visualization is correct (especially after stop() clears it)
-        this.visualizeSelection(selector);
+        // Ensure visualization is correct
+        if (selector) {
+            this.visualizeSelection(selector);
+        } else {
+            // If cleared (selector is null), we don't need to call visualizeSelection(null) 
+            // because clearSelection() in picker handles it, or picker is already stopped/cleared.
+            // But if we want to be safe or if clearing came from outside, we can force clear:
+            this.picker.clearSelection();
+        }
     }
 
     startPicking = () => {

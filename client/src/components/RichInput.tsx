@@ -13,6 +13,8 @@ interface RichInputProps {
     onBlur?: () => void;
     onPaste?: (e: React.ClipboardEvent) => void;
     tabIndex?: number;
+    autoFocus?: boolean;
+    rows?: number;
 }
 
 interface RichInputState {
@@ -41,6 +43,9 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
 
     componentDidMount() {
         this.updateContentFromProps();
+        if (this.props.autoFocus && this.mainRef.current && !this.props.disabled) {
+            this.mainRef.current.focus();
+        }
     }
 
     componentDidUpdate(prevProps: RichInputProps) {
@@ -170,6 +175,7 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
                     data-placeholder={placeholder}
                     role="textbox"
                     tabIndex={this.props.tabIndex}
+                    style={{ minHeight: this.props.rows ? `calc(${this.props.rows} * 1.5em + 1.5rem)` : undefined }}
                 />
             </div>
         );

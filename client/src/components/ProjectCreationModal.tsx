@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 import { UiModal } from './UiModal';
 import { UiButton } from './UiButton';
+import { RichInput } from './RichInput';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
 import { LLM_PROVIDERS } from '../constants';
@@ -30,7 +31,6 @@ export class ProjectCreationModal extends Component<ProjectCreationModalProps, P
 
     handleCreate = async () => {
         const { goal, imageGenerationPref, defaultProvider } = this.state;
-        if (!goal.trim()) return;
 
         this.setState({ isCreating: true });
         try {
@@ -57,16 +57,16 @@ export class ProjectCreationModal extends Component<ProjectCreationModalProps, P
                         {isCreating ? 'Creating...' : 'Create'}
                     </UiButton>
                 }
+                className={styles.modal}
             >
                 <div className={styles.field}>
                     <label className={styles.label}>Project Goal</label>
-                    <textarea
-                        className={styles.input}
+                    <RichInput
                         value={goal}
-                        onChange={(e) => this.setState({ goal: e.target.value })}
+                        onChange={(value) => this.setState({ goal: value })}
                         placeholder="Describe the goal of this project..."
-                        rows={3}
                         autoFocus
+                        rows={2}
                     />
                 </div>
                 <div className={styles.field}>
