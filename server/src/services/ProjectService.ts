@@ -114,4 +114,21 @@ export class ProjectService {
         const project = this.projects.get(projectId);
         return project ? [...project.sessionIds] : [];
     }
+
+    getNextSessionGroup(projectId: string): number {
+        const project = this.projects.get(projectId);
+        if (!project) {
+            throw new Error(`Project ${projectId} not found`);
+        }
+
+        const lastGroup = project.lastAssignedSessionGroup;
+        // Start from 0 if undefined, otherwise increment and wrap around 12
+        const nextGroup = lastGroup === undefined ? 0 : (lastGroup + 1) % 12;
+
+        project.lastAssignedSessionGroup = nextGroup;
+        project.updatedAt = new Date();
+        this.saveProjects();
+
+        return nextGroup;
+    }
 }

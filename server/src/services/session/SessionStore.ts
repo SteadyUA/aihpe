@@ -108,9 +108,9 @@ export class SessionStore {
         return 0;
     }
 
-    create(projectId: string): SessionData {
+    create(projectId: string, group?: number): SessionData {
         const id = randomUUID();
-        const session = this.createFreshSession(id, projectId);
+        const session = this.createFreshSession(id, projectId, group);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);

@@ -30,6 +30,7 @@ export interface Project {
     sessionIds: string[];
     createdAt: Date;
     updatedAt: Date;
+    lastAssignedSessionGroup?: number;
 }
 
 export interface SessionData {

@@ -42,8 +42,8 @@ const processContent = (text: string, sessionIds: string[] = []) => {
     // Debug logging (temporary)
     // console.log('Processing content:', { textLength: text.length, sessionIdsCount: sessionIds.length });
 
-    // Regex to find potential session IDs (UUID or 8-char prefix), possibly wrapped in backticks
-    return text.replace(/(`)?\b([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?)\b(`)?/g, (match, bt1, id, bt2) => {
+    // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
+    return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, bt1, id, bt2) => {
         // Case insensitive check
         const matchLower = id.toLowerCase();
 
@@ -53,7 +53,6 @@ const processContent = (text: string, sessionIds: string[] = []) => {
         });
 
         if (foundId) {
-            console.log('Linking session:', { id, foundId });
             return `[${id.substring(0, 8)}](#session-${foundId})`;
         }
         return match;
