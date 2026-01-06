@@ -364,6 +364,11 @@ export class ImageService {
         return metadata;
     }
 
+    async getImageInfo(sessionId: string, version: number, filename: string): Promise<ImageMetadata | undefined> {
+        const metadata = this.loadMetadata(sessionId, version);
+        return metadata.find(img => img.filename === filename);
+    }
+
     async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
         const metadata = this.loadMetadata(sessionId, version);
         if (metadata.length === 0) return;

@@ -217,6 +217,31 @@ export class AiSdkClient implements LlmClient {
             },
         });
 
+        tools.image_info = tool({
+            description: 'Get details about a specific image including its description and geometry (width/height). Use this when you need to know the properties of a specific image file.',
+            inputSchema: z.object({
+                filename: z.string().describe('The filename of the image (e.g., "image.png").'),
+                summary: z.string().describe('Explain why you are requesting info for this image. This will be shown to the user.'),
+            }),
+            execute: async ({ filename, summary }: { filename: string; summary: string }) => {
+                try {
+                    const info = await this.imageService.getImageInfo(request.sessionId, request.currentVersion, filename);
+                    if (!info) {
+                        return `Image not found: ${filename}`;
+                    }
+                    return JSON.stringify({
+                        filename: info.filename,
+                        description: info.description,
+                        width: info.width,
+                        height: info.height,
+                        model: info.model
+                    });
+                } catch (error: any) {
+                    return `Failed to get image info: ${error.message}`;
+                }
+            },
+        });
+
         tools.generate_image = tool({
             description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
             inputSchema: z.object({
