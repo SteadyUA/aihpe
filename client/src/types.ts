@@ -4,6 +4,7 @@ export interface MessageData {
     role: 'user' | 'assistant' | 'system';
     content: string;
     turn: number;
+    version?: number;
     createdAt?: string;
     selection?: { selector: string };
     attachment?: ChatAttachment;

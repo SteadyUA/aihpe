@@ -2,11 +2,7 @@ import { ChatStatus } from '../services/SseService';
 
 export type SessionStatus = ChatStatus | 'idle';
 
-export interface SessionFiles {
-    html: string;
-    css: string;
-    js: string;
-}
+export type SessionFiles = Record<string, string>;
 
 export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 

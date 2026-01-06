@@ -80,46 +80,67 @@ class App extends React.Component<AppProps, AppState> {
             // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
             const data: { id: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
 
-            const sessionsMap: Record<string, Session> = {};
-            const sessionOrder: string[] = [];
+            const { router } = this.props;
+            const params = router.params as Record<string, string | undefined>;
+            const urlSessionId = params['sessionId'];
+            const urlTurn = router.searchParams.get('turn');
+            const urlTab = router.searchParams.get('tab') as TabType;
 
-            data.sessions.forEach(({ sessionId, group }) => {
-                sessionOrder.push(sessionId);
-                sessionsMap[sessionId] = {
-                    id: sessionId,
+            this.setState(prevState => {
+                const sessionsMap: Record<string, Session> = {};
+                const sessionOrder: string[] = [];
+
+                data.sessions.forEach(({ sessionId, group }) => {
+                    sessionOrder.push(sessionId);
+                    const existing = prevState.sessions[sessionId];
+                    if (existing) {
+                        sessionsMap[sessionId] = {
+                            ...existing,
+                            group: group ?? existing.group
+                        };
+                    } else {
+                        // Restore state from URL if this is the active session in URL
+                        const isUrlSession = sessionId === urlSessionId;
+                        const initialActiveTurn = isUrlSession && urlTurn ? parseInt(urlTurn, 10) : null;
+                        const initialActiveTab = isUrlSession && urlTab ? urlTab : 'preview';
+
+                        sessionsMap[sessionId] = {
+                            id: sessionId,
+                            projectId,
+                            status: 'unloaded',
+                            messages: [],
+                            statusMessages: [],
+                            requestStartTime: null,
+                            currentTurn: 0,
+                            activeTurn: initialActiveTurn,
+                            activeTab: initialActiveTab,
+                            selection: null,
+                            isPicking: false,
+                            pendingRefreshTurn: null,
+                            group: group ?? 0,
+                            unsent: {},
+                            provider: 'openai'
+                        };
+                    }
+                });
+
+                return {
+                    sessions: sessionsMap,
+                    sessionOrder,
                     projectId,
-                    status: 'unloaded',
-                    messages: [],
-                    statusMessages: [],
-                    requestStartTime: null,
-                    currentTurn: 0,
-                    activeTurn: null,
-                    activeTab: 'preview',
-                    selection: null,
-                    isPicking: false,
-                    pendingRefreshTurn: null,
-                    group: group ?? 0,
-                    unsent: {},
-                    provider: 'openai'
+                    projectRulesAndGoal: data.rulesAndGoal || '',
+                    projectImageGenerationPref: data.imageGenerationPref,
+                    projectDefaultProvider: data.defaultProvider
                 };
-            });
-
-            this.setState({
-                sessions: sessionsMap,
-                sessionOrder,
-                projectId,
-                projectRulesAndGoal: data.rulesAndGoal || '',
-                projectImageGenerationPref: data.imageGenerationPref,
-                projectDefaultProvider: data.defaultProvider
             }, () => {
                 const activeSessionId = this.handleInitialRouting();
 
                 // If no sessions, create one
-                if (sessionOrder.length === 0) {
+                if (this.state.sessionOrder.length === 0) {
                     this.createSession();
-                } else if (!activeSessionId && sessionOrder.length > 0) {
+                } else if (!activeSessionId && this.state.sessionOrder.length > 0) {
                     // If routing didn't pick one (e.g. root URL), pick first
-                    this.switchSession(sessionOrder[0]);
+                    this.switchSession(this.state.sessionOrder[0]);
                 }
             });
 
@@ -182,6 +203,19 @@ class App extends React.Component<AppProps, AppState> {
 
             // Session change via URL
             if (newSessionId && newSessionId !== activeSessionId && sessions[newSessionId]) {
+                const turnVal = newTurn ? parseInt(newTurn, 10) : null;
+                const tabVal = newTab || 'preview';
+                const targetSession = sessions[newSessionId];
+
+                // Ensure target session matches URL params before switching active ID
+                // ensuring updateUrl later sees correct values and doesn't wipe URL params
+                if (targetSession.activeTurn !== turnVal || targetSession.activeTab !== tabVal) {
+                    this.updateSession(newSessionId, {
+                        activeTurn: turnVal,
+                        activeTab: tabVal
+                    });
+                }
+
                 this.setState({ activeSessionId: newSessionId });
             }
 
@@ -638,7 +672,7 @@ class App extends React.Component<AppProps, AppState> {
 
         try {
             const res = await fetch(
-                `/api/sessions/${activeSessionId}/turns/${turn}/clone`,
+                `/api/sessions/${activeSessionId}/clone/${turn}`,
                 { method: 'POST' },
             );
             if (!res.ok) throw new Error('Clone turn failed');

@@ -61,9 +61,9 @@ const DEFAULT_SESSION_SCRIPT = `(() => {
 })();\n`;
 
 const EMPTY_FILES: SessionFiles = {
-    html: '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
-    css: '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
-    js: DEFAULT_SESSION_SCRIPT,
+    'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
+    'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
+    'script.js': DEFAULT_SESSION_SCRIPT,
 };
 
 const SESSION_ROOT = resolveSessionRoot();
@@ -537,25 +537,15 @@ export class SessionStore {
     updateSessionFile(
         sessionId: string,
         version: number,
-        filename: keyof SessionFiles,
+        filename: string,
         content: string,
     ): SessionData {
         const session = this.getOrCreate(sessionId);
-
-        // We now allow editing past versions, so this check is removed:
-        // if (version !== session.currentVersion) { ... }
 
         const newFiles: SessionFiles = {
             ...session.files,
         };
 
-        // If we are editing the current version, update the main files object
-        // If we are editing an old version, we need to update that version's files specifically
-        // But wait, the logic for 'current version' files vs 'versioned' files storage is tricky in this store.
-        // 'session.files' holds the HEAD (current version). 
-        // Old versions are stored in 'versions' directory on disk.
-
-        // If editing current version:
         if (version === session.currentVersion) {
             newFiles[filename] = content;
             const updated: SessionData = {
@@ -568,32 +558,12 @@ export class SessionStore {
             return cloneSession(updated);
         }
 
-        // If editing past version:
-        // We don't update 'session.files' because that's HEAD.
-        // We just need to persist the file to the version directory.
-        // However, 'SessionData' object in memory doesn't hold old versions content typically, 
-        // except what's in 'history'.
-        // But 'files' in SessionData is ONLY HEAD.
-
-        // So for past versions, we just write to disk.
-        // And if we want to return the updated session, the session object itself might not change 
-        // (unless we track 'updatedAt').
-
-        // Let's write to disk.
+        // Editing past version
         ensureVersionSnapshot(sessionId, version, readVersionFiles(sessionId, version) || EMPTY_FILES);
-        // We need to overwrite the specific file now.
         const versionDir = resolveVersionDir(sessionId, version);
         ensureDirectory(versionDir);
 
-        // Map abstract filename (html/css/js) to actual filename
-        const actualFilename = filename === 'html' ? 'index.html' :
-            filename === 'css' ? 'styles.css' :
-                filename === 'js' ? 'script.js' :
-                    undefined;
-
-        if (actualFilename) {
-            fs.writeFileSync(path.join(versionDir, actualFilename), content, 'utf-8');
-        }
+        fs.writeFileSync(path.join(versionDir, filename), content, 'utf-8');
 
         const updated: SessionData = {
             ...session,
@@ -702,17 +672,17 @@ export class SessionStore {
             const versionDir = resolveVersionDir(sessionId, currentVersion);
 
             const files: SessionFiles = {
-                html: readFileOrDefault(
+                'index.html': readFileOrDefault(
                     path.join(versionDir, 'index.html'),
-                    EMPTY_FILES.html,
+                    EMPTY_FILES['index.html'],
                 ),
-                css: readFileOrDefault(
+                'styles.css': readFileOrDefault(
                     path.join(versionDir, 'styles.css'),
-                    EMPTY_FILES.css,
+                    EMPTY_FILES['styles.css'],
                 ),
-                js: readFileOrDefault(
+                'script.js': readFileOrDefault(
                     path.join(versionDir, 'script.js'),
-                    EMPTY_FILES.js,
+                    EMPTY_FILES['script.js'],
                 ),
             };
 
@@ -816,17 +786,17 @@ export class SessionStore {
             );
             fs.writeFileSync(
                 path.join(versionDir, 'index.html'),
-                session.files.html,
+                session.files['index.html'],
                 'utf-8',
             );
             fs.writeFileSync(
                 path.join(versionDir, 'styles.css'),
-                session.files.css,
+                session.files['styles.css'],
                 'utf-8',
             );
             fs.writeFileSync(
                 path.join(versionDir, 'script.js'),
-                session.files.js,
+                session.files['script.js'],
                 'utf-8',
             );
         } catch (error: any) {
@@ -944,9 +914,9 @@ function persistVersionFiles(
 ): void {
     const versionDir = resolveVersionDir(sessionId, version);
     ensureDirectory(versionDir);
-    fs.writeFileSync(path.join(versionDir, 'index.html'), files.html, 'utf-8');
-    fs.writeFileSync(path.join(versionDir, 'styles.css'), files.css, 'utf-8');
-    fs.writeFileSync(path.join(versionDir, 'script.js'), files.js, 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'index.html'), files['index.html'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'styles.css'), files['styles.css'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'script.js'), files['script.js'], 'utf-8');
 }
 
 function ensureVersionSnapshot(
@@ -995,17 +965,17 @@ function readVersionFiles(
         return undefined;
     }
     return {
-        html: readFileOrDefault(
+        'index.html': readFileOrDefault(
             path.join(versionDir, 'index.html'),
-            EMPTY_FILES.html,
+            EMPTY_FILES['index.html'],
         ),
-        css: readFileOrDefault(
+        'styles.css': readFileOrDefault(
             path.join(versionDir, 'styles.css'),
-            EMPTY_FILES.css,
+            EMPTY_FILES['styles.css'],
         ),
-        js: readFileOrDefault(
+        'script.js': readFileOrDefault(
             path.join(versionDir, 'script.js'),
-            EMPTY_FILES.js,
+            EMPTY_FILES['script.js'],
         ),
     };
 }

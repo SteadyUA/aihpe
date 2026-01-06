@@ -23,7 +23,7 @@ const DEVICES: Device[] = [
 
 interface PreviewProps {
     sessionId: string | null;
-    turn: number;
+    version: number;
     active: boolean;
     onLoad?: () => void;
     reloadTrigger?: number;
@@ -60,10 +60,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     }
 
     getSnapshotBeforeUpdate(prevProps: PreviewProps) {
-        // If we represent a diff session or diff turn, save current scroll
         if (
             prevProps.sessionId !== this.props.sessionId ||
-            prevProps.turn !== this.props.turn
+            prevProps.version !== this.props.version
         ) {
             this.saveScrollPosition();
         }
@@ -74,7 +73,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         // If we are about to switch version within the same session
         if (
             prevProps.sessionId === this.props.sessionId &&
-            prevProps.turn !== this.props.turn &&
+            prevProps.version !== this.props.version &&
             prevProps.active
         ) {
             // Logic handled by saveScrollPosition above, but we keep this for legacy alignment if needed,
@@ -192,19 +191,19 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleNewWindow = () => {
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
         if (!sessionId) return;
-        const url = `/api/sessions/${sessionId}/turns/${turn}/static/index.html`;
+        const url = `/api/sessions/${sessionId}/${version}/files/index.html`;
         window.open(url, '_blank');
     };
 
     handleDownload = async () => {
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
         if (!sessionId) return;
 
         try {
             const response = await fetch(
-                `/api/sessions/${encodeURIComponent(sessionId)}/turns/${turn}/archive`,
+                `/api/sessions/${encodeURIComponent(sessionId)}/${version}/archive`,
             );
             if (!response.ok) throw new Error('Failed to download');
 
@@ -212,7 +211,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `session-${sessionId.slice(0, 8)}-turn-${turn}.zip`;
+            a.download = `session-${sessionId.slice(0, 8)}-v${version}.zip`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -228,17 +227,17 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     render() {
-        const { sessionId, turn, active, reloadTrigger } = this.props;
+        const { sessionId, version, active, reloadTrigger } = this.props;
         const { isMobile, deviceIndex } = this.state;
         const device = DEVICES[deviceIndex];
 
         const previewUrl =
-            sessionId && typeof turn === 'number'
-                ? `/api/sessions/${sessionId}/turns/${turn}/static/index.html`
+            sessionId && typeof version === 'number'
+                ? `/api/sessions/${sessionId}/${version}/files/index.html`
                 : 'about:blank';
 
         // Key logic: Combine identifying props to force remount of iframe when any changes
-        const iframeKey = `${sessionId}-${turn}-${reloadTrigger}`;
+        const iframeKey = `${sessionId}-${version}-${reloadTrigger}`;
 
         return (
             <div className={styles.previewContainer} style={{ display: active ? 'flex' : 'none' }}>

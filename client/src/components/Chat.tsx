@@ -17,6 +17,7 @@ import { MessageData, LlmProvider, ChatAttachment } from '../types';
 
 interface MessageProps {
     msg: MessageData;
+    id?: string;
     onSelectChip?: (selector: string) => void;
     onCloneTurn?: (turn: number) => void;
     onPreviewTurn?: (turn: number) => void;
@@ -43,7 +44,7 @@ const processContent = (text: string, sessionIds: string[] = []) => {
     // console.log('Processing content:', { textLength: text.length, sessionIdsCount: sessionIds.length });
 
     // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
-    return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, bt1, id, bt2) => {
+    return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
         // Case insensitive check
         const matchLower = id.toLowerCase();
 
@@ -63,6 +64,7 @@ class Message extends React.Component<MessageProps> {
     render() {
         const {
             msg,
+            id,
             onSelectChip,
             onCloneTurn,
             onPreviewTurn,
@@ -89,6 +91,7 @@ class Message extends React.Component<MessageProps> {
 
         return (
             <div
+                id={id}
                 className={messageClass}
                 onClick={
                     hasTurn && onPreviewTurn
@@ -295,7 +298,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidMount() {
-        this.scrollToBottom();
+        if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
+            this.scrollToTurn(this.props.activeTurn);
+        } else {
+            this.scrollToBottom();
+        }
         this.updateTimer();
     }
 
@@ -305,7 +312,23 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
             prevProps.status !== this.props.status
         ) {
-            this.scrollToBottom();
+            // If active turn is set, stay there? Or if new message added?
+            // If new message comes in (streaming), we usually auto-scroll to bottom.
+            // But if we are viewing history?
+            // If we are viewing history (activeTurn != null), we should probably NOT scroll to bottom on new message.
+            if (this.props.activeTurn === null || this.props.activeTurn === undefined) {
+                this.scrollToBottom();
+            }
+        }
+
+        // If active turn changed, scroll to it
+        if (prevProps.activeTurn !== this.props.activeTurn) {
+            if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
+                this.scrollToTurn(this.props.activeTurn);
+            } else {
+                // If we went back to latest
+                this.scrollToBottom();
+            }
         }
 
         if (prevProps.startTime !== this.props.startTime || prevProps.status !== this.props.status) {
@@ -366,6 +389,16 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     scrollToBottom = () => {
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    scrollToTurn = (turn: number) => {
+        // Use timeout to allow render to complete if necessary
+        setTimeout(() => {
+            const el = document.getElementById(`msg-turn-${turn}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 100);
     };
 
     handleSubmit = (e: React.FormEvent) => {
@@ -525,6 +558,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
                         return (
                             <Message
+                                id={
+                                    m.role === 'assistant' && typeof m.turn === 'number'
+                                        ? `msg-turn-${m.turn}`
+                                        : undefined
+                                }
                                 key={i}
                                 msg={m}
                                 onSelectChip={onSelectChip}

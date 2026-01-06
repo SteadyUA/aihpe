@@ -37,6 +37,22 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.previewRef = React.createRef();
     }
 
+    getVersionForTurn = (turn: number): number => {
+        const { session } = this.props;
+        // Look backwards from the end of history to find the first message with a version <= turn
+        // Just like the server does
+        const relevantHistory = session.messages.filter(m => m.turn <= turn);
+        if (relevantHistory.length === 0) return 0;
+
+        for (let i = relevantHistory.length - 1; i >= 0; i--) {
+            const msg = relevantHistory[i];
+            if (typeof msg.version === 'number') {
+                return msg.version;
+            }
+        }
+        return 0;
+    };
+
     getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
         // Prepare to hide: Save scroll position before display becomes none
         if (prevProps.isVisible && !this.props.isVisible) {
@@ -272,7 +288,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                 <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
-                    turn={currentTurn}
+                    version={this.getVersionForTurn(currentTurn)}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
@@ -282,4 +298,3 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         );
     }
 }
-

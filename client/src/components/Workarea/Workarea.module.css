@@ -56,6 +56,19 @@
     color: var(--text-primary);
 }
 
+.versionLabel {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background-color: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 0.5rem;
+    align-self: center;
+    user-select: none;
+    border: 1px solid var(--border-color);
+}
+
 .assetTab.active,
 .assetTab[aria-selected='true'] {
     background: white;

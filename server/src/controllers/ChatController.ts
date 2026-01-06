@@ -549,26 +549,18 @@ export class ChatController {
 
 
 
-    @Get('/api/sessions/:sessionId/turns/:turn/archive')
+    @Get('/api/sessions/:sessionId/:version/archive')
     async downloadArchive(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response
-                .status(400)
-                .json({ message: 'Некорректный номер хода' });
-        }
-
         try {
-            // Resolve version from turn
-            const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-            if (version === undefined) {
+            const version = Number.parseInt(versionParam, 10);
+            if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
                 return response
-                    .status(404)
-                    .json({ message: 'Ход не найден или не содержит файлов' });
+                    .status(400)
+                    .json({ message: 'Invalid version' });
             }
 
             // Get code files
@@ -598,15 +590,15 @@ export class ChatController {
             response.setHeader('Content-Type', 'application/zip');
             response.setHeader(
                 'Content-Disposition',
-                `attachment; filename="session-${safeId}-turn${turn}.zip"`,
+                `attachment; filename="session-${safeId}-version${version}.zip"`,
             );
 
             archive.pipe(response);
 
             // Add code files
-            archive.append(files.html ?? '', { name: 'index.html' });
-            archive.append(files.css ?? '', { name: 'styles.css' });
-            archive.append(files.js ?? '', { name: 'script.js' });
+            for (const [filename, content] of Object.entries(files)) {
+                archive.append(content, { name: filename });
+            }
 
             // Add images
             try {
@@ -637,7 +629,7 @@ export class ChatController {
 
             void archive.finalize();
             return response;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to prepare session archive', error);
             return response
                 .status(500)
@@ -645,27 +637,16 @@ export class ChatController {
         }
     }
 
-    @Get('/api/sessions/:sessionId/turns/:turn/static/:filename')
-    getStaticFile(
+    @Get('/api/sessions/:sessionId/:version/files/:filename')
+    getFile(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() response: Response,
     ) {
-        // Basic validation
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).send('Invalid turn');
-        }
-
-        // Allow alphanumeric, dashes, underscores, dots only
-        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
-            return response.status(400).send('Invalid filename');
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return response.status(404).send('Turn not found');
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
         }
 
         const validFiles = ['index.html', 'styles.css', 'script.js'];
@@ -675,42 +656,50 @@ export class ChatController {
                 return response.status(404).send('Files not found');
             }
 
-            let content = '';
+            let content = files[filename];
             let contentType = 'text/plain';
 
-            switch (filename) {
-                case 'index.html':
-                    content = files.html;
-                    contentType = 'text/html';
-                    break;
-                case 'styles.css':
-                    content = files.css;
-                    contentType = 'text/css';
-                    break;
-                case 'script.js':
-                    content = files.js;
-                    contentType = 'application/javascript';
-                    break;
+            if (filename === 'index.html') contentType = 'text/html';
+            else if (filename === 'styles.css') contentType = 'text/css';
+            else if (filename === 'script.js') contentType = 'application/javascript';
+
+            if (content === undefined) {
+                // Should not happen if validFiles checked, but safety
+                return response.status(404).send('File content missing');
             }
 
             response.setHeader('Content-Type', contentType);
             return response.send(content);
         }
 
+        // Validate filename for fallback (alphanumeric, dashes, underscores, dots) to prevent path traversal
+        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        // Fallback for other files (images, variants of text files not in cache map?)
         const cwd = process.cwd();
         const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+        const safeVersion = version;
         const filePath = path.join(sessionRoot, safeId, 'versions', String(safeVersion), filename);
 
         if (fs.existsSync(filePath)) {
             const ext = path.extname(filename).toLowerCase();
             let contentType = 'application/octet-stream';
+            // Only allow serving images and specific text files if they fell through
             if (ext === '.png') contentType = 'image/png';
             if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+            if (ext === '.gif') contentType = 'image/gif';
+            if (ext === '.webp') contentType = 'image/webp';
+            if (ext === '.svg') contentType = 'image/svg+xml';
             if (ext === '.html') contentType = 'text/html';
             if (ext === '.css') contentType = 'text/css';
             if (ext === '.js') contentType = 'application/javascript';
+
+            if (contentType === 'application/octet-stream') {
+                // Fallback or potentially deny non-images if strict
+            }
 
             response.setHeader('Content-Type', contentType);
             return fs.createReadStream(filePath);
@@ -718,6 +707,7 @@ export class ChatController {
 
         return response.status(404).send('File not found');
     }
+
 
 
     @Post('/api/sessions/:sessionId/undo')
@@ -736,7 +726,7 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/clone')
+    @Post('/api/sessions/:sessionId/clone/:turn')
     cloneTurn(
         @Param('sessionId') sessionId: string,
         @Param('turn') turnParam: string,
@@ -796,34 +786,24 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/static/:filename')
+    @Post('/api/sessions/:sessionId/:version/files/:filename')
     updateStaticFile(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Req() req: Request,
         @Res() response: Response
     ) {
         // Basic validation
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).send('Invalid turn');
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
         }
 
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return response.status(404).send('Turn not found');
-        }
+        // Removed getVersionForTurn logic as we receive version directly
 
-        // Map filename to SessionFiles key
-        let fileKey: 'html' | 'css' | 'js' | undefined;
-        if (filename === 'index.html') fileKey = 'html';
-        else if (filename === 'styles.css') fileKey = 'css';
-        else if (filename === 'script.js') fileKey = 'js';
-
-        if (!fileKey) {
-            return response.status(400).send('Invalid filename');
-        }
+        // Map filename to SessionFiles key - REMOVED
+        // We now use filename directly
 
         const body = req.body;
         console.log(`[updateStaticFile] Saving ${filename}. Content-Type: ${req.headers['content-type']}. Body Type: ${typeof body}`);
@@ -833,9 +813,9 @@ export class ChatController {
         if (typeof body === 'string') {
             content = body;
         } else if (typeof body === 'object' && body !== null) {
-            // Fallback for JSON { content: "..." } or { html: "..." }
+            // Fallback for JSON { content: "..." }
             if (typeof body.content === 'string') content = body.content;
-            else if (typeof body[fileKey] === 'string') content = body[fileKey];
+            else if (typeof body[filename] === 'string') content = body[filename];
             else {
                 console.error('[updateStaticFile] Missing content in object body', body);
                 return response.status(400).send('Missing content');
@@ -849,7 +829,7 @@ export class ChatController {
             this.sessionStore.updateSessionFile(
                 sessionId,
                 version,
-                fileKey,
+                filename,
                 content
             );
             return response.status(200).send('OK');
@@ -860,21 +840,16 @@ export class ChatController {
                 .json({ message: 'Не удалось обновить файл' });
         }
     }
-    @Post('/api/sessions/:sessionId/turns/:turn/images')
+    @Post('/api/sessions/:sessionId/:version/images')
     async uploadGalleryImage(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Req() req: Request,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         const storage = multer.memoryStorage(); // Or temp disk storage
@@ -923,22 +898,17 @@ export class ChatController {
         });
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    @Post('/api/sessions/:sessionId/:version/images/:filename/description')
     async updateImageDescription(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Body() body: { description: string },
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         if (typeof body.description !== 'string') {
@@ -958,21 +928,16 @@ export class ChatController {
         }
     }
 
-    @Delete('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    @Delete('/api/sessions/:sessionId/:version/images/:filename')
     async deleteImage(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         try {
@@ -990,21 +955,16 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename/describe')
+    @Get('/api/sessions/:sessionId/:version/images/:filename/describe')
     async generateImageDescription(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         try {
@@ -1019,22 +979,15 @@ export class ChatController {
         }
     }
 
-    @Get('/api/sessions/:sessionId/turns/:turn/images')
+    @Get('/api/sessions/:sessionId/:version/images')
     async getImages(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            // Fallback to empty list or 404? 
-            // If turn exists but has no version, it's effectively version 0 for images usually
-            return response.json([]);
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).json({ message: 'Invalid version' });
         }
 
         return this.imageService.listImages(sessionId, version);

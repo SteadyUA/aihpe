@@ -19,9 +19,9 @@ const FALLBACK_RESPONSE: GeneratePageResult = {
     summary:
         'API key not configured. Returning existing files without modifications. Configure OPENAI_API_KEY or GEMINI_API_KEY.',
     files: {
-        html: '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
-        css: '',
-        js: '',
+        'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
+        'styles.css': '',
+        'script.js': '',
     },
 };
 
@@ -82,9 +82,8 @@ export class AiSdkClient implements LlmClient {
                     file: 'index.html' | 'styles.css' | 'script.js';
                     summary: string;
                 }) => {
-                    if (file === 'index.html') return currentFiles.html;
-                    if (file === 'styles.css') return currentFiles.css;
-                    if (file === 'script.js') return currentFiles.js;
+                    const content = currentFiles[file];
+                    if (content !== undefined) return content;
                     return 'File not found';
                 },
             }),
@@ -122,10 +121,13 @@ export class AiSdkClient implements LlmClient {
                 }) => {
                     this.ensureNextVersion(request.sessionId);
 
-                    let content = '';
-                    if (file === 'index.html') content = currentFiles.html;
-                    else if (file === 'styles.css') content = currentFiles.css;
-                    else if (file === 'script.js') content = currentFiles.js;
+                    let content = currentFiles[file] || '';
+                    if (!content && (file === 'styles.css' || file === 'script.js')) {
+                        // Allow empty css/js if undefined (though it should be defined as empty string in fallback)
+                        content = '';
+                    } else if (content === undefined) {
+                        return `Error: File ${file} not found.`;
+                    }
 
                     let targetString = oldString;
                     if (!content.includes(targetString)) {
@@ -166,10 +168,7 @@ export class AiSdkClient implements LlmClient {
                         return `Error: oldString found multiple times in ${file}. Provide more unique context.`;
 
                     const newContent = content.replace(targetString, newString);
-                    if (file === 'index.html') currentFiles.html = newContent;
-                    else if (file === 'styles.css')
-                        currentFiles.css = newContent;
-                    else if (file === 'script.js') currentFiles.js = newContent;
+                    currentFiles[file] = newContent;
                     return `Successfully updated ${file}`;
                 },
             }),
