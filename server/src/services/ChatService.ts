@@ -103,17 +103,28 @@ export class ChatService {
         // 2. Prepare conversation history for prompt
         // Use separate context list. Exclude the last message (just added) as it's the instruction.
         const currentContext = this.sessionStore.getOrCreate(sessionId).context;
+
+        // Apply Step-based Window logic
+        // Shift window every 5 turns (first shift at 15)
+        let startTurn = 1;
+        if (newTurn >= 15) {
+            const shifts = Math.floor((newTurn - 15) / 5) + 1;
+            startTurn = 5 * shifts;
+        }
+
+        const historyCandidates = currentContext.slice(0, -1).filter((msg) => (msg.turn ?? 0) >= startTurn);
+
         // hydrate attachments for the prompt/LLM
-        // Note: We need to hydrate ONLY the items that are going to be sent to LLM? 
+        // Note: We need to hydrate ONLY the items that are going to be sent to LLM?
         // Or do we need to hydrate history too?
-        // AI SDK usually handles history images if they have dataUrl. 
+        // AI SDK usually handles history images if they have dataUrl.
         // But our stored history now DOES NOT have dataUrl.
         // We probably need to hydrate the ENTIRE conversation history that has images?
         // Or at least the current message's attachments.
 
-        // For now, let's just hydrate the current request attachments. 
+        // For now, let's just hydrate the current request attachments.
         // If we want history images to work, we'd need to hydrate conversation too.
-        // Given the request, "messages.json не должен сохранять dataUrl", 
+        // Given the request, "messages.json не должен сохранять dataUrl",
         // implies we should re-hydrate on read/send using PUBLIC_HOST if/when needed.
         // Current implementation passes 'conversation' to generatePage which builds messages.
         // We should map the conversation and hydrate images there!
@@ -125,7 +136,7 @@ export class ChatService {
         // Ideally we should do this in generatePage or before passing.
 
         // Let's create a hydrated copy of the conversation for the LLM
-        const conversation = await Promise.all(currentContext.slice(0, -1).map(async (msg) => {
+        const conversation = await Promise.all(historyCandidates.map(async (msg) => {
             if (msg.attachment) {
                 return {
                     ...msg,
