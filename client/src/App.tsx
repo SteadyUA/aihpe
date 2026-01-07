@@ -413,8 +413,19 @@ class App extends React.Component<AppProps, AppState> {
                     updatedSession.status = 'idle';
                     updatedSession.requestStartTime = null;
 
-                    // Trigger fetch to get latest messages/turn
-                    setTimeout(() => this.fetchSession(sessionId, true), 0);
+                    // Append assistant message if provided in details
+                    if (data.details && data.details.message) {
+                        const assistantMsg = data.details.message;
+                        // Avoid duplicates if for some reason it's already there (unlikely with this flow)
+                        updatedSession.messages = [...updatedSession.messages, assistantMsg];
+                        // Update currentTurn if provided in message
+                        if (typeof assistantMsg.turn === 'number') {
+                            updatedSession.currentTurn = assistantMsg.turn;
+                        }
+                    } else {
+                        // Fallback: Trigger fetch if no message in payload (legacy or error case)
+                        setTimeout(() => this.fetchSession(sessionId, true), 0);
+                    }
                 } else if (data.status === 'error') {
                     updatedSession.status = 'error';
                     updatedSession.statusMessages = [...updatedSession.statusMessages, data.message || 'Error occurred'];
@@ -555,7 +566,9 @@ class App extends React.Component<AppProps, AppState> {
                             // If I leave [], it clears the status.
                             // If status is busy, and we have no message, we just show Busy.
                             // It's acceptable.
-                            statusMessages: [],
+                            statusMessages: (data.status === 'started' || data.status === 'generating')
+                                ? (session.statusMessages || [])
+                                : [],
 
                             // Set pendingRefreshTurn only if completion triggered this fetch
                             pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,
@@ -888,7 +901,7 @@ class App extends React.Component<AppProps, AppState> {
         });
 
         try {
-            await fetch(`/api/sessions/${activeSessionId}/chat`, {
+            const res = await fetch(`/api/sessions/${activeSessionId}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -898,15 +911,16 @@ class App extends React.Component<AppProps, AppState> {
                     provider: session.provider,
                 }),
             });
-            this.updateSession(activeSessionId, { attachment: undefined }); // Clear attachment
-            // Explicitly clear unsent data via API or handled by server?
-            // Server ChatService should clear it.
-            // Client state should also be cleared to reflect that.
-            // But if we want to be safe, we can clear it.
-            // However, ChatService handles it.
-            // Wait, if we rely on ChatService clearing it, we need to know WHEN it's cleared.
-            // Since we receive SSE status updates, maybe we don't need to manually clear unsent here if we fetch?
-            // But to be responsive, we should clear it.
+
+            const data = await res.json();
+
+            // Update session with the confirmed turn number
+            this.updateSession(activeSessionId, {
+                attachment: undefined,
+                currentTurn: data.turn,
+                activeTurn: data.turn, // Navigate to the new turn
+            });
+
             this.setState(prev => {
                 const s = prev.sessions[activeSessionId];
                 return {

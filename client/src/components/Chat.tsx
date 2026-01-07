@@ -28,6 +28,9 @@ interface MessageProps {
     onUndo?: () => void;
     sessionIds?: string[];
     onSwitchSession?: (id: string) => void;
+    isPending?: boolean;
+    statusMessages?: string[];
+    elapsedSeconds?: number;
 }
 
 const formatTime = (dateString?: string) => {
@@ -73,20 +76,19 @@ class Message extends React.Component<MessageProps> {
             isLastAssistant,
             status,
             onUndo,
+            isPending,
+            statusMessages,
+            elapsedSeconds,
         } = this.props;
         const isUser = msg.role === 'user';
         const isAssistant = msg.role === 'assistant';
-        const isSystem = msg.role === 'system';
-
-        const hasTurn = isAssistant && typeof msg.turn === 'number';
 
         const messageClass = classNames(styles.message, {
             [styles.user]: isUser,
             [styles.assistant]: isAssistant,
-            [styles.system]: isSystem,
-            [styles.hasVersion]: hasTurn,
-            [styles.activeVersion]: isActiveTurn,
+            [styles.activeTurn]: isActiveTurn,
             [styles.dimmed]: isDimmed,
+            [styles.pending]: isPending,
         });
 
         return (
@@ -94,7 +96,7 @@ class Message extends React.Component<MessageProps> {
                 id={id}
                 className={messageClass}
                 onClick={
-                    hasTurn && onPreviewTurn
+                    isAssistant && onPreviewTurn
                         ? () => onPreviewTurn(msg.turn!)
                         : undefined
                 }
@@ -129,14 +131,35 @@ class Message extends React.Component<MessageProps> {
                         </div>
                     )}
 
-                    {/* Render Text Content */}
-                    {(msg.content || (!msg.attachment && isUser)) && (
-                        <div
-                            className="message-text"
-                            dangerouslySetInnerHTML={{
-                                __html: marked.parse(processContent(msg.content, this.props.sessionIds)) as string,
-                            }}
-                        />
+                    {/* Render Content */}
+                    {isPending ? (
+                        statusMessages && statusMessages.length > 0 ? (
+                            (() => {
+                                const maxItems = 3;
+                                const start = Math.max(0, statusMessages.length - maxItems);
+                                const visibleMessages = statusMessages.slice(start);
+                                const startIndex = start + 1;
+
+                                return (
+                                    <ol start={startIndex} className={styles.statusList}>
+                                        {visibleMessages.map((msg, idx) => (
+                                            <li key={start + idx}>{msg}</li>
+                                        ))}
+                                    </ol>
+                                );
+                            })()
+                        ) : (
+                            <span className={styles.blinkingCursor}>▋</span>
+                        )
+                    ) : (
+                        (msg.content || (!msg.attachment && isUser)) && (
+                            <div
+                                className="message-text"
+                                dangerouslySetInnerHTML={{
+                                    __html: marked.parse(processContent(msg.content, this.props.sessionIds)) as string,
+                                }}
+                            />
+                        )
                     )}
 
                     {/* Render Attachment as Thumbnail */}
@@ -160,6 +183,16 @@ class Message extends React.Component<MessageProps> {
                 </div>
                 {/* Message Actions */}
                 <div className={styles.messageActions}>
+                    {isPending && (
+                        <>
+                            <span className={styles.spinner}></span>
+                            <span className={styles.timer}>
+                                {elapsedSeconds && elapsedSeconds > 0
+                                    ? `${elapsedSeconds}s`
+                                    : ''}
+                            </span>
+                        </>
+                    )}
                     {/* Timestamp for user messages */}
                     {isUser && msg.createdAt && (
                         <div className={styles.messageMeta}>
@@ -276,6 +309,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
     private timerInterval: any = null;
+    private isUserScroll = false;
 
     constructor(props: ChatProps) {
         super(props);
@@ -323,7 +357,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         // If active turn changed, scroll to it
         if (prevProps.activeTurn !== this.props.activeTurn) {
-            if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
+            if (this.isUserScroll) {
+                this.isUserScroll = false;
+            } else if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
                 this.scrollToTurn(this.props.activeTurn);
             } else {
                 // If we went back to latest
@@ -490,6 +526,13 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
+    handlePreviewTurn = (turn: number) => {
+        this.isUserScroll = true;
+        if (this.props.onPreviewTurn) {
+            this.props.onPreviewTurn(turn);
+        }
+    };
+
     render() {
         const {
             messages,
@@ -541,6 +584,17 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }
 
+        let latestTurn = 0;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (typeof messages[i].turn === 'number') {
+                latestTurn = messages[i].turn!;
+                break;
+            }
+        }
+
+        const isPendingActive = latestTurn === effectiveActiveTurn;
+        const shouldPendingDim = foundActive && !isPendingActive;
+
         return (
             <div className={styles.chatPanel}>
                 <div className={styles.messages} id="messages">
@@ -567,7 +621,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 msg={m}
                                 onSelectChip={onSelectChip}
                                 onCloneTurn={onCloneTurn}
-                                onPreviewTurn={onPreviewTurn}
+                                onPreviewTurn={this.handlePreviewTurn}
                                 isActiveTurn={isTurnMatch}
                                 isDimmed={shouldDim}
                                 isLastAssistant={i === lastAssistantIndex}
@@ -578,40 +632,29 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         );
                     })}
                     {status === 'busy' && (
-                        <div
-                            className={classNames(
-                                styles.message,
-                                styles.assistant,
-                                styles.pending,
-                            )}
-                        >
-                            <div className={styles.messageContent}>
-                                {statusMessages && statusMessages.length > 0 ? (
-                                    (() => {
-                                        const maxItems = 3;
-                                        const start = Math.max(0, statusMessages.length - maxItems);
-                                        const visibleMessages = statusMessages.slice(start);
-                                        const startIndex = start + 1; // 1-based index for <ol>
-
-                                        return (
-                                            <ol className={styles.statusList} start={startIndex}>
-                                                {visibleMessages.map((msg, idx) => (
-                                                    <li key={start + idx}>{msg}</li>
-                                                ))}
-                                            </ol>
-                                        );
-                                    })()
-                                ) : (
-                                    <p>Thinking...</p>
-                                )}
-                            </div>
-                            <div className={styles.messageActions}>
-                                <span className={styles.spinner}></span>
-                                <span className={styles.timer}>
-                                    {elapsedSeconds > 0 ? `${elapsedSeconds}s` : ''}
-                                </span>
-                            </div>
-                        </div>
+                        <Message
+                            id={
+                                latestTurn
+                                    ? `msg-turn-${latestTurn}`
+                                    : undefined
+                            }
+                            msg={{
+                                role: 'assistant',
+                                content: '',
+                                turn: latestTurn,
+                                version: 0,
+                            }}
+                            statusMessages={statusMessages}
+                            elapsedSeconds={elapsedSeconds}
+                            isPending={true}
+                            isActiveTurn={isPendingActive}
+                            isDimmed={shouldPendingDim}
+                            // Mimic props required for interaction
+                            onPreviewTurn={onPreviewTurn}
+                            // Additional props
+                            sessionIds={sessionIds}
+                            onSwitchSession={onSwitchSession}
+                        />
                     )}
                     <div ref={this.messagesEndRef} />
                 </div>

@@ -313,18 +313,33 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/chat')
-    sendMessage(
+    async sendMessage(
         @Param('sessionId') sessionId: string,
         @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider },
+        @Res() response: Response,
     ) {
-        return this.chatService.handleUserMessage(
+        const result = await this.chatService.addUserMessage(
             sessionId,
             body.message,
             body.attachment,
-            true, // allowVariants
             body.selection,
             body.provider,
         );
+
+        if (!result.skipped && result.promptData) {
+            setImmediate(() => {
+                this.chatService.generateResponse(
+                    sessionId,
+                    result.promptData!,
+                    result.turn,
+                    true,
+                ).catch(e => console.error('Background generation error', e));
+            });
+        }
+
+        return response.status(201).json({
+            turn: result.turn,
+        });
     }
 
     @Post('/api/sessions/:sessionId/uploads')

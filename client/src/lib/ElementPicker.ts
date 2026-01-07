@@ -398,7 +398,7 @@ export class ElementPicker {
                 ? className.substring(0, maxClassLen) + '...'
                 : className;
 
-            const dims = `${Math.round(target.getBoundingClientRect().width)} x ${Math.round(target.getBoundingClientRect().height)}`;
+            const dims = `${Math.round(target.getBoundingClientRect().width)}x${Math.round(target.getBoundingClientRect().height)}`;
 
             const infoSpan = document.createElement('span');
             infoSpan.textContent = `${tagName}${idId}${truncatedClass} | ${dims}`;

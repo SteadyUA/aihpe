@@ -12,6 +12,7 @@ import path from 'path';
 interface ChatResult {
     message: string;
     session: SessionData;
+    turn: number;
 }
 
 @Service()
@@ -24,14 +25,22 @@ export class ChatService {
         private readonly projectService: ProjectService,
     ) { }
 
-    async handleUserMessage(
+    async addUserMessage(
         sessionId: string,
         userMessage: string,
         attachment?: ChatAttachment,
-        allowVariants: boolean = true,
         selection?: { selector: string },
         provider?: LlmProvider,
-    ): Promise<ChatResult> {
+    ): Promise<{
+        turn: number;
+        session: SessionData;
+        promptData?: {
+            message: string;
+            attachment?: ChatAttachment;
+            selection?: { selector: string };
+        };
+        skipped: boolean;
+    }> {
         const trimmed = userMessage.trim();
         const normalizedAttachment = await this.prepareAttachment(sessionId, attachment);
         const hasContent =
@@ -47,8 +56,9 @@ export class ChatService {
                 'Message is empty. No changes applied.',
             );
             return {
-                message: 'Message is empty. No changes applied.',
+                turn: session.lastTurn ?? 0,
                 session,
+                skipped: true,
             };
         }
 
@@ -98,20 +108,48 @@ export class ChatService {
             unsent: undefined // Clear unsent data as we just sent it
         });
 
+        return {
+            turn: newTurn,
+            session: this.sessionStore.getOrCreate(sessionId),
+            promptData: {
+                message: trimmed,
+                attachment: normalizedAttachment,
+                selection,
+            },
+            skipped: false,
+        };
+    }
+
+    async generateResponse(
+        sessionId: string,
+        promptData: {
+            message: string;
+            attachment?: ChatAttachment;
+            selection?: { selector: string };
+        },
+        turn: number,
+        allowVariants: boolean = true,
+    ): Promise<void> {
         this.notifyStatus(sessionId, 'started', 'Thinking...');
+
+        const currentSessionData = this.sessionStore.getOrCreate(sessionId);
 
         // 2. Prepare conversation history for prompt
         // Use separate context list. Exclude the last message (just added) as it's the instruction.
-        const currentContext = this.sessionStore.getOrCreate(sessionId).context;
+        const currentContext = currentSessionData.context;
 
         // Apply Step-based Window logic
         // Shift window every 5 turns (first shift at 15)
         let startTurn = 1;
-        if (newTurn >= 15) {
-            const shifts = Math.floor((newTurn - 15) / 5) + 1;
+        if (turn >= 15) {
+            const shifts = Math.floor((turn - 15) / 5) + 1;
             startTurn = 5 * shifts;
         }
 
+        // We assume the last message in context is the one we just added (the user instruction)
+        // Check if context has message for current turn?
+        // Note: addUserMessage added it. So currentContext should have it at the end.
+        // historyCandidates should exclude it.
         const historyCandidates = currentContext.slice(0, -1).filter((msg) => (msg.turn ?? 0) >= startTurn);
 
         // hydrate attachments for the prompt/LLM
@@ -130,7 +168,7 @@ export class ChatService {
         // We should map the conversation and hydrate images there!
 
         // Let's hydrate the current attachment first (for the prompt 'user' message)
-        const hydratedCurrentAttachment = await this.hydrateAttachment(sessionId, normalizedAttachment);
+        const hydratedCurrentAttachment = await this.hydrateAttachment(sessionId, promptData.attachment);
 
         // We also need to hydrate conversation history images if they are used by the model
         // Ideally we should do this in generatePage or before passing.
@@ -147,14 +185,14 @@ export class ChatService {
         }));
 
         let selectorsSummary = '';
-        if (normalizedAttachment) {
-            selectorsSummary = `Image: ${normalizedAttachment.filename}`;
+        if (promptData.attachment) {
+            selectorsSummary = `Image: ${promptData.attachment.filename}`;
         }
-        const selectionContext = selection
-            ? `Выбран элемент: ${selection.selector}.`
+        const selectionContext = promptData.selection
+            ? `Выбран элемент: ${promptData.selection.selector}.`
             : '';
 
-        let effectiveInstructions = trimmed;
+        let effectiveInstructions = promptData.message;
         if (selectionContext) {
             effectiveInstructions = `${selectionContext} ${effectiveInstructions}`;
         }
@@ -209,9 +247,10 @@ export class ChatService {
                         `Tool call: generate_variant`,
                     );
 
-                    const currentSession = this.sessionStore.getOrCreate(sessionId);
+                    // Re-instantiate session data just in case
+                    const session = this.sessionStore.getOrCreate(sessionId);
 
-                    const targetTurn = Math.max(0, newTurn - 1);
+                    const targetTurn = Math.max(0, turn - 1);
                     const { id: variantId } = this.sessionStore.prepareClone(sessionId);
                     const variantGroup = Math.floor(Math.random() * 32);
 
@@ -237,12 +276,25 @@ export class ChatService {
                         projectId: session.projectId,
                     });
 
-                    this.handleUserMessage(
+                    // Recursively call addUserMessage for the new session?
+                    // Wait, generate_variant tool triggers generation for the new session.
+                    // We need to simulate a user message reception there?
+                    // Or just trigger generation?
+                    // handleUserMessage was calling itself recursively.
+                    // Now we should probably call addUserMessage + generateResponse?
+                    // Actually, `instruction` is the user message for the new session.
+
+                    this.addUserMessage(
                         newSession.id,
                         instruction,
                         undefined,
-                        false, // Do NOT allow variants of variants recursively
-                    ).catch((e) =>
+                        undefined,
+                        // Defaults
+                    ).then(async (result) => {
+                        if (!result.skipped && result.promptData) {
+                            await this.generateResponse(newSession.id, result.promptData, result.turn, false);
+                        }
+                    }).catch((e) =>
                         console.error(
                             `Failed to generate variant for session ${newSession.id}`,
                             e,
@@ -335,17 +387,24 @@ export class ChatService {
                 );
             }
 
+            // Construct the assistant message object to send to client
+            const assistantMessage: ChatMessage = {
+                role: 'assistant',
+                content: generation.summary,
+                createdAt: new Date(),
+                version: updated.currentVersion,
+                turn: updated.lastTurn ?? 0,
+            };
+
             this.notifyStatus(
                 sessionId,
                 'completed',
                 'Request completed.',
-                generation.summary,
+                {
+                    message: assistantMessage
+                },
             );
 
-            return {
-                message: generation.summary,
-                session: updated,
-            };
         } catch (error) {
             const description = this.describeError(error);
             this.notifyStatus(
@@ -354,7 +413,8 @@ export class ChatService {
                 'Failed to process request.',
                 description,
             );
-            throw error;
+            // We don't throw here as this is a background task now
+            console.error('Generation failed:', error);
         }
     }
 
