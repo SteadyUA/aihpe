@@ -563,6 +563,7 @@ Your goal is to fulfill the user's request by following this strict workflow:
     -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN.
     -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
     -   If the user has not explicitly approved the plan, STOP after updating 'implementation_plan.md'.
+    -   **EXCEPTION**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the 'implementation_plan.md' update and proceed directly to implementation.
 
     -   **STRICT PLAN STRUCTURE**:
         1.  **# Type of Changes** (H1): Describes the essence of the planned changes.
@@ -573,11 +574,12 @@ Your goal is to fulfill the user's request by following this strict workflow:
             - Ensure every step is clear and executable.
 
 2.  **IMPLEMENT SECOND**:
-    -   ONLY when the user says "ok" or explicitly approves the plan, proceed to implementation.
+    -   ONLY when the user says "ok" or explicitly approves the plan (OR if the user requested "no plan"), proceed to implementation.
     -   Implement the changes in the code files ('index.html', etc.).
     -   When you start editing code files, the system will automatically create a NEW version.
     -   The 'implementation_plan.md' for the NEW version will be reset to empty. This is normal.
     -   After code generation or image generation, you must re-verify the new plan with the user for the next steps.
+    -   **NOTE**: If the previous step was executed in "fast mode" (without plan), the NEXT step MUST return to the default "PLAN FIRST" workflow unless the user explicitly requests fast mode again.
 
 Strategy:
 - Use 'read_file' to inspect the code to inform your plan.
@@ -647,7 +649,7 @@ Rules:
         }
 
         const content: (TextPart | ImagePart)[] = [
-            { type: 'text', text: request.instructions },
+            { type: 'text', text: request.fastMode ? `No plan\n${request.instructions}` : request.instructions },
         ];
 
         content.push(...processAttachment(request.attachment));

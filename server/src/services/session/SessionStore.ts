@@ -6,7 +6,7 @@ import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, Sessio
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -20,6 +20,7 @@ type PersistedSession = {
     currentVersion?: number;
     lastTurn?: number;
     provider?: LlmProvider;
+    fastMode?: boolean;
     unsent?: UnsentData;
     projectId?: string;
     status?: SessionStatus;
@@ -74,9 +75,16 @@ const VERSION_DIRNAME = 'versions';
 @Service()
 export class SessionStore {
     private readonly sessions = new Map<string, SessionData>();
+    private nextGroupIndex = Math.floor(Math.random() * 12);
 
     constructor() {
         ensureDirectory(SESSION_ROOT);
+    }
+
+    private getNextGroup(): number {
+        const group = this.nextGroupIndex;
+        this.nextGroupIndex = (this.nextGroupIndex + 1) % 12;
+        return group;
     }
 
     getVersionForTurn(sessionId: string, turn: number): number | undefined {
@@ -119,7 +127,7 @@ export class SessionStore {
 
     prepareCreate(): { id: string; group: number } {
         const id = randomUUID();
-        const group = Math.floor(Math.random() * 12);
+        const group = this.getNextGroup();
         return { id, group };
     }
 
@@ -404,10 +412,11 @@ export class SessionStore {
             history: [],
             context: [],
             updatedAt: new Date(),
-            group: group ?? Math.floor(Math.random() * 12),
+            group: group ?? this.getNextGroup(),
             currentVersion: 0,
             lastTurn: 0,
             provider: 'openai', // Default provider
+            fastMode: false,
             unsent: {},
             status: 'idle',
         };
@@ -627,22 +636,48 @@ export class SessionStore {
 
     savePlanArtifact(sessionId: string, turn: number): void {
         const session = this.getOrCreate(sessionId);
-        // We want to save the state of implementation_plan.md BEFORE the new turn starts.
-        // So this represents the plan state at the end of the previous turn.
+        // Save the plan state at the END of the current turn.
 
         const sessionDir = resolveSessionDir(sessionId);
         const artifactsDir = path.join(sessionDir, 'artifacts');
 
         ensureDirectory(artifactsDir);
 
-        const planContent = session.files['implementation_plan.md'] || '';
-        const artifactPath = path.join(artifactsDir, `plan.md.${turn}`);
+        const planContent = session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'];
+        const artifactPath = path.join(artifactsDir, `implementation_plan.md.${turn}`);
 
         try {
             fs.writeFileSync(artifactPath, planContent, 'utf-8');
         } catch (error) {
             console.error(`Failed to save plan artifact for session ${sessionId} turn ${turn}`, error);
         }
+    }
+
+
+    getArtifact(sessionId: string, turn: number, filename: string): string | undefined {
+        const sessionDir = resolveSessionDir(sessionId);
+        const artifactsDir = path.join(sessionDir, 'artifacts');
+        const artifactPath = path.join(artifactsDir, `${filename}.${turn}`);
+
+        if (fs.existsSync(artifactPath)) {
+            try {
+                return fs.readFileSync(artifactPath, 'utf-8');
+            } catch (error) {
+                console.error(`Failed to read artifact ${filename}.${turn} for session ${sessionId}`, error);
+            }
+        } else if (filename === 'implementation_plan.md') {
+            const legacyPath = path.join(artifactsDir, `plan.md.${turn}`);
+            if (fs.existsSync(legacyPath)) {
+                try {
+                    return fs.readFileSync(legacyPath, 'utf-8');
+                } catch (error) {
+                    console.error(`Failed to read legacy artifact plan.md.${turn} for session ${sessionId}`, error);
+                }
+            }
+        }
+
+        // Return default if missing
+        return EMPTY_FILES[filename as keyof SessionFiles];
     }
 
     getAllHistory(sessionId: string): ChatMessage[] | undefined {
@@ -686,6 +721,7 @@ export class SessionStore {
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
             provider: update.provider ?? session.provider,
+            fastMode: update.fastMode ?? session.fastMode,
             status: update.status ?? session.status,
         };
 
@@ -744,7 +780,8 @@ export class SessionStore {
                 currentVersion,
                 lastTurn: parsed.lastTurn ?? 0,
                 provider: parsed.provider ?? 'openai',
-                unsent: parsed.unsent ?? {},
+                fastMode: parsed.fastMode ?? false,
+                unsent: parsed.unsent || {},
                 status: parsed.status ?? 'idle',
             };
 

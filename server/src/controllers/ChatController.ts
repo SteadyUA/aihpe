@@ -23,6 +23,7 @@ import {
     Matches,
     ValidateIf,
     ValidateNested,
+    IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Service } from 'typedi';
@@ -104,7 +105,9 @@ class UnsentDataRequest {
     @IsString()
     provider?: LlmProvider;
 
-
+    @IsOptional()
+    @IsBoolean()
+    fastMode?: boolean;
 }
 
 class CreateSessionRequest {
@@ -294,7 +297,7 @@ export class ChatController {
         // If value is defined (and not null), update it.
         // If value is undefined, ignore (preserve existing).
 
-        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider'];
+        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider', 'fastMode'];
 
         for (const field of fields) {
             const value = body[field];
@@ -317,7 +320,7 @@ export class ChatController {
     @Post('/api/sessions/:sessionId/chat')
     async sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider },
+        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider, fastMode?: boolean },
         @Res() response: Response,
     ) {
         const result = await this.chatService.addUserMessage(
@@ -326,6 +329,7 @@ export class ChatController {
             body.attachment,
             body.selection,
             body.provider,
+            body.fastMode,
         );
 
         if (!result.skipped && result.promptData) {
@@ -520,6 +524,7 @@ export class ChatController {
             currentVersion: snapshot.currentVersion,
             currentTurn: snapshot.lastTurn ?? 0,
             provider: snapshot.provider ?? 'openai',
+            fastMode: snapshot.fastMode ?? false,
             history,
             unsent: snapshot.unsent,
             status: snapshot.status,
@@ -727,6 +732,39 @@ export class ChatController {
     }
 
 
+
+    @Get('/api/sessions/:sessionId/artifacts/:turn/:filename')
+    getArtifact(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return response.status(400).send('Invalid turn');
+        }
+
+        // Security check for filename
+        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const content = this.sessionStore.getArtifact(sessionId, turn, filename);
+
+        if (content === undefined) {
+            return response.status(404).send('Artifact not found');
+        }
+
+        let contentType = 'text/plain';
+        if (filename.endsWith('.md')) contentType = 'text/markdown';
+        else if (filename.endsWith('.html')) contentType = 'text/html';
+        else if (filename.endsWith('.css')) contentType = 'text/css';
+        else if (filename.endsWith('.js')) contentType = 'application/javascript';
+
+        response.setHeader('Content-Type', contentType);
+        return response.send(content);
+    }
 
     @Post('/api/sessions/:sessionId/undo')
     undoLastTurn(

@@ -367,9 +367,15 @@
     font-weight: 500;
 }
 
-.imageToggle {
+.toggles {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin-right: auto;
-    /* Push to left */
+}
+
+.imageToggle {
+    /* margin-right: auto;  Removed as parent handles it */
 }
 
 .messageMeta {

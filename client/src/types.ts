@@ -35,7 +35,7 @@ export interface UnsentData {
     attachment?: ChatAttachment | null;
     selection?: string | null;
     provider?: LlmProvider | null;
-
+    fastMode?: boolean;
 }
 
 
@@ -56,8 +56,9 @@ export interface Session {
     activeTab: TabType;
 
     provider?: LlmProvider;
+    fastMode?: boolean;
     pendingRefreshTurn: number | null;
-    pendingFileRefresh?: { version: number; filename: string } | null;
+    pendingFileRefresh?: { version: number; filename: string; turn?: number } | null;
 
     // UI selections per session
     selection: string | null;

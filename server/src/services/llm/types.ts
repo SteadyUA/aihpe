@@ -12,6 +12,7 @@ export interface GeneratePageRequest {
     rulesAndGoal?: string;
     imageGenerationPref?: string;
     onVariantRequest?: (instruction: string) => Promise<string>;
+    fastMode?: boolean;
 }
 
 

@@ -40,6 +40,7 @@ export interface SessionData {
     currentVersion: number;
     lastTurn?: number;
     provider?: LlmProvider;
+    fastMode?: boolean;
     unsent?: UnsentData;
 
     status: SessionStatus;
@@ -64,4 +65,5 @@ export interface UnsentData {
     attachment?: ChatAttachment;
     selection?: string;
     provider?: LlmProvider;
+    fastMode?: boolean;
 }

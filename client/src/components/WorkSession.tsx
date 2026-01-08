@@ -19,7 +19,7 @@ interface WorkSessionProps {
     onDeleteAttachment?: (attachment: ChatAttachment) => void;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
-    onSaveUnsent?: (data: { input?: string | null }) => void;
+    onSaveUnsent?: (data: { input?: string | null; fastMode?: boolean }) => void;
     onResizeStart?: (e: React.MouseEvent) => void;
     isResizing?: boolean;
     sessionIds: string[];
@@ -101,8 +101,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.props.onUpdateSession({ pendingRefreshTurn: null });
         } else if (this.props.session.pendingFileRefresh) {
             // Granular refresh
-            const { version, filename } = this.props.session.pendingFileRefresh;
-            this.previewRef.current?.clearCache(version, filename);
+            const { version, filename, turn } = this.props.session.pendingFileRefresh;
+            this.previewRef.current?.clearCache(version, filename, turn);
             this.props.onUpdateSession({ pendingFileRefresh: null });
         }
 
@@ -258,9 +258,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         // Calculate current turn for Preview
         const currentTurn = session.activeTurn ?? session.currentTurn;
         // Check if we are at the latest turn
-        const isLatest = session.currentVersion !== undefined
-            ? session.currentVersion === this.getVersionForTurn(currentTurn)
-            : (session.activeTurn === undefined || session.activeTurn === null || session.activeTurn === session.currentTurn);
+        const isLatest = (session.activeTurn === undefined || session.activeTurn === null || session.activeTurn === session.currentTurn);
 
         return (
             <div style={{ display: isVisible ? 'contents' : 'none' }}>
@@ -292,6 +290,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSaveUnsent={onSaveUnsent}
                     sessionIds={sessionIds}
                     onSwitchSession={onSwitchSession}
+                    fastMode={session.unsent?.fastMode ?? session.fastMode}
+                    onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
 
                 />
 
@@ -313,6 +313,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onProceed={this.handleProceed}
                     isBusy={session.status === 'busy'}
                     isLatest={isLatest}
+                    displayedTurn={currentTurn}
+                    fastMode={session.unsent?.fastMode ?? session.fastMode}
                 />
             </div>
         );

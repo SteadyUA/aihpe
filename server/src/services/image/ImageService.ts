@@ -374,8 +374,8 @@ export class ImageService {
         if (metadata.length === 0) return;
 
         let hasChanges = false;
-        const htmlContent = files.html || '';
-        const cssContent = files.css || '';
+        const htmlContent = files['index.html'] || files['html'] || '';
+        const cssContent = files['styles.css'] || files['css'] || '';
 
         const updatedMetadata = metadata.map(img => {
             // Check usage

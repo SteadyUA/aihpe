@@ -452,7 +452,7 @@ class App extends React.Component<AppProps, AppState> {
 
         this.evtSource.addEventListener('file-change', (e) => {
             const data = JSON.parse(e.data);
-            const { sessionId, version, filename } = data;
+            const { sessionId, version, filename, turn } = data;
 
             this.setState(prevState => {
                 const session = prevState.sessions[sessionId];
@@ -464,7 +464,7 @@ class App extends React.Component<AppProps, AppState> {
                         ...prevState.sessions,
                         [sessionId]: {
                             ...session,
-                            pendingFileRefresh: { version, filename }
+                            pendingFileRefresh: { version, filename, turn }
                         }
                     }
                 };
@@ -613,6 +613,7 @@ class App extends React.Component<AppProps, AppState> {
                             attachment: (data.unsent?.attachment) ?? session.attachment,
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
+                            fastMode: (data.unsent?.fastMode) ?? data.fastMode ?? false,
 
                         }
                     }
@@ -761,7 +762,7 @@ class App extends React.Component<AppProps, AppState> {
         });
     }
 
-    handleSaveUnsent = async (sessionId?: string, data?: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null }) => {
+    handleSaveUnsent = async (sessionId?: string, data?: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null, fastMode?: boolean }) => {
         const targetId = sessionId || this.state.activeSessionId;
         if (!targetId || !data) return;
 
@@ -787,6 +788,10 @@ class App extends React.Component<AppProps, AppState> {
             if (data.provider !== undefined) {
                 if (data.provider === null) delete currentUnsent.provider;
                 else currentUnsent.provider = data.provider;
+            }
+            if (data.fastMode !== undefined) {
+                // Boolean doesn't really have "null" to delete, but let's assume valid boolean means update.
+                currentUnsent.fastMode = data.fastMode;
             }
 
             return {
@@ -947,7 +952,7 @@ class App extends React.Component<AppProps, AppState> {
                     attachment,
                     selection: selectionData,
                     provider: session.provider,
-
+                    fastMode: session.unsent?.fastMode ?? session.fastMode ?? false,
                 }),
             });
 

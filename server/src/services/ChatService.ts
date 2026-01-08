@@ -31,6 +31,7 @@ export class ChatService {
         attachment?: ChatAttachment,
         selection?: { selector: string },
         provider?: LlmProvider,
+        fastMode?: boolean,
     ): Promise<{
         turn: number;
         session: SessionData;
@@ -80,9 +81,7 @@ export class ChatService {
         // Determine turn: User message starts a new turn
         const currentTurn = currentSessionData.lastTurn ?? 0;
 
-        // Save implementation_plan.md artifact for the current turn (before incrementing)
-        // This snapshots the plan as it was at the end of the previous turn.
-        this.sessionStore.savePlanArtifact(sessionId, currentTurn);
+
 
         const newTurn = currentTurn + 1;
 
@@ -111,6 +110,7 @@ export class ChatService {
             context: [...currentSessionData.context, contextEntry],
             lastTurn: newTurn, // Update lastTurn
             updatedAt: now,
+            fastMode: fastMode ?? currentSessionData.fastMode, // Persist fastMode if provided
             unsent: undefined // Clear unsent data as we just sent it
         });
 
@@ -135,6 +135,7 @@ export class ChatService {
         },
         turn: number,
         allowVariants: boolean = true,
+        fastModeOverride?: boolean,
     ): Promise<void> {
         this.notifyStatus(sessionId, 'started', 'Thinking...');
 
@@ -226,6 +227,7 @@ export class ChatService {
                 currentVersion: currentSessionData.currentVersion,
                 rulesAndGoal,
                 imageGenerationPref,
+                fastMode: fastModeOverride ?? currentSessionData.fastMode,
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
@@ -295,10 +297,11 @@ export class ChatService {
                         instruction,
                         undefined,
                         undefined,
-                        // Defaults
+                        undefined,
+                        undefined, // Do NOT persist fastMode
                     ).then(async (result) => {
                         if (!result.skipped && result.promptData) {
-                            await this.generateResponse(newSession.id, result.promptData, result.turn, false);
+                            await this.generateResponse(newSession.id, result.promptData, result.turn, false, true);
                         }
                     }).catch((e) =>
                         console.error(
@@ -313,12 +316,18 @@ export class ChatService {
 
 
             if (generation.targetVersion !== undefined && generation.targetVersion !== null) {
+                // Merge existing files with new changes to avoid overwriting with partial updates
+                const mergedFiles = { ...currentSessionData.files, ...generation.files };
+
                 const updated = this.sessionStore.updateFiles(
                     sessionId,
-                    generation.files,
+                    mergedFiles,
                     generation.targetVersion,
                 );
                 await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
+
+                // Save implementation_plan.md artifact for the current turn (before notifying changes)
+                this.sessionStore.savePlanArtifact(sessionId, updated.lastTurn ?? 0);
 
                 // Detect and emit file changes
                 for (const [filename, content] of Object.entries(generation.files)) {
@@ -329,11 +338,15 @@ export class ChatService {
                             sessionId,
                             version: generation.targetVersion,
                             filename,
+                            turn: updated.lastTurn ?? 0,
                         });
                     }
                 }
             } else {
                 // No changes to files/version, just append messages
+                // Ensure artifact is saved for this turn even if no files changed
+                const session = this.sessionStore.getOrCreate(sessionId);
+                this.sessionStore.savePlanArtifact(sessionId, session.lastTurn ?? 0);
             }
 
             // Re-fetch strict session state
@@ -423,6 +436,8 @@ export class ChatService {
                     message: assistantMessage
                 },
             );
+
+
 
         } catch (error) {
             const description = this.describeError(error);

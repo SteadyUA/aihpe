@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import classNames from 'classnames';
 import { ElementPicker } from './ElementPicker';
 import { UiButton } from './UiButton';
+import { UiDropdown } from './UiDropdown';
 import { UiTarget } from './UiTarget';
 import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
@@ -294,6 +295,8 @@ interface ChatProps {
     onSaveUnsent?: (data: { input?: string | null }) => void;
     sessionIds?: string[];
     onSwitchSession?: (id: string) => void;
+    fastMode?: boolean;
+    onFastModeChange?: (value: boolean) => void;
 
 }
 
@@ -752,12 +755,23 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     >
                         {/* Mode Toggle */}
                         {onProviderChange && (
-                            <ProviderSelector
-                                value={provider}
-                                onChange={onProviderChange}
-                                disabled={isFormDisabled || isLoading || isUploading}
-                                className={styles.imageToggle}
-                            />
+                            <div className={styles.toggles}>
+                                <UiDropdown
+                                    value={this.props.fastMode ? 'fast' : 'plan'}
+                                    options={[
+                                        { value: 'plan', label: 'Planning' },
+                                        { value: 'fast', label: 'Fast mode' }
+                                    ]}
+                                    onChange={(val) => this.props.onFastModeChange?.(val === 'fast')}
+                                    disabled={isFormDisabled}
+                                />
+                                <ProviderSelector
+                                    value={provider}
+                                    onChange={onProviderChange}
+                                    disabled={isFormDisabled || isLoading || isUploading}
+                                    className={styles.imageToggle}
+                                />
+                            </div>
                         )}
                         <UiButton
                             type="submit"
