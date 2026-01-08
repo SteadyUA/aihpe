@@ -294,6 +294,7 @@ interface ChatProps {
     onSaveUnsent?: (data: { input?: string | null }) => void;
     sessionIds?: string[];
     onSwitchSession?: (id: string) => void;
+
 }
 
 interface ChatState {
@@ -435,6 +436,14 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 el.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }, 100);
+    };
+
+    public submit = (text: string) => {
+        if (this.props.disabled) return;
+        this.props.onSend(text);
+        if (this.props.onAttachmentChange) {
+            this.props.onAttachmentChange(undefined);
+        }
     };
 
     handleSubmit = (e: React.FormEvent) => {
@@ -741,6 +750,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <div
                         className={styles.formActions}
                     >
+                        {/* Mode Toggle */}
                         {onProviderChange && (
                             <ProviderSelector
                                 value={provider}

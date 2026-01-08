@@ -64,6 +64,7 @@ const EMPTY_FILES: SessionFiles = {
     'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
     'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
     'script.js': DEFAULT_SESSION_SCRIPT,
+    'implementation_plan.md': '# Project Plan\n\nNo plan created yet.',
 };
 
 const SESSION_ROOT = resolveSessionRoot();
@@ -333,6 +334,26 @@ export class SessionStore {
             targetVersion === 0
                 ? { ...EMPTY_FILES }
                 : readVersionFiles(sessionId, targetVersion) || { ...EMPTY_FILES };
+
+        // 6.5 Restore implementation_plan.md from artifact
+        const previousTurn = currentTurn - 1;
+        const previousPlanArtifact = path.join(
+            resolveSessionDir(sessionId),
+            'artifacts',
+            `implementation_plan.md.${previousTurn}`
+        );
+
+        if (fs.existsSync(previousPlanArtifact)) {
+            try {
+                const planContent = fs.readFileSync(previousPlanArtifact, 'utf-8');
+                snapshot['implementation_plan.md'] = planContent;
+            } catch (e) {
+                console.error(`Failed to restore plan artifact for turn ${previousTurn}`, e);
+            }
+        } else if (previousTurn === 0) {
+            // Turn 0 implies empty or initial plan
+            snapshot['implementation_plan.md'] = EMPTY_FILES['implementation_plan.md'];
+        }
 
         // 7. Update Session
         const updated: SessionData = {
@@ -604,6 +625,26 @@ export class SessionStore {
         return undefined;
     }
 
+    savePlanArtifact(sessionId: string, turn: number): void {
+        const session = this.getOrCreate(sessionId);
+        // We want to save the state of implementation_plan.md BEFORE the new turn starts.
+        // So this represents the plan state at the end of the previous turn.
+
+        const sessionDir = resolveSessionDir(sessionId);
+        const artifactsDir = path.join(sessionDir, 'artifacts');
+
+        ensureDirectory(artifactsDir);
+
+        const planContent = session.files['implementation_plan.md'] || '';
+        const artifactPath = path.join(artifactsDir, `plan.md.${turn}`);
+
+        try {
+            fs.writeFileSync(artifactPath, planContent, 'utf-8');
+        } catch (error) {
+            console.error(`Failed to save plan artifact for session ${sessionId} turn ${turn}`, error);
+        }
+    }
+
     getAllHistory(sessionId: string): ChatMessage[] | undefined {
         const session = this.getOrCreate(sessionId);
 
@@ -683,6 +724,10 @@ export class SessionStore {
                 'script.js': readFileOrDefault(
                     path.join(versionDir, 'script.js'),
                     EMPTY_FILES['script.js'],
+                ),
+                'implementation_plan.md': readFileOrDefault(
+                    path.join(versionDir, 'implementation_plan.md'),
+                    EMPTY_FILES['implementation_plan.md'],
                 ),
             };
 
@@ -797,6 +842,16 @@ export class SessionStore {
             fs.writeFileSync(
                 path.join(versionDir, 'script.js'),
                 session.files['script.js'],
+                'utf-8',
+            );
+            fs.writeFileSync(
+                path.join(versionDir, 'script.js'),
+                session.files['script.js'],
+                'utf-8',
+            );
+            fs.writeFileSync(
+                path.join(versionDir, 'implementation_plan.md'),
+                session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'],
                 'utf-8',
             );
         } catch (error: any) {
@@ -917,6 +972,7 @@ function persistVersionFiles(
     fs.writeFileSync(path.join(versionDir, 'index.html'), files['index.html'], 'utf-8');
     fs.writeFileSync(path.join(versionDir, 'styles.css'), files['styles.css'], 'utf-8');
     fs.writeFileSync(path.join(versionDir, 'script.js'), files['script.js'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'implementation_plan.md'), files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'], 'utf-8');
 }
 
 function ensureVersionSnapshot(
@@ -977,6 +1033,10 @@ function readVersionFiles(
             path.join(versionDir, 'script.js'),
             EMPTY_FILES['script.js'],
         ),
+        'implementation_plan.md': readFileOrDefault(
+            path.join(versionDir, 'implementation_plan.md'),
+            EMPTY_FILES['implementation_plan.md'],
+        ),
     };
 }
 
@@ -1027,6 +1087,7 @@ function cloneSession(session: SessionData): SessionData {
         provider: session.provider,
         unsent: session.unsent ? { ...session.unsent } : undefined,
         projectId: session.projectId,
+
         status: session.status,
     };
 }

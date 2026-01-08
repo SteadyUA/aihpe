@@ -11,6 +11,7 @@ import { TabType } from '../../types';
 import { Preview } from './Preview';
 import { Images } from './Images';
 import { Editor } from './Editor';
+import { Artifact } from './Artifact';
 
 interface WorkareaProps {
     sessionId: string | null;
@@ -19,15 +20,19 @@ interface WorkareaProps {
     onTabChange?: (tab: TabType) => void;
     onLoad?: () => void;
     isResizing?: boolean;
+    onProceed?: () => void;
+    isBusy?: boolean;
+    isLatest?: boolean;
 }
 
 const FILENAME_MAP: Record<AssetType, string> = {
     html: 'index.html',
     css: 'styles.css',
     js: 'script.js',
+    plan: 'implementation_plan.md'
 };
 
-type AssetType = 'html' | 'css' | 'js';
+type AssetType = 'html' | 'css' | 'js' | 'plan';
 
 interface WorkareaState {
     iframeKey: number;
@@ -36,6 +41,7 @@ interface WorkareaState {
     loading: Record<AssetType, boolean>;
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
+    hasUnreadPlanChanges: boolean;
 }
 
 export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
@@ -47,9 +53,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.state = {
             iframeKey: 0,
             versionCache: {}, // Initialize empty
-            loading: { html: false, css: false, js: false },
-            unsavedContent: { html: null, css: null, js: null },
+            loading: { html: false, css: false, js: false, plan: false },
+            unsavedContent: { html: null, css: null, js: null, plan: null },
             isSaving: false,
+            hasUnreadPlanChanges: false,
         };
         this.previewRef = React.createRef();
     }
@@ -75,8 +82,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             // Full reset for new turn/session
             this.setState(
                 {
-                    loading: { html: false, css: false, js: false },
-                    unsavedContent: { html: null, css: null, js: null },
+                    loading: { html: false, css: false, js: false, plan: false },
+                    unsavedContent: { html: null, css: null, js: null, plan: null },
                     // Increment iframeKey to force Preview reload if needed
                     // (Preview handles turn change internally for key derivation, but we can signal explicitly too)
                     iframeKey: this.state.iframeKey + 1,
@@ -112,19 +119,45 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.previewRef.current?.restoreScroll();
     }
 
-    public clearCache = (version: number) => {
+    public clearCache = (version: number, filename?: string) => {
         this.setState(prev => {
             const newCache = { ...prev.versionCache };
-            delete newCache[version];
+
+            if (filename) {
+                // Clear specific file
+                // Find asset type for filename
+                const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
+                if (type && newCache[version]) {
+                    newCache[version] = { ...newCache[version], [type]: null };
+                }
+            } else {
+                // Clear all for version
+                delete newCache[version];
+            }
+
             return {
                 versionCache: newCache,
                 iframeKey: prev.iframeKey + 1 // Force iframe refresh
             };
         }, () => {
-            // Re-fetch if current
+            // Check if we need to set unread flag for plan
+            if (filename && filename === FILENAME_MAP['plan'] && this.props.activeTab !== 'plan') {
+                this.setState({ hasUnreadPlanChanges: true });
+            }
+
+            // Re-fetch if current and matching active tab
             const { version: currentVersion, sessionId, activeTab } = this.props;
+
             if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
-                this.fetchFile(activeTab as AssetType);
+                // Check if we cleared the active tab's file
+                if (filename) {
+                    const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
+                    if (type === activeTab) {
+                        this.fetchFile(activeTab as AssetType);
+                    }
+                } else {
+                    this.fetchFile(activeTab as AssetType);
+                }
             }
         });
     }
@@ -158,7 +191,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             const text = await res.text();
 
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -170,7 +203,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         } catch (error) {
             console.error(`Failed to load ${type}`, error);
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -189,6 +222,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         // activeTab is the OLD tab
         if (activeTab !== 'preview' && activeTab !== 'images' && unsavedContent[activeTab as AssetType] !== null) {
             await this.handleSave(activeTab as AssetType);
+        }
+
+        if (tab === 'plan') {
+            this.setState({ hasUnreadPlanChanges: false });
         }
 
         this.props.onTabChange?.(tab);
@@ -247,7 +284,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
             // Update cache with saved content and clear unsaved state
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -267,11 +304,16 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         }
     };
 
+    handleProceed = () => {
+        this.props.onProceed?.();
+    };
+
     getEditorLanguage = (tab: AssetType) => {
         switch (tab) {
             case 'html': return 'html';
             case 'css': return 'css';
             case 'js': return 'javascript';
+            case 'plan': return 'markdown';
             default: return 'plaintext';
         }
     };
@@ -407,11 +449,12 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             loading,
             unsavedContent,
             iframeKey,
+            hasUnreadPlanChanges,
         } = this.state;
         const isCodeView = activeTab !== 'preview' && activeTab !== 'images';
 
         // Resolve content for current version
-        const currentFiles = versionCache[version] || { html: null, css: null, js: null };
+        const currentFiles = versionCache[version] || { html: null, css: null, js: null, plan: null };
 
         return (
             <div
@@ -439,6 +482,16 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     <span className={styles.versionLabel}>
                         v{version}
                     </span>
+                    <button
+                        className={classNames(styles.assetTab, {
+                            [styles.active]: activeTab === 'plan',
+                        })}
+                        onClick={() => this.handleTabChange('plan')}
+                    >
+                        {hasUnreadPlanChanges && <span className={styles.notificationDot}></span>}
+                        Implementation plan
+                        {unsavedContent['plan'] !== null && ' *'}
+                    </button>
                     <div className={styles.assetsSpacer}></div>
                     {(['html', 'css', 'js'] as const).map((type) => (
                         <button
@@ -470,23 +523,33 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     active={activeTab === 'images'}
                 />
 
-                {(['html', 'css', 'js'] as const).map(type => {
-                    const content = unsavedContent[type] ?? currentFiles[type] ?? '';
-                    const language = this.getEditorLanguage(type);
+                <Artifact
+                    content={unsavedContent['plan'] ?? currentFiles['plan'] ?? ''}
+                    onProceed={this.handleProceed}
+                    active={activeTab === 'plan'}
+                    busy={this.props.isBusy}
+                    isLatest={this.props.isLatest}
+                />
 
-                    return (
-                        <Editor
-                            key={type}
-                            language={language}
-                            value={content}
-                            loading={loading[type]}
-                            active={activeTab === type}
-                            onChange={this.handleEditorChange(type)}
-                            onMount={this.handleEditorDidMount(type)}
-                        />
-                    );
-                })}
-            </div>
+                {
+                    (['html', 'css', 'js'] as const).map(type => {
+                        const content = unsavedContent[type] ?? currentFiles[type] ?? '';
+                        const language = this.getEditorLanguage(type);
+
+                        return (
+                            <Editor
+                                key={type}
+                                language={language}
+                                value={content}
+                                loading={loading[type]}
+                                active={activeTab === type}
+                                onChange={this.handleEditorChange(type)}
+                                onMount={this.handleEditorDidMount(type)}
+                            />
+                        );
+                    })
+                }
+            </div >
         );
     }
 }

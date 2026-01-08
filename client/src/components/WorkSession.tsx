@@ -29,12 +29,14 @@ interface WorkSessionProps {
 export class WorkSession extends React.Component<WorkSessionProps> {
     private picker: ElementPicker;
     private previewRef: React.RefObject<Workarea | null>;
+    private chatRef: React.RefObject<Chat | null>;
 
     constructor(props: WorkSessionProps) {
         super(props);
         this.picker = new ElementPicker();
         this.picker.setOnSelect(this.handleElementSelected);
         this.previewRef = React.createRef();
+        this.chatRef = React.createRef();
     }
 
     getVersionForTurn = (turn: number): number => {
@@ -90,13 +92,18 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.stopPicking();
         }
 
-        // 3. Handle Explicit Cache Refresh (e.g. on Turn completion)
+        // 3. Handle Explicit Cache Refresh (e.g. on Turn completion or File Change)
         if (this.props.session.pendingRefreshTurn !== null) {
             const turnToRefresh = this.props.session.pendingRefreshTurn;
             // Clear cache for this turn
             this.previewRef.current?.clearCache(turnToRefresh);
             // Acknowledge event by clearing the flag in session state
             this.props.onUpdateSession({ pendingRefreshTurn: null });
+        } else if (this.props.session.pendingFileRefresh) {
+            // Granular refresh
+            const { version, filename } = this.props.session.pendingFileRefresh;
+            this.previewRef.current?.clearCache(version, filename);
+            this.props.onUpdateSession({ pendingFileRefresh: null });
         }
 
         // 4. Handle Selection Restoration (e.g. after Undo or Picking)
@@ -194,6 +201,10 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.props.onUpdateSession({ selection: null });
     };
 
+    handleProceed = () => {
+        this.chatRef.current?.submit('Proceed');
+    };
+
     render() {
         const {
             session,
@@ -246,10 +257,15 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
         // Calculate current turn for Preview
         const currentTurn = session.activeTurn ?? session.currentTurn;
+        // Check if we are at the latest turn
+        const isLatest = session.currentVersion !== undefined
+            ? session.currentVersion === this.getVersionForTurn(currentTurn)
+            : (session.activeTurn === undefined || session.activeTurn === null || session.activeTurn === session.currentTurn);
 
         return (
             <div style={{ display: isVisible ? 'contents' : 'none' }}>
                 <Chat
+                    ref={this.chatRef}
                     messages={session.messages || []}
                     onSend={onSend}
                     status={session.status || 'idle'}
@@ -276,6 +292,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSaveUnsent={onSaveUnsent}
                     sessionIds={sessionIds}
                     onSwitchSession={onSwitchSession}
+
                 />
 
                 {this.props.onResizeStart && (
@@ -293,6 +310,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
                     isResizing={this.props.isResizing}
+                    onProceed={this.handleProceed}
+                    isBusy={session.status === 'busy'}
+                    isLatest={isLatest}
                 />
             </div>
         );

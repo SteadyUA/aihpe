@@ -103,6 +103,8 @@ class UnsentDataRequest {
     @IsOptional()
     @IsString()
     provider?: LlmProvider;
+
+
 }
 
 class CreateSessionRequest {
@@ -664,7 +666,7 @@ export class ChatController {
             return response.status(400).send('Invalid version');
         }
 
-        const validFiles = ['index.html', 'styles.css', 'script.js'];
+        const validFiles = ['index.html', 'styles.css', 'script.js', 'implementation_plan.md'];
         if (validFiles.includes(filename)) {
             const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
@@ -677,6 +679,7 @@ export class ChatController {
             if (filename === 'index.html') contentType = 'text/html';
             else if (filename === 'styles.css') contentType = 'text/css';
             else if (filename === 'script.js') contentType = 'application/javascript';
+            else if (filename === 'implementation_plan.md') contentType = 'text/markdown';
 
             if (content === undefined) {
                 // Should not happen if validFiles checked, but safety

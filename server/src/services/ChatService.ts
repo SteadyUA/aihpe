@@ -77,7 +77,13 @@ export class ChatService {
         );
         const now = new Date();
         // Determine turn: User message starts a new turn
+        // Determine turn: User message starts a new turn
         const currentTurn = currentSessionData.lastTurn ?? 0;
+
+        // Save implementation_plan.md artifact for the current turn (before incrementing)
+        // This snapshots the plan as it was at the end of the previous turn.
+        this.sessionStore.savePlanArtifact(sessionId, currentTurn);
+
         const newTurn = currentTurn + 1;
 
         const userMessageEntry: ChatMessage = {
@@ -306,13 +312,26 @@ export class ChatService {
             });
 
 
-            if (generation.targetVersion) {
+            if (generation.targetVersion !== undefined && generation.targetVersion !== null) {
                 const updated = this.sessionStore.updateFiles(
                     sessionId,
                     generation.files,
                     generation.targetVersion,
                 );
                 await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
+
+                // Detect and emit file changes
+                for (const [filename, content] of Object.entries(generation.files)) {
+                    const oldContent = currentSessionData.files[filename as keyof typeof currentSessionData.files];
+                    // Compare content. Note: files might be undefined in old session if new.
+                    if (content !== oldContent) {
+                        this.sseService.emitFileChange({
+                            sessionId,
+                            version: generation.targetVersion,
+                            filename,
+                        });
+                    }
+                }
             } else {
                 // No changes to files/version, just append messages
             }

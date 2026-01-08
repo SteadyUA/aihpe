@@ -53,7 +53,11 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt(request.rulesAndGoal, request.imageGenerationPref);
+        const systemPrompt = this.buildSystemPrompt(
+            request.rulesAndGoal,
+            request.imageGenerationPref,
+            !!request.files['implementation_plan.md']
+        );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
@@ -67,7 +71,7 @@ export class AiSdkClient implements LlmClient {
                     'Read the content of a file. Use this to understand current code before editing.',
                 inputSchema: z.object({
                     file: z
-                        .enum(['index.html', 'styles.css', 'script.js'])
+                        .enum(['index.html', 'styles.css', 'script.js', 'implementation_plan.md'])
                         .describe('The file to read'),
                     summary: z
                         .string()
@@ -79,7 +83,7 @@ export class AiSdkClient implements LlmClient {
                     file,
                     summary,
                 }: {
-                    file: 'index.html' | 'styles.css' | 'script.js';
+                    file: 'index.html' | 'styles.css' | 'script.js' | 'implementation_plan.md';
                     summary: string;
                 }) => {
                     const content = currentFiles[file];
@@ -92,7 +96,7 @@ export class AiSdkClient implements LlmClient {
                     'Edit a file by replacing exact string match. The oldString must match exactly one location in the file.',
                 inputSchema: z.object({
                     file: z
-                        .enum(['index.html', 'styles.css', 'script.js'])
+                        .enum(['index.html', 'styles.css', 'script.js', 'implementation_plan.md'])
                         .describe('The file to edit'),
                     oldString: z
                         .string()
@@ -114,16 +118,35 @@ export class AiSdkClient implements LlmClient {
                     newString,
                     summary,
                 }: {
-                    file: 'index.html' | 'styles.css' | 'script.js';
+                    file: 'index.html' | 'styles.css' | 'script.js' | 'implementation_plan.md';
                     oldString: string;
                     newString: string;
                     summary: string;
                 }) => {
-                    this.ensureNextVersion(request.sessionId);
+                    // Logic for Plan-First Workflow:
+                    // 1. If editing implementation_plan.md, we stay on current version (mutable plan).
+                    // 2. If editing code files, we MUST ensure a new version exists.
+                    //    When we switch to a new version, we reset implementation_plan.md to empty to indicate a fresh start.
+
+                    if (file === 'implementation_plan.md') {
+                        // Edit in place. Do NOT trigger ensureNextVersion.
+                    } else {
+                        // Editing code. Ensure new version.
+                        if (this.targetVersion === undefined) {
+                            // This matches the FIRST code edit in this turn.
+                            // We are transitioning from "Planning" to "Implementation".
+                            this.ensureNextVersion(request.sessionId);
+
+                            // currentFiles['implementation_plan.md'] = ''; // DEFERRED: We do not reset plan here anymore. We reset it at the end of generation if version changed.
+                        }
+                    }
+
+
+                    const versionToUpdate = this.targetVersion !== undefined ? this.targetVersion : request.currentVersion;
 
                     let content = currentFiles[file] || '';
-                    if (!content && (file === 'styles.css' || file === 'script.js')) {
-                        // Allow empty css/js if undefined (though it should be defined as empty string in fallback)
+                    if (!content && (file === 'styles.css' || file === 'script.js' || file === 'implementation_plan.md')) {
+                        // Allow empty css/js if undefined
                         content = '';
                     } else if (content === undefined) {
                         return `Error: File ${file} not found.`;
@@ -145,10 +168,6 @@ export class AiSdkClient implements LlmClient {
                                 '\n',
                             );
                             if (normalizedContent.includes(normalizedTarget)) {
-                                // We found a match with normalized line endings.
-                                // However, simple replace on 'content' won't work directly if indices differ.
-                                // For simplicity/safety, we fail if strict match fails but hints validation
-                                // OR we update the file content to be normalized (acceptable for this project).
                                 content = normalizedContent;
                                 targetString = normalizedTarget;
                             } else if (
@@ -169,6 +188,8 @@ export class AiSdkClient implements LlmClient {
 
                     const newContent = content.replace(targetString, newString);
                     currentFiles[file] = newContent;
+
+
                     return `Successfully updated ${file}`;
                 },
             }),
@@ -498,11 +519,17 @@ export class AiSdkClient implements LlmClient {
             // Use the summary from tool if available, otherwise fallback to generated text or generic
             const summaryText = finalSummary || fullText || 'Changes applied.';
 
+            // If we created a new version (targetVersion is set), we should reset the plan for the NEXT turn.
+            // effectively, the new version's plan starts empty.
+            if (this.targetVersion !== undefined) {
+                currentFiles['implementation_plan.md'] = '';
+            }
+
             return {
                 summary: summaryText,
                 files: currentFiles,
                 newMessages,
-                targetVersion: this.targetVersion,
+                targetVersion: this.targetVersion ?? request.currentVersion,
             };
         } catch (error) {
             console.error(
@@ -517,35 +544,66 @@ export class AiSdkClient implements LlmClient {
         }
     }
 
-    private buildSystemPrompt(rulesAndGoal?: string, imageGenerationPref?: string): string {
+    private buildSystemPrompt(
+        rulesAndGoal?: string,
+        imageGenerationPref?: string,
+        hasPlan?: boolean
+    ): string {
 
         let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
+You additionally maintain a 'implementation_plan.md' file that tracks the immediate next steps.
 
-Your goal is to fulfill the user's request by modifying these files.`;
+Your goal is to fulfill the user's request by following this strict workflow:
 
-        if (rulesAndGoal) {
-            prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\nThe user has defined the following rules and goal for this project:\n"${rulesAndGoal}"\nKeep this in mind when making decisions about design and functionality.`;
-        }
+1.  **PLAN FIRST**:
+    -   All user messages are initially treated as discussion and clarification of the plan.
+    -   Your first priority is always to update 'implementation_plan.md' to reflect the user's request.
+    -   'implementation_plan.md' must be a CONCRETE, ACTIONABLE list of implementation steps.
+    -   **IMPORTANT**: The content of 'implementation_plan.md' MUST be written in the same language as the user's messages.
+    -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN.
+    -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
+    -   If the user has not explicitly approved the plan, STOP after updating 'implementation_plan.md'.
 
-        if (imageGenerationPref) {
-            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\nUser has specified the following preferences for generating images:\n"${imageGenerationPref}"\nApply these preferences when generating or editing images.`;
-        }
+    -   **STRICT PLAN STRUCTURE**:
+        1.  **# Type of Changes** (H1): Describes the essence of the planned changes.
+        2.  **## Goal** (H2, optional): A single paragraph describing the goal of the changes.
+        3.  **## Proposed Changes** (H2): A section detailing the changes.
+        4.  **List of changes**: A brief list of elements and how they will be modified. 
+            - Use **### Component/Location** (H3) to group changes by file or component.
+            - Ensure every step is clear and executable.
 
-        prompt += `\n\nStrategy:
-1. Use 'read_file' to examine the current content of relevant files. Provide a 'summary' explaining why you need to read it.
-2. Use 'edit_file' to apply specific changes. You should favor targeted edits using unique string replacements to save context window. Provide a 'summary' explaining the change.
-3. If you need to make multiple changes, perform them in steps.
-4. Once you have completed the task, use the 'summary' tool to explain what you did and finish the turn.
-5. IMPORTANT: Do not repeat a tool call if it was successful. Wait for the tool result before proceeding.
+2.  **IMPLEMENT SECOND**:
+    -   ONLY when the user says "ok" or explicitly approves the plan, proceed to implementation.
+    -   Implement the changes in the code files ('index.html', etc.).
+    -   When you start editing code files, the system will automatically create a NEW version.
+    -   The 'implementation_plan.md' for the NEW version will be reset to empty. This is normal.
+    -   After code generation or image generation, you must re-verify the new plan with the user for the next steps.
+
+Strategy:
+- Use 'read_file' to inspect the code to inform your plan.
+- Use 'edit_file' to update 'implementation_plan.md' first. Ask for confirmation.
+- Use 'edit_file' to apply changes to code files ONLY after confirmation.
+- Use 'generate_variant' if asked for multiple options.
 
 Rules:
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
-- If the user asks for variants, use 'generate_variant'.
-- 'generate_variant' creates a NEW separate session. The tool result will give you the Session ID.
-- In your final 'summary', you MUST explicitly mention which Session ID correponds to which variant (e.g., "Blue version created in session X"). Do NOT ask the user to choose one to apply here; they are already created there.
-- You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.
+- 'generate_variant' creates a NEW separate session.
+- Partially autonomous image generation with 'generate_image' is encouraged.
 `;
+
+        if (rulesAndGoal) {
+            prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\n"${rulesAndGoal}"`;
+        }
+
+        if (imageGenerationPref) {
+            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\n"${imageGenerationPref}"`;
+        }
+
+        // if (hasPlan) {
+        //     prompt += `\n\nCONTEXT: A 'implementation_plan.md' file exists from the previous turn. Read it and follow it if you are moving to implementation.`;
+        // }
+
         return prompt;
     }
 

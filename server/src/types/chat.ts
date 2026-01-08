@@ -41,6 +41,7 @@ export interface SessionData {
     lastTurn?: number;
     provider?: LlmProvider;
     unsent?: UnsentData;
+
     status: SessionStatus;
 }
 
@@ -54,6 +55,9 @@ export interface ImageAttachment {
 }
 
 export type ChatAttachment = ImageAttachment;
+
+
+
 
 export interface UnsentData {
     input?: string;

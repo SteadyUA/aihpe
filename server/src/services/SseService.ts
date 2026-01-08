@@ -84,6 +84,13 @@ export class SseService {
         this.broadcast('server-stop', { timestamp: new Date().toISOString() });
     }
 
+    emitFileChange(payload: { sessionId: string; version: number; filename: string }): void {
+        this.broadcast('file-change', {
+            ...payload,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
         for (const client of this.clients.values()) {

@@ -1,4 +1,4 @@
-export type TabType = 'preview' | 'images' | 'html' | 'css' | 'js';
+export type TabType = 'preview' | 'images' | 'html' | 'css' | 'js' | 'plan';
 
 export interface MessageData {
     role: 'user' | 'assistant' | 'system';
@@ -35,7 +35,10 @@ export interface UnsentData {
     attachment?: ChatAttachment | null;
     selection?: string | null;
     provider?: LlmProvider | null;
+
 }
+
+
 
 export type LlmProvider = 'openai' | 'google';
 
@@ -47,17 +50,20 @@ export interface Session {
     statusMessages: string[];
     requestStartTime: number | null;
 
+    currentVersion?: number;
     currentTurn: number;
     activeTurn: number | null;
     activeTab: TabType;
 
     provider?: LlmProvider;
     pendingRefreshTurn: number | null;
+    pendingFileRefresh?: { version: number; filename: string } | null;
 
     // UI selections per session
     selection: string | null;
     attachment?: ChatAttachment;
     isPicking: boolean;
+
 
     unsent?: UnsentData;
 

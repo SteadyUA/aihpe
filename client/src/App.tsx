@@ -119,7 +119,8 @@ class App extends React.Component<AppProps, AppState> {
                             pendingRefreshTurn: null,
                             group: group ?? 0,
                             unsent: {},
-                            provider: 'openai'
+                            provider: 'openai',
+
                         };
                     }
                 });
@@ -413,6 +414,11 @@ class App extends React.Component<AppProps, AppState> {
                     updatedSession.status = 'idle';
                     updatedSession.requestStartTime = null;
 
+                    // Auto-switch to preview if we are in plan view (user expectation: seeing the result)
+                    if (updatedSession.activeTab === 'plan') {
+                        updatedSession.activeTab = 'preview';
+                    }
+
                     // Append assistant message if provided in details
                     if (data.details && data.details.message) {
                         const assistantMsg = data.details.message;
@@ -421,6 +427,9 @@ class App extends React.Component<AppProps, AppState> {
                         // Update currentTurn if provided in message
                         if (typeof assistantMsg.turn === 'number') {
                             updatedSession.currentTurn = assistantMsg.turn;
+                        }
+                        if (typeof assistantMsg.version === 'number') {
+                            updatedSession.currentVersion = assistantMsg.version;
                         }
                     } else {
                         // Fallback: Trigger fetch if no message in payload (legacy or error case)
@@ -438,6 +447,29 @@ class App extends React.Component<AppProps, AppState> {
                         [sessionId]: updatedSession
                     }
                 };
+            });
+        });
+
+        this.evtSource.addEventListener('file-change', (e) => {
+            const data = JSON.parse(e.data);
+            const { sessionId, version, filename } = data;
+
+            this.setState(prevState => {
+                const session = prevState.sessions[sessionId];
+                if (!session) return null;
+
+                // Force WorkSession to clear cache for this file
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [sessionId]: {
+                            ...session,
+                            pendingFileRefresh: { version, filename }
+                        }
+                    }
+                };
+            }, () => {
+                this.fetchSession(sessionId);
             });
         });
 
@@ -477,7 +509,8 @@ class App extends React.Component<AppProps, AppState> {
                     // provider: 'openai', // REMOVED default
                     group: data.group ?? 0,
                     pendingRefreshTurn: null,
-                    unsent: {}
+                    unsent: {},
+
                 };
 
                 // Calculate new order
@@ -551,6 +584,7 @@ class App extends React.Component<AppProps, AppState> {
                         [id]: {
                             ...session,
                             messages: history,
+                            currentVersion: data.currentVersion,
                             currentTurn: lastTurn,
 
                             // Use server provided status directly, mapped to client types
@@ -579,6 +613,7 @@ class App extends React.Component<AppProps, AppState> {
                             attachment: (data.unsent?.attachment) ?? session.attachment,
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
+
                         }
                     }
                 };
@@ -641,6 +676,7 @@ class App extends React.Component<AppProps, AppState> {
                 statusMessages: [],
                 requestStartTime: null,
                 currentTurn: sessionData.currentTurn ?? 0,
+                currentVersion: sessionData.currentVersion ?? 0,
                 activeTurn: null,
 
                 activeTab: 'preview',
@@ -649,7 +685,8 @@ class App extends React.Component<AppProps, AppState> {
                 provider: sessionData.provider,
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
-                unsent: sessionData.unsent ?? {}
+                unsent: sessionData.unsent ?? {},
+
             };
 
             // Calculate new order
@@ -897,7 +934,8 @@ class App extends React.Component<AppProps, AppState> {
                 }
             ],
             selection: null, // Clear selection
-            activeTurn: null // Reset time travel
+            activeTurn: null, // Reset time travel
+
         });
 
         try {
@@ -909,6 +947,7 @@ class App extends React.Component<AppProps, AppState> {
                     attachment,
                     selection: selectionData,
                     provider: session.provider,
+
                 }),
             });
 
