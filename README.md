@@ -1,112 +1,109 @@
-# HTML Preview Chat Server
+# Code App Monorepo
 
-A Node.js + TypeScript HTTP server that turns chat instructions into a simple web page. The backend uses `Express`, `routing-controllers`, and OpenAI's `gpt-5.1-codex` (or another model you configure). A bundled frontend provides a chat interface with live HTML/CSS/JS preview.
+This repository is a monorepo containing the source code for the **Code App**, an AI-powered coding workspace that allows users to generate and preview web applications via a chat interface.
+
+It consists of two main workspaces:
+- **Client**: A React application built with Vite (`/client`).
+- **Server**: A Node.js/Express server with TypeScript (`/server`).
 
 ## Prerequisites
 
-- Node.js 18+
-- npm 9+
-- An OpenAI API key with access to the desired model
+- **Node.js**: v18 or higher
+- **npm**: v9 or higher
+- **OpenAI API Key**: Required for the server to communicate with the LLM.
 
-## Quick Start
+## Installation & Setup
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
-2. **Configure environment variables**
-   - Copy `.env` and set the values:
-     ```bash
-     cp .env .env.local
-     ```
-   - Edit `.env.local` (or `.env`) with your credentials:
-     ```env
-      MODEL=gpt-5.1-codex        # Any Responses API-compatible model
-      OPENAI_API_KEY=sk-...      # Required for live generation
-      PORT=3000                  # Optional, defaults to 3000
-      SESSION_ROOT=data/sessions # Optional, overrides session storage root
-      ```
-
-    - The app loads environment variables via [`dotenv`](https://www.npmjs.com/package/dotenv) at startup.
- 3. **Run in development mode**
+1.  **Install Dependencies**
+    Run the following command in the root directory to install dependencies for both client and server:
     ```bash
+    npm install
+    ```
 
-   npm run dev
-   ```
-4. **Build and run production bundle**
-   ```bash
-   npm run build
-   npm start
-   ```
+2.  **Server Configuration**
+    Go to the server directory and set up your environment variables:
+    ```bash
+    cd server
+    cp .env .env.local
+    ```
+    Edit `.env.local` (or `.env`) and add your credentials:
+    ```env
+    OPENAI_API_KEY=sk-...
+    PORT=3000
+    # Optional:
+    MODEL=gpt-4o               # Or any compatible model
+    SESSION_ROOT=data/sessions # Path to store session data
+    ```
 
-The server hosts the frontend at `http://localhost:3000/` (or your chosen port). Use the chat panel to describe changes; each reply updates the preview iframe and shows the generated asset contents.
+## Development
 
-## API
+To run the application in development mode (starts both client and server concurrently):
 
-### `POST /api/chat`
-Send chat instructions for a specific session.
-
-```json
-{
-  "sessionId": "string",
-  "message": "Describe what to create or change"
-}
+```bash
+npm run dev
 ```
 
-Response:
+- **Frontend**: http://localhost:5173 (usually)
+- **Backend**: http://localhost:3000
 
-```json
-{
-  "message": "Summary of what changed"
-}
-```
+You can also run them individually:
+- **Server only**: `npm run server`
+- **Client only**: `npm run client`
 
-### `GET /api/sessions/:sessionId`
-Returns the full session snapshot (history + assets). Response:
+## Production Build
 
-```json
-{
-  "id": "session-123",
-  "updatedAt": "2025-12-05T13:37:00.000Z",
-  "history": [
-    { "role": "user", "content": "...", "createdAt": "..." },
-    { "role": "assistant", "content": "...", "createdAt": "..." }
-  ],
-  "files": {
-    "html": "<!DOCTYPE html>...",
-    "css": "body { ... }",
-    "js": "console.log('...');"
-  }
-}
-```
+To build and serve the production version:
 
-### `GET /api/sessions/:sessionId/files`
-Fetch only the latest generated assets for the session. Returns:
+1.  **Build** (builds both client and server, and copies client assets to server):
+    ```bash
+    npm run build
+    ```
 
-```json
-{
-  "html": "<!DOCTYPE html>...",
-  "css": "body { ... }",
-  "js": "console.log('...');"
-}
-```
+2.  **Start**:
+    ```bash
+    npm start
+    ```
+    The server will host the frontend at `http://localhost:3000/`.
 
-Sessions and files are stored in-memory. Restarting the server clears all state.
+## Architecture & API Reference
 
-## Frontend Preview
+### Overview
+- **Client**: Handles the chat UI, code preview (via iframe), and session management.
+- **Server**: Manages projects, sessions, interacts with the LLM, and persists data to the file system.
 
-The static frontend (served from `public/`) implements:
-- Chat UI with persistent session tracking via `localStorage`
-- Calls to the REST API for chat interactions and file snapshots
-- Live iframe preview that injects returned HTML, CSS, and JavaScript
-- Mobile preview toggle that constrains the iframe to a 375px viewport
-- Element picker with selector copy to target precise edits
+### Key API Endpoints
 
-You can customize the UI by editing files in `public/`.
+The server exposes a REST API and an SSE endpoint for real-time updates.
 
-## Development Notes
+#### Structure
+- **SSE Stream**: `GET /api/sse` - Connect for real-time updates on session status and generation progress.
 
-- Type checking: `npm run build`
-- Session data persists to `data/sessions/<sessionId>/` by default; override with `SESSION_ROOT`.
-- Linting is not configured; integrate your preferred tool if needed.
-- Ensure your OpenAI usage complies with all relevant policies.
+#### Projects
+- `POST /api/projects`: Create a new project.
+- `GET /api/projects/:projectId`: Get project details and list of sessions.
+- `PATCH /api/projects/:projectId`: Update project settings.
+
+#### Sessions
+- `POST /api/sessions`: Create a new chat session.
+- `GET /api/sessions/:sessionId`: Get full session history and state.
+- `DELETE /api/sessions/:sessionId`: Delete a session.
+
+#### Chat & Interaction
+- `POST /api/sessions/:sessionId/chat`: Send a user message (triggers LLM generation).
+- `POST /api/sessions/:sessionId/unsent`: Save current draft input/selection (auto-save).
+- `POST /api/sessions/:sessionId/undo`: Revert the last turn.
+- `POST /api/sessions/:sessionId/clone/:turn`: Branch a session from a specific turn.
+
+#### Assets & Files
+- `POST /api/sessions/:sessionId/uploads`: Upload an image/file.
+- `DELETE /api/sessions/:sessionId/uploads/:filename`: Delete an uploaded file.
+- `GET /api/sessions/:sessionId/uploads/:filename`: Serve an uploaded file.
+- `GET /api/sessions/:sessionId/:version/files/:filename`: Get content of a specific generated file (html/css/js) for a version.
+- `GET /api/sessions/:sessionId/:version/archive`: Download a ZIP archive of the generated code.
+- `GET /api/sessions/:sessionId/artifacts/:turn/:filename`: Get intermediate artifacts (e.g. plans) for a turn.
+
+## Features
+- **Live Preview**: See changes in real-time as the AI writes code.
+- **Session Management**: Organized by Projects with support for multiple sessions.
+- **Branching**: Clone functionality to explore different iterations.
+- **Persistence**: File-system based storage for sessions and generated code.
