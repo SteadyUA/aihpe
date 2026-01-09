@@ -1,7 +1,7 @@
 import React from 'react';
 import { marked } from 'marked';
 import classNames from 'classnames';
-import { ElementPicker } from './ElementPicker';
+
 import { UiButton } from './UiButton';
 import { UiDropdown } from './UiDropdown';
 import { UiTarget } from './UiTarget';
@@ -314,6 +314,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
     private timerInterval: any = null;
     private isUserScroll = false;
+    private richInputRef = React.createRef<RichInput>();
 
     constructor(props: ChatProps) {
         super(props);
@@ -384,6 +385,21 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             if (this.props.unsentInput !== this.state.input) {
                 this.setState({ input: this.props.unsentInput });
             }
+            if (this.props.unsentInput !== this.state.input) {
+                this.setState({ input: this.props.unsentInput });
+            }
+        }
+
+        // Focus management
+        const justFinishedPicking = prevProps.isPicking && !this.props.isPicking;
+        const justClearedSelection = prevProps.selection && !this.props.selection;
+        // Optionally also when attachment changes (uploaded or removed)
+        const attachmentChanged = prevProps.attachment !== this.props.attachment;
+        const providerChanged = prevProps.provider !== this.props.provider;
+        const fastModeChanged = prevProps.fastMode !== this.props.fastMode;
+
+        if (justFinishedPicking || justClearedSelection || (attachmentChanged && !this.state.isUploading) || providerChanged || fastModeChanged) {
+            this.richInputRef.current?.focus();
         }
     }
 
@@ -510,6 +526,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             if (file) {
                 e.preventDefault(); // Prevent default paste behavior (e.g. pasting file name)
                 await this.performUpload(file);
+                // Optionally focus here too? Usually paste keeps focus if handled correctly.
                 return;
             }
         }
@@ -545,6 +562,23 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
+    handleContainerClick = (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement;
+        // const interactiveTags = ['SELECT', 'BUTTON', 'INPUT', 'TEXTAREA', 'A'];
+        const interactiveTags = ['SELECT'];
+
+        let el: HTMLElement | null = target;
+        while (el && el !== e.currentTarget) {
+            if (interactiveTags.includes(el.tagName)) {
+                return;
+            }
+            if (el.getAttribute('contenteditable') === 'true') return;
+            el = el.parentElement;
+        }
+
+        this.richInputRef.current?.focus();
+    };
+
     render() {
         const {
             messages,
@@ -559,8 +593,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onPreviewTurn,
             disabled,
             provider,
-            onProviderChange,
-            onUpload,
+            onProviderChange = () => { },
+            onUpload = () => { },
             attachment,
             // Restore missing ones
             onClearSelection,
@@ -673,89 +707,132 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
                 <form className={styles.chatForm} onSubmit={this.handleSubmit}>
 
-                    {/* Attachment Preview (Above Toolbar) */}
-                    {attachment && (
-                        <div className={styles.attachmentList}>
-                            <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
-                                <img
-                                    src={attachment.url}
-                                    alt={attachment.originalName || attachment.filename}
-                                    className={styles.imagePreview}
-                                    title={attachment.originalName || attachment.filename}
-                                />
-                            </UiTarget>
-                        </div>
-                    )}
+                    {/* Unified Input Container */}
+                    <div className={styles.inputContainer} onClick={this.handleContainerClick}>
+                        <div className={styles.selections}>
+                            {/* Element Picker (Top) */}
+                            {selection && (
+                                <div className={styles.pickerContainer}>
+                                    <UiTarget onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
+                                        <code className={styles.selectionValue}>{selection}</code>
+                                    </UiTarget>
+                                </div>
+                            )}
 
-                    {/* Toolbar */}
-                    <div className={styles.toolbar}>
-                        {onUpload && (
-                            <>
-                                <input
-                                    type="file"
-                                    ref={this.fileInputRef}
-                                    style={{ display: 'none' }}
-                                    onChange={this.handleFileChange}
-                                    accept="image/*"
-                                />
+                            {/* Attachment Preview */}
+                            {attachment && (
+                                <div className={styles.attachmentList}>
+                                    <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
+                                        <img
+                                            src={attachment.url}
+                                            alt={attachment.originalName || attachment.filename}
+                                            className={styles.imagePreview}
+                                            title={attachment.originalName || attachment.filename}
+                                        />
+                                    </UiTarget>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Rich Input */}
+                        <RichInput
+                            ref={this.richInputRef}
+                            value={input}
+                            onChange={this.handleRichInputChange}
+                            onPaste={this.handlePaste}
+                            placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
+                            disabled={isFormDisabled}
+                            tabIndex={1}
+                            className={styles.headlessInput}
+                            editorClassName={styles.headlessEditor}
+                            onBlur={() => {
+                                if (this.props.onSaveUnsent) {
+                                    this.props.onSaveUnsent({ input: this.state.input });
+                                }
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    this.handleSubmit(e);
+                                }
+                            }}
+                        />
+
+                        {/* Input Controls Footer */}
+                        <div className={styles.inputControls}>
+                            <div className={styles.inputControlsLeft}>
+                                {/* Pick Element Button */}
                                 <UiButton
                                     type="button"
-                                    variant="secondary"
+                                    variant={isPicking ? 'ghost-active' : 'ghost'}
                                     size="icon"
-                                    onClick={() => this.fileInputRef.current?.click()}
-                                    disabled={isFormDisabled || isUploading || !!attachment} // Disable if attachment exists
-                                    title={!!attachment ? "Only one attachment allowed" : "Attach image"}
+                                    onClick={isPicking ? onCancelPick : onPickElement}
+                                    disabled={isFormDisabled}
+                                    title={isPicking ? "Cancel selection" : "Select element"}
                                 >
-                                    {isUploading ? (
-                                        <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
-                                    ) : (
-                                        <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                        </svg>
-                                    )}
+                                    <svg
+                                        width="18"
+                                        height="18"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    >
+                                        <path d="M1 1h4" />
+                                        <path d="M1 1v4" />
+                                        <path d="M1 23v-4" />
+                                        <path d="M1 23h4" />
+                                        <path d="M23 1h-4" />
+                                        <path d="M23 1v4" />
+                                        <path d="M10 1h4" />
+                                        <path d="M1 10v4" />
+                                        <path d="M23 10v4" />
+                                        <path d="M10 23h4" />
+                                        <path d="M21 21l-9-9" />
+                                        <path d="M12 12l8 3" />
+                                        <path d="M12 12l3 8" />
+                                    </svg>
                                 </UiButton>
-                            </>
-                        )}
 
-                        <ElementPicker
-                            selection={selection ?? null}
-                            isPicking={isPicking}
-                            onPick={onPickElement}
-                            onCancel={onCancelPick}
-                            onClear={onClearSelection}
-                            disabled={isFormDisabled}
-                            className={styles.elementPicker}
-                        />
-                    </div>
+                                {/* Upload Button */}
+                                <div>
+                                    <input
+                                        type="file"
+                                        ref={this.fileInputRef}
+                                        style={{ display: 'none' }}
+                                        onChange={this.handleFileChange}
+                                        accept="image/*"
+                                    />
+                                    <UiButton
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => this.fileInputRef.current?.click()}
+                                        disabled={isFormDisabled || isUploading || !!attachment}
+                                        title={!!attachment ? "Only one attachment allowed" : "Attach image"}
+                                    >
+                                        {isUploading ? (
+                                            <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
+                                        ) : (
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                            </svg>
+                                        )}
+                                    </UiButton>
+                                </div>
 
-                    <RichInput
-                        value={input}
-                        onChange={this.handleRichInputChange}
-                        onPaste={this.handlePaste}
-                        placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
-                        disabled={isFormDisabled}
-                        tabIndex={1}
-                        onBlur={() => {
-                            if (this.props.onSaveUnsent) {
-                                this.props.onSaveUnsent({ input: this.state.input });
-                            }
-                        }}
-                    />
-                    <div
-                        className={styles.formActions}
-                    >
-                        {/* Mode Toggle */}
-                        {onProviderChange && (
-                            <div className={styles.toggles}>
+                                {/* Mode Toggle */}
                                 <UiDropdown
                                     value={this.props.fastMode ? 'fast' : 'plan'}
                                     options={[
@@ -764,23 +841,43 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     ]}
                                     onChange={(val) => this.props.onFastModeChange?.(val === 'fast')}
                                     disabled={isFormDisabled}
+                                    variant="ghost"
                                 />
                                 <ProviderSelector
                                     value={provider}
                                     onChange={onProviderChange}
                                     disabled={isFormDisabled || isLoading || isUploading}
                                     className={styles.imageToggle}
+                                    variant="ghost"
                                 />
                             </div>
-                        )}
-                        <UiButton
-                            type="submit"
-                            variant="primary"
-                            disabled={isFormDisabled}
-                            tabIndex={2}
-                        >
-                            Send
-                        </UiButton>
+
+                            <div className={styles.inputControlsRight}>
+                                {/* Send Button */}
+                                <UiButton
+                                    type="submit"
+                                    variant="primary"
+                                    size="icon"
+                                    disabled={isFormDisabled}
+                                    tabIndex={2}
+                                    onClick={this.handleSubmit}
+                                >
+                                    <svg
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    >
+                                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                    </svg>
+                                </UiButton>
+                            </div>
+                        </div>
                     </div>
                 </form>
 
@@ -796,3 +893,4 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         );
     }
 }
+

@@ -29,6 +29,7 @@ export class Artifact extends React.Component<ArtifactProps> {
                         isLatest ? (
                             <UiButton
                                 variant="primary" // Or another variant if preferred for the main action
+                                size="small"
                                 onClick={onProceed}
                                 disabled={isContentEmpty || busy}
                             >

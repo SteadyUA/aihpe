@@ -13,6 +13,7 @@
     flex: 1;
     overflow-y: auto;
     padding: 1rem;
+    padding-bottom: 0;
 }
 
 .message {
@@ -238,7 +239,7 @@
 
 .chatForm {
     padding: 1rem;
-    border-top: 1px solid var(--border-color);
+    /* border-top: 1px solid var(--border-color); */
     background: var(--panel-bg);
 }
 
@@ -257,6 +258,9 @@
 */
 /* Hack: If ElementPicker renders a div/button directly in toolbar */
 
+.selections>div {
+    margin-bottom: 0.5rem;
+}
 
 .elementPicker {
     flex: 1;
@@ -264,13 +268,11 @@
     /* Override component default */
 }
 
-
 .attachmentList {
     display: flex;
     flex-direction: column;
     /* Stack if multiple, but single limit enforced */
     width: 100%;
-    margin-bottom: 8px;
     max-height: 160px;
 }
 
@@ -367,16 +369,12 @@
     font-weight: 500;
 }
 
-.toggles {
+/* .toggles {
     display: flex;
     align-items: center;
     gap: 12px;
     margin-right: auto;
-}
-
-.imageToggle {
-    /* margin-right: auto;  Removed as parent handles it */
-}
+} */
 
 .messageMeta {
     display: flex;
@@ -385,4 +383,55 @@
     color: var(--text-secondary);
     opacity: 0.7;
     align-self: center;
+}
+
+/* New Chat Input Design */
+
+.inputContainer {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-color);
+    padding: 0.5rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    user-select: none;
+}
+
+.inputContainer:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
+}
+
+.headlessInput {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.headlessEditor {
+    padding: 0.5rem !important;
+    min-height: auto !important;
+    user-select: text !important;
+    cursor: text;
+}
+
+.inputControls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.inputControlsLeft {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.inputControlsRight {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }

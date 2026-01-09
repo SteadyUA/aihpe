@@ -15,6 +15,8 @@ interface RichInputProps {
     tabIndex?: number;
     autoFocus?: boolean;
     rows?: number;
+    className?: string;
+    editorClassName?: string;
 }
 
 interface RichInputState {
@@ -153,18 +155,24 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
         }
     };
 
+    public focus = () => {
+        if (this.mainRef.current) {
+            this.mainRef.current.focus();
+        }
+    };
+
     render() {
-        const { placeholder, disabled, onBlur } = this.props;
+        const { placeholder, disabled, onBlur, className, editorClassName } = this.props;
 
         return (
             <div
-                className={classNames(styles.richInputContainer, {
+                className={classNames(styles.richInputContainer, className, {
                     [styles.disabled]: disabled
                 })}
             >
                 <div
                     ref={this.mainRef}
-                    className={classNames(styles.richInputEditor, {
+                    className={classNames(styles.richInputEditor, editorClassName, {
                         [styles.empty]: this.state.isEmpty
                     })}
                     contentEditable={!disabled}
