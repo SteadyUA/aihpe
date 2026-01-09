@@ -292,6 +292,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSwitchSession={onSwitchSession}
                     fastMode={session.unsent?.fastMode ?? session.fastMode}
                     onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
+                    sessionTitle={session.subject}
 
                 />
 

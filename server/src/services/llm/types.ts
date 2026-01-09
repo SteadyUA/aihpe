@@ -13,6 +13,8 @@ export interface GeneratePageRequest {
     imageGenerationPref?: string;
     onVariantRequest?: (instruction: string) => Promise<string>;
     fastMode?: boolean;
+    subject?: string;
+    onPatch?: (patch: { subject?: string }) => void;
 }
 
 

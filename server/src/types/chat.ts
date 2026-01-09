@@ -44,6 +44,7 @@ export interface SessionData {
     unsent?: UnsentData;
 
     status: SessionStatus;
+    subject?: string;
 }
 
 export interface ImageAttachment {

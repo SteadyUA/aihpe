@@ -228,6 +228,13 @@ export class ChatService {
                 rulesAndGoal,
                 imageGenerationPref,
                 fastMode: fastModeOverride ?? currentSessionData.fastMode,
+                subject: currentSessionData.subject,
+                onPatch: (patch) => {
+                    this.sseService.emitSessionUpdate({
+                        sessionId,
+                        ...patch,
+                    });
+                },
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {

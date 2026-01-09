@@ -78,7 +78,7 @@ class App extends React.Component<AppProps, AppState> {
             if (!res.ok) throw new Error('Failed to fetch project');
 
             // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
-            const data: { id: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number }[] } = await res.json();
+            const data: { id: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number; subject?: string }[] } = await res.json();
 
             const { router } = this.props;
             const params = router.params as Record<string, string | undefined>;
@@ -90,13 +90,14 @@ class App extends React.Component<AppProps, AppState> {
                 const sessionsMap: Record<string, Session> = {};
                 const sessionOrder: string[] = [];
 
-                data.sessions.forEach(({ sessionId, group }) => {
+                data.sessions.forEach(({ sessionId, group, subject }) => {
                     sessionOrder.push(sessionId);
                     const existing = prevState.sessions[sessionId];
                     if (existing) {
                         sessionsMap[sessionId] = {
                             ...existing,
-                            group: group ?? existing.group
+                            group: group ?? existing.group,
+                            subject: subject ?? existing.subject
                         };
                     } else {
                         // Restore state from URL if this is the active session in URL
@@ -120,7 +121,7 @@ class App extends React.Component<AppProps, AppState> {
                             group: group ?? 0,
                             unsent: {},
                             provider: 'openai',
-
+                            subject: subject || '...',
                         };
                     }
                 });
@@ -347,6 +348,14 @@ class App extends React.Component<AppProps, AppState> {
         return groups;
     }
 
+    extractSubjects(sessions: Record<string, Session>): Record<string, string> {
+        const subjects: Record<string, string> = {};
+        Object.values(sessions).forEach(s => {
+            subjects[s.id] = s.subject || '...';
+        });
+        return subjects;
+    }
+
     componentWillUnmount() {
         if (this.evtSource) {
             this.evtSource.close();
@@ -541,6 +550,30 @@ class App extends React.Component<AppProps, AppState> {
             });
         });
 
+        this.evtSource.addEventListener('session-update', (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload.sessionId) {
+                    this.setState(prevState => {
+                        const session = prevState.sessions[payload.sessionId];
+                        if (!session) return null;
+
+                        return {
+                            sessions: {
+                                ...prevState.sessions,
+                                [payload.sessionId]: {
+                                    ...session,
+                                    subject: payload.subject ?? session.subject
+                                }
+                            }
+                        };
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to process session-update SSE', e);
+            }
+        });
+
         this.evtSource.addEventListener('server-stop', () => {
             console.log('Server stopping, closing SSE connection');
             if (this.evtSource) {
@@ -614,7 +647,7 @@ class App extends React.Component<AppProps, AppState> {
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                             fastMode: (data.unsent?.fastMode) ?? data.fastMode ?? false,
-
+                            subject: data.subject || '...',
                         }
                     }
                 };
@@ -687,7 +720,7 @@ class App extends React.Component<AppProps, AppState> {
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
                 unsent: sessionData.unsent ?? {},
-
+                subject: sessionData.subject || '...',
             };
 
             // Calculate new order
@@ -972,6 +1005,7 @@ class App extends React.Component<AppProps, AppState> {
                         ...prev.sessions,
                         [activeSessionId]: {
                             ...s,
+                            fastMode: s.unsent?.fastMode ?? s.fastMode ?? false,
                             unsent: undefined
                         }
                     }
@@ -1162,6 +1196,7 @@ class App extends React.Component<AppProps, AppState> {
                         onRemove={this.removeSession}
                         statusMap={statusMap}
                         groups={groups}
+                        subjects={this.extractSubjects(this.state.sessions)}
                         pendingSessions={pendingSessions}
                         isConnected={isConnected}
                         onProjectSettings={this.toggleProjectSettings}

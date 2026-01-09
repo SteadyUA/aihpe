@@ -1,8 +1,8 @@
 import React from 'react';
-import { marked } from 'marked';
 import { Toolbar } from './Toolbar';
 import { UiButton } from '../UiButton';
 import styles from './Artifact.module.css';
+import { createMarkedInstance } from '../../utils/markdownUtils';
 
 interface ArtifactProps {
     content: string;
@@ -18,7 +18,10 @@ export class Artifact extends React.Component<ArtifactProps> {
 
         if (!active) return null;
 
-        const htmlContent = marked.parse(content || '') as string;
+        // Configure marked with a custom tokenizer/renderer for colors
+        const markedInstance = createMarkedInstance(styles as any);
+
+        const htmlContent = markedInstance.parse(content || '') as string;
 
         const isContentEmpty = !content || content.trim() === '' || content.includes('No plan');
 

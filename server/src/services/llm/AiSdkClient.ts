@@ -208,6 +208,27 @@ export class AiSdkClient implements LlmClient {
                     return 'Summary delivered.';
                 },
             }),
+            update_subject: tool({
+                description: 'Update the subject/topic of the session. Use this tool when the session subject is "..." or generic, and the conversation context allows for a better, short summary (3-5 words).',
+                inputSchema: z.object({
+                    subject: z.string().describe('The new subject for the session. Should be concise (3-5 words max) and in the language of the user\'s messages.'),
+                }),
+                execute: async ({ subject }: { subject: string }) => {
+                    this.sessionStore.upsert(request.sessionId, { subject });
+                    if (request.onPatch) {
+                        request.onPatch({ subject });
+                    }
+                    return `Session subject updated to: "${subject}"`;
+                },
+            }),
+            read_subject: tool({
+                description: 'Read the current subject/topic of the session. Use this to check if the subject is still "..." or if it needs updating based on the current context.',
+                inputSchema: z.object({}),
+                execute: async () => {
+                    const currentSubject = request.subject || '...';
+                    return `Current Session Subject: "${currentSubject}"`;
+                },
+            }),
         };
 
         // Add image tools
@@ -306,7 +327,7 @@ export class AiSdkClient implements LlmClient {
                     instruction: z
                         .string()
                         .describe(
-                            'Specific, actionable instruction for this variant. Focused on WHAT to change (e.g., "Change background to blue...", "Update font to...").',
+                            'Specific, actionable instruction for this variant. Focused on WHAT to change (e.g., "Change background to blue...", "Update font to..."). Must be in the language of the user\'s messages.',
                         ),
                 }),
                 execute: async (args: {
@@ -586,6 +607,8 @@ Strategy:
 - Use 'edit_file' to update 'implementation_plan.md' first. Ask for confirmation.
 - Use 'edit_file' to apply changes to code files ONLY after confirmation.
 - Use 'generate_variant' if asked for multiple options.
+- Use 'read_subject' to check the current session topic if you are unsure or if it might be outdated.
+- Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
 
 Rules:
 - Preserve valid HTML/CSS/JS syntax.

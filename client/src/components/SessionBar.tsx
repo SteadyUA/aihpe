@@ -9,6 +9,7 @@ interface SessionBarProps {
     onCreate: () => void;
     statusMap: Record<string, string>;
     groups: Record<string, number>; // Map sessionId -> groupId
+    subjects: Record<string, string>; // Map sessionId -> subject
     onRemove: (id: string) => void;
     pendingSessions: string[];
     isConnected: boolean;
@@ -111,7 +112,9 @@ export class SessionBar extends React.Component<
                                         </svg>
                                     )}
                                 </span>
-                                <span>{id.slice(0, 8)}</span>
+                                <span className={styles.sessionTitle} title={id}>
+                                    {this.props.subjects[id] || id.slice(0, 8)}
+                                </span>
                                 <span
                                     className={styles.sessionTabClose}
                                     onClick={(e) => {

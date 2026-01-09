@@ -1005,3 +1005,12 @@
     border-color: var(--group-color);
     border-top-color: transparent;
 }
+.sessionTitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+    display: inline-block;
+    vertical-align: middle;
+    font-size: 0.85rem;
+}

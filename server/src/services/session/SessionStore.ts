@@ -6,7 +6,7 @@ import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, Sessio
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -24,6 +24,7 @@ type PersistedSession = {
     unsent?: UnsentData;
     projectId?: string;
     status?: SessionStatus;
+    subject?: string;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -65,7 +66,7 @@ const EMPTY_FILES: SessionFiles = {
     'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
     'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
     'script.js': DEFAULT_SESSION_SCRIPT,
-    'implementation_plan.md': '# Project Plan\n\nNo plan created yet.',
+    'implementation_plan.md': 'No plan created yet.',
 };
 
 const SESSION_ROOT = resolveSessionRoot();
@@ -264,6 +265,8 @@ export class SessionStore {
             provider: source.provider, // Copy provider settings
             projectId: source.projectId,
             status: 'idle',
+            subject: source.subject,
+            fastMode: source.fastMode,
         };
 
         clearPersistedSessionData(targetId);
@@ -419,6 +422,7 @@ export class SessionStore {
             fastMode: false,
             unsent: {},
             status: 'idle',
+            subject: '...',
         };
     }
 
@@ -783,6 +787,7 @@ export class SessionStore {
                 fastMode: parsed.fastMode ?? false,
                 unsent: parsed.unsent || {},
                 status: parsed.status ?? 'idle',
+                subject: parsed.subject,
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -860,6 +865,8 @@ export class SessionStore {
                 provider: session.provider,
                 unsent: session.unsent,
                 status: session.status,
+                subject: session.subject,
+                fastMode: session.fastMode,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1126,5 +1133,7 @@ function cloneSession(session: SessionData): SessionData {
         projectId: session.projectId,
 
         status: session.status,
+        subject: session.subject,
+        fastMode: session.fastMode,
     };
 }

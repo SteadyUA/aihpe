@@ -91,6 +91,13 @@ export class SseService {
         });
     }
 
+    emitSessionUpdate(payload: { sessionId: string; subject?: string }): void {
+        this.broadcast('session-update', {
+            ...payload,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
         for (const client of this.clients.values()) {

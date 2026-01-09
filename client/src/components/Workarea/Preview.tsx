@@ -33,6 +33,8 @@ interface PreviewProps {
 interface PreviewState {
     isMobile: boolean;
     deviceIndex: number;
+    scale: number;
+    reloadCount: number;
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
@@ -40,24 +42,93 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     private static scrollStore: Record<string, { x: number; y: number }> = {};
     private thottledScrollHandler: (() => void) | null = null;
     private iframeRef: React.RefObject<HTMLIFrameElement | null>;
+    private containerRef: React.RefObject<HTMLDivElement | null>;
 
     constructor(props: PreviewProps) {
         super(props);
         this.state = {
             isMobile: false,
             deviceIndex: 0,
+            scale: 1,
+            reloadCount: 0,
         };
         this.iframeRef = React.createRef();
+        this.containerRef = React.createRef();
     }
 
     componentDidMount() {
         // No initial action needed, restoration happens on iframe load
+        this.observeContainer();
+        window.addEventListener('resize', this.calculateScale);
     }
 
     componentWillUnmount() {
         this.saveScrollPosition();
         this.cleanupScrollListener();
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+        window.removeEventListener('resize', this.calculateScale);
     }
+
+    private resizeObserver: ResizeObserver | null = null;
+
+    observeContainer = () => {
+        if (this.containerRef.current) {
+            this.resizeObserver = new ResizeObserver(() => {
+                this.calculateScale();
+            });
+            this.resizeObserver.observe(this.containerRef.current);
+        }
+    };
+
+    calculateScale = () => {
+        const { isMobile, deviceIndex } = this.state;
+        if (!isMobile) {
+            if (this.state.scale !== 1) {
+                this.setState({ scale: 1 });
+            }
+            return;
+        }
+
+        const container = this.containerRef.current;
+        if (!container) return;
+
+        const device = DEVICES[deviceIndex];
+        // Available space in container (accounting for some padding if needed, 
+        // though container padding is handled by CSS, we care about content box usually)
+        // The container is the .frameWrapper which has flex layout.
+
+        // We need to measure the available space. 
+        // frameWrapper has padding: 2rem 0 for mobile in CSS.
+        // clientHeight includes padding.
+        // We want to fit device.height + borders into available height.
+
+        // CSS defines: .frameWrapper.mobile iframe { border: 8px solid #1e293b; ... }
+        // So total height needed is device.height + 16px (borders)
+        // Total width needed is device.width + 16px (borders)
+
+        const BORDER_SIZE = 16; // 8px * 2
+        const VERTICAL_PADDING = 0; // 2rem top + 2rem bottom roughly, or just safe margin
+        const HORIZONTAL_PADDING = 0;
+
+        const availableWidth = container.clientWidth - HORIZONTAL_PADDING;
+        const availableHeight = container.clientHeight - VERTICAL_PADDING;
+
+        const requiredWidth = device.width + BORDER_SIZE;
+        const requiredHeight = device.height + BORDER_SIZE;
+
+        const scaleX = availableWidth / requiredWidth;
+        const scaleY = availableHeight / requiredHeight;
+
+        // Use the smaller scale to fit both dimensions, capped at 1 (don't zoom in)
+        const newScale = Math.min(Math.min(scaleX, scaleY), 1);
+
+        // Limit precision to avoid constant updates for tiny fraction diffs
+        if (Math.abs(newScale - this.state.scale) > 0.001) {
+            this.setState({ scale: newScale });
+        }
+    };
 
     getSnapshotBeforeUpdate(prevProps: PreviewProps) {
         if (
@@ -82,10 +153,16 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         return null;
     }
 
-    componentDidUpdate(prevProps: PreviewProps, _prevState: PreviewState, _snapshot: any) {
+    componentDidUpdate(prevProps: PreviewProps, prevState: PreviewState, _snapshot: any) {
         // If became active (tab switch), restore scroll
         if (!prevProps.active && this.props.active) {
             this.restoreScroll();
+            // Also recalc scale as container might have changed size
+            setTimeout(this.calculateScale, 0);
+        }
+
+        if (prevState.isMobile !== this.state.isMobile || prevState.deviceIndex !== this.state.deviceIndex) {
+            this.calculateScale();
         }
     }
 
@@ -221,6 +298,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     };
 
+    handleReload = () => {
+        this.setState(prev => ({ reloadCount: prev.reloadCount + 1 }));
+    };
+
     // Public method for parent
     public getIframe = (): HTMLIFrameElement | null => {
         return this.iframeRef.current;
@@ -228,7 +309,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
     render() {
         const { sessionId, version, active, reloadTrigger } = this.props;
-        const { isMobile, deviceIndex } = this.state;
+        const { isMobile, deviceIndex, scale, reloadCount } = this.state;
         const device = DEVICES[deviceIndex];
 
         const previewUrl =
@@ -237,13 +318,55 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 : 'about:blank';
 
         // Key logic: Combine identifying props to force remount of iframe when any changes
-        const iframeKey = `${sessionId}-${version}-${reloadTrigger}`;
+        const iframeKey = `${sessionId}-${version}-${reloadTrigger}-${reloadCount}`;
+
+        // When scaled, the wrapping div needs to take up exactly the scaled size
+        // so the parent flex container knows the true size.
+        // The inner div (with iframe) stays full size but is scaled down visually.
+        const wrapperStyle = isMobile
+            ? {
+                width: `${device.width * scale}px`,
+                height: `${device.height * scale}px`,
+                // We don't put overflow:hidden here necessarily unless we want to crop shadows,
+                // but usually better not to to keep shadows nice.
+            }
+            : { width: '100%', height: '100%' };
+
+        const innerStyle = isMobile
+            ? {
+                width: `${device.width}px`,
+                height: `${device.height}px`,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left', // Scale from top-left so it fits into the wrapper
+            }
+            : { width: '100%', height: '100%' };
 
         return (
             <div className={styles.previewContainer} style={{ display: active ? 'flex' : 'none' }}>
                 <Toolbar
                     left={
                         <>
+                            <UiButton
+                                variant="secondary"
+                                size="icon"
+                                onClick={this.handleReload}
+                                title="Reload Preview"
+                            >
+                                <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                >
+                                    <path d="M23 4v6h-6"></path>
+                                    <path d="M1 20v-6h6"></path>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
+                            </UiButton>
                             <UiCheckbox
                                 checked={isMobile}
                                 onChange={this.toggleMobile}
@@ -311,27 +434,30 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 />
 
                 <div
+                    ref={this.containerRef}
                     className={classNames(styles.frameWrapper, {
                         [styles.mobile]: isMobile,
                     })}
                 >
-                    <iframe
-                        key={iframeKey}
-                        ref={this.iframeRef}
-                        src={previewUrl}
-                        title="Preview"
-                        sandbox="allow-scripts allow-same-origin allow-modals"
-                        onLoad={this.handleIframeLoad}
-                        style={{
-                            ...(isMobile
-                                ? {
-                                    width: `${device.width}px`,
-                                    height: `${device.height}px`,
-                                }
-                                : {}),
-                            pointerEvents: this.props.isResizing ? 'none' : 'auto'
-                        }}
-                    />
+                    {/* Size-Constraining Wrapper: Sized to the scaled result */}
+                    <div style={wrapperStyle}>
+                        {/* Transformed Content: Full size but scaled down */}
+                        <div style={innerStyle}>
+                            <iframe
+                                key={iframeKey}
+                                ref={this.iframeRef}
+                                src={previewUrl}
+                                title="Preview"
+                                sandbox="allow-scripts allow-same-origin allow-modals"
+                                onLoad={this.handleIframeLoad}
+                                style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    pointerEvents: this.props.isResizing ? 'none' : 'auto'
+                                }}
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
         );

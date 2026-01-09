@@ -1,6 +1,6 @@
 import React from 'react';
-import { marked } from 'marked';
 import classNames from 'classnames';
+import { createMarkedInstance } from '../utils/markdownUtils';
 
 import { UiButton } from './UiButton';
 import { UiDropdown } from './UiDropdown';
@@ -9,12 +9,9 @@ import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-
-
-marked.setOptions({ breaks: true });
-
-marked.setOptions({ breaks: true });
 import { MessageData, LlmProvider, ChatAttachment } from '../types';
+
+
 
 interface MessageProps {
     msg: MessageData;
@@ -31,7 +28,7 @@ interface MessageProps {
     onSwitchSession?: (id: string) => void;
     isPending?: boolean;
     statusMessages?: string[];
-    elapsedSeconds?: number;
+    startTime?: number;
 }
 
 const formatTime = (dateString?: string) => {
@@ -41,11 +38,36 @@ const formatTime = (dateString?: string) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
+const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
+    const [elapsed, setElapsed] = React.useState(0);
+
+    React.useEffect(() => {
+        if (!startTime) {
+            setElapsed(0);
+            return;
+        }
+
+        const update = () => {
+            const now = Date.now();
+            setElapsed(Math.floor((now - startTime) / 1000));
+        };
+
+        update();
+        const interval = setInterval(update, 1000);
+        return () => clearInterval(interval);
+    }, [startTime]);
+
+    if (!startTime || elapsed <= 0) return null;
+
+    return (
+        <span className={styles.timer}>
+            {`${elapsed}s`}
+        </span>
+    );
+};
+
 const processContent = (text: string, sessionIds: string[] = []) => {
     if (!text) return '';
-
-    // Debug logging (temporary)
-    // console.log('Processing content:', { textLength: text.length, sessionIdsCount: sessionIds.length });
 
     // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
     return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
@@ -64,7 +86,44 @@ const processContent = (text: string, sessionIds: string[] = []) => {
     });
 };
 
+const areArraysEqual = (a?: any[], b?: any[]) => {
+    if (a === b) return true;
+    if (!a || !b) return a === b;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+};
+
 class Message extends React.Component<MessageProps> {
+    shouldComponentUpdate(nextProps: MessageProps) {
+        const { msg, sessionIds, statusMessages, ...otherProps } = this.props;
+        const { msg: nextMsg, sessionIds: nextSessionIds, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
+
+        // 1. Primitive props check (shallow comparison of the rest)
+        const keys = Object.keys(otherProps) as (keyof typeof otherProps)[];
+        for (const key of keys) {
+            if (otherProps[key] !== nextOtherProps[key]) return true;
+        }
+        // Also check if nextProps has new keys (though unlikely with TS)
+        if (Object.keys(nextOtherProps).length !== keys.length) return true;
+
+        // 2. Message content check
+        if (msg.content !== nextMsg.content) return true;
+        if (msg.role !== nextMsg.role) return true;
+        if (msg.turn !== nextMsg.turn) return true;
+        // Attachment check (reference or value if needed, simpler to ref check for now)
+        if (msg.attachment !== nextMsg.attachment) return true;
+        if (msg.selection?.selector !== nextMsg.selection?.selector) return true;
+
+        // 3. Array checks
+        if (!areArraysEqual(sessionIds, nextSessionIds)) return true;
+        if (!areArraysEqual(statusMessages, nextStatusMessages)) return true;
+
+        return false;
+    }
+
     render() {
         const {
             msg,
@@ -79,7 +138,7 @@ class Message extends React.Component<MessageProps> {
             onUndo,
             isPending,
             statusMessages,
-            elapsedSeconds,
+            startTime,
         } = this.props;
         const isUser = msg.role === 'user';
         const isAssistant = msg.role === 'assistant';
@@ -157,7 +216,7 @@ class Message extends React.Component<MessageProps> {
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: marked.parse(processContent(msg.content, this.props.sessionIds)) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content, this.props.sessionIds)) as string,
                                 }}
                             />
                         )
@@ -187,11 +246,7 @@ class Message extends React.Component<MessageProps> {
                     {isPending && (
                         <>
                             <span className={styles.spinner}></span>
-                            <span className={styles.timer}>
-                                {elapsedSeconds && elapsedSeconds > 0
-                                    ? `${elapsedSeconds}s`
-                                    : ''}
-                            </span>
+                            <DurationTimer startTime={startTime} />
                         </>
                     )}
                     {/* Timestamp for user messages */}
@@ -297,6 +352,7 @@ interface ChatProps {
     onSwitchSession?: (id: string) => void;
     fastMode?: boolean;
     onFastModeChange?: (value: boolean) => void;
+    sessionTitle?: string;
 
 }
 
@@ -304,7 +360,6 @@ interface ChatState {
     isLoading: boolean;
     error: string | null;
     input: string;
-    elapsedSeconds: number;
     showUndoConfirmation: boolean;
     isUploading: boolean;
 }
@@ -312,7 +367,6 @@ interface ChatState {
 export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
-    private timerInterval: any = null;
     private isUserScroll = false;
     private richInputRef = React.createRef<RichInput>();
 
@@ -323,7 +377,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             error: null,
             input: '',
             isUploading: false,
-            elapsedSeconds: 0,
             showUndoConfirmation: false,
         };
         if (props.unsentInput) {
@@ -342,58 +395,45 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         } else {
             this.scrollToBottom();
         }
-        this.updateTimer();
     }
 
     componentDidUpdate(prevProps: ChatProps) {
+        const lastMsg = this.props.messages[this.props.messages.length - 1];
+        const prevLastMsg = prevProps.messages[prevProps.messages.length - 1];
+        const contentChanged = lastMsg?.content !== prevLastMsg?.content;
+
         if (
             prevProps.messages.length !== this.props.messages.length ||
             prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
-            prevProps.status !== this.props.status
+            prevProps.status !== this.props.status ||
+            contentChanged
         ) {
-            // If active turn is set, stay there? Or if new message added?
-            // If new message comes in (streaming), we usually auto-scroll to bottom.
-            // But if we are viewing history?
-            // If we are viewing history (activeTurn != null), we should probably NOT scroll to bottom on new message.
-            if (this.props.activeTurn === null || this.props.activeTurn === undefined) {
+            const isAtBottom = this.props.activeTurn === null || this.props.activeTurn === undefined;
+            const isLatestTurnActive = lastMsg && typeof lastMsg.turn === 'number' && this.props.activeTurn === lastMsg.turn;
+
+            if (isAtBottom || isLatestTurnActive) {
                 this.scrollToBottom();
             }
         }
 
-        // If active turn changed, scroll to it
         if (prevProps.activeTurn !== this.props.activeTurn) {
             if (this.isUserScroll) {
                 this.isUserScroll = false;
             } else if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
                 this.scrollToTurn(this.props.activeTurn);
             } else {
-                // If we went back to latest
                 this.scrollToBottom();
             }
         }
 
-        if (prevProps.startTime !== this.props.startTime || prevProps.status !== this.props.status) {
-            this.updateTimer();
-        }
-
         if (prevProps.unsentInput !== this.props.unsentInput && this.props.unsentInput !== undefined) {
-            // Only update if it's different and not just undefined (or maybe blank string is valid)
-            // Beware of overriding user input if they are typing?
-            // Usually unsentInput updates come from LOAD or UNDO.
-            // If local input is different?
-            // Let's assume unsentInput prop is the truth from server/store.
-            if (this.props.unsentInput !== this.state.input) {
-                this.setState({ input: this.props.unsentInput });
-            }
             if (this.props.unsentInput !== this.state.input) {
                 this.setState({ input: this.props.unsentInput });
             }
         }
 
-        // Focus management
         const justFinishedPicking = prevProps.isPicking && !this.props.isPicking;
         const justClearedSelection = prevProps.selection && !this.props.selection;
-        // Optionally also when attachment changes (uploaded or removed)
         const attachmentChanged = prevProps.attachment !== this.props.attachment;
         const providerChanged = prevProps.provider !== this.props.provider;
         const fastModeChanged = prevProps.fastMode !== this.props.fastMode;
@@ -404,24 +444,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentWillUnmount() {
-        if (this.timerInterval) clearInterval(this.timerInterval);
-    }
-
-    updateTimer = () => {
-        if (this.timerInterval) clearInterval(this.timerInterval);
-        this.timerInterval = null;
-
-        if (this.props.status === 'busy' && this.props.startTime) {
-            const tick = () => {
-                const now = Date.now();
-                const start = this.props.startTime || now;
-                this.setState({ elapsedSeconds: Math.floor((now - start) / 1000) });
-            };
-            tick();
-            this.timerInterval = setInterval(tick, 1000);
-        } else {
-            this.setState({ elapsedSeconds: 0 });
-        }
     }
 
 
@@ -600,9 +622,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onClearSelection,
             onSelectChip,
             sessionIds,
-            onSwitchSession
+            onSwitchSession,
+            sessionTitle
         } = this.props;
-        const { input, elapsedSeconds, isUploading, isLoading } = this.state;
+        const { input, isUploading, isLoading } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
 
         let effectiveActiveTurn = activeTurn;
@@ -643,6 +666,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         return (
             <div className={styles.chatPanel}>
+                <div className={styles.sessionHeader}>
+                    {sessionTitle || '...'}
+                </div>
                 <div className={styles.messages} id="messages">
                     {messages.map((m, i) => {
                         // Use strict equality for safely finding the match
@@ -691,7 +717,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 version: 0,
                             }}
                             statusMessages={statusMessages}
-                            elapsedSeconds={elapsedSeconds}
+                            startTime={this.props.startTime || undefined}
                             isPending={true}
                             isActiveTurn={isPendingActive}
                             isDimmed={shouldPendingDim}
@@ -893,4 +919,3 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         );
     }
 }
-

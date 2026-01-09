@@ -45,6 +45,7 @@ export type LlmProvider = 'openai' | 'google';
 export interface Session {
     id: string;
     projectId: string; // New field
+    subject?: string;
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
     messages: MessageData[];
     statusMessages: string[];

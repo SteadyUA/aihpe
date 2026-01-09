@@ -101,11 +101,32 @@
 .content> :first-child {
     margin-top: 0;
 }
+
 .implementedLabel {
     font-weight: 500;
     color: var(--text-secondary);
-    padding: 0.5rem 1rem;
+    padding: 4px 8px;
     background-color: var(--bg-tertiary);
     border-radius: 4px;
     font-size: 0.9em;
+    height: 28px;
+    line-height: 20px;
+}
+
+.colorContainer {
+    font-family: var(--font-mono);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+    font-size: 0.85rem;
+}
+
+.colorSwatch {
+    display: block;
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
 }
