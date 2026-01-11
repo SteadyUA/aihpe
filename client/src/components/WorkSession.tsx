@@ -30,6 +30,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     private picker: ElementPicker;
     private previewRef: React.RefObject<Workarea | null>;
     private chatRef: React.RefObject<Chat | null>;
+    private hasInitialScrollHappened = false;
 
     constructor(props: WorkSessionProps) {
         super(props);
@@ -64,6 +65,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     }
 
     componentDidUpdate(prevProps: WorkSessionProps) {
+        // 0. Handle Initial Scroll on Visibility Reveal (For background loaded sessions)
+        if (this.props.isVisible && !this.hasInitialScrollHappened && this.chatRef.current) {
+            // If we have an active turn, scroll to it, otherwise bottom
+            if (this.props.session.activeTurn !== null && this.props.session.activeTurn !== undefined) {
+                this.chatRef.current.scrollToTurn(this.props.session.activeTurn);
+            } else {
+                this.chatRef.current.scrollToBottom();
+            }
+            this.hasInitialScrollHappened = true;
+        }
+
         // 1. Handle Session Switch (Visibility Change)
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();

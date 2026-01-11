@@ -44,6 +44,7 @@ export interface SessionData {
     unsent?: UnsentData;
 
     status: SessionStatus;
+    errorMessage?: string; // Persisted error message
     subject?: string;
 }
 

@@ -376,10 +376,11 @@ export class ImageService {
         let hasChanges = false;
         const htmlContent = files['index.html'] || files['html'] || '';
         const cssContent = files['styles.css'] || files['css'] || '';
+        const jsContent = files['script.js'] || files['js'] || '';
 
         const updatedMetadata = metadata.map(img => {
             // Check usage
-            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename);
+            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename) || jsContent.includes(img.filename);
 
             if (img.isUsed !== isUsed) {
                 hasChanges = true;

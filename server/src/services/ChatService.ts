@@ -169,7 +169,7 @@ export class ChatService {
 
         // For now, let's just hydrate the current request attachments.
         // If we want history images to work, we'd need to hydrate conversation too.
-        // Given the request, "messages.json не должен сохранять dataUrl",
+        // Given the request, "messages.json must not save dataUrl",
         // implies we should re-hydrate on read/send using PUBLIC_HOST if/when needed.
         // Current implementation passes 'conversation' to generatePage which builds messages.
         // We should map the conversation and hydrate images there!
@@ -196,7 +196,7 @@ export class ChatService {
             selectorsSummary = `Image: ${promptData.attachment.filename}`;
         }
         const selectionContext = promptData.selection
-            ? `Выбран элемент: ${promptData.selection.selector}.`
+            ? `Selected element: ${promptData.selection.selector}.`
             : '';
 
         let effectiveInstructions = promptData.message;
@@ -204,7 +204,7 @@ export class ChatService {
             effectiveInstructions = `${selectionContext} ${effectiveInstructions}`;
         }
         if (!effectiveInstructions && selectorsSummary) {
-            effectiveInstructions = `Обработай вложенные скриншоты выбранных элементов: ${selectorsSummary}.`;
+            effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
 
         // Fetch project context
@@ -451,7 +451,7 @@ export class ChatService {
             this.notifyStatus(
                 sessionId,
                 'error',
-                'Failed to process request.',
+                description,
                 description,
             );
             // We don't throw here as this is a background task now
@@ -488,17 +488,46 @@ export class ChatService {
 
         this.sessionStore.upsert(sessionId, {
             status: newStatus,
+            errorMessage: status === 'error' ? message : undefined,
         });
     }
 
     private describeError(error: unknown): string {
-        if (error instanceof Error && error.message) {
+        let current = error;
+        // Limit depth to avoid infinite loops
+        for (let i = 0; i < 5; i++) {
+            if (current instanceof Error) {
+                // Check if it is a specific error wrapping another one (like RetryError from Vercel AI SDK)
+                // Some retry errors have a 'lastError' property
+                if ((current as any).lastError) {
+                    current = (current as any).lastError;
+                    continue;
+                }
+
+                // If message is generic and there is a cause, look deeper
+                const message = current.message;
+                const isGeneric = message.includes('No output generated') || message.includes('Failed to process');
+
+                if (isGeneric && (current as any).cause) {
+                    current = (current as any).cause;
+                    continue;
+                }
+
+                return message;
+            }
+            break;
+        }
+
+        if (typeof current === 'string') {
+            return current;
+        }
+
+        // Fallback to original if we couldn't dig deeper but it was an error
+        if (error instanceof Error) {
             return error.message;
         }
-        if (typeof error === 'string') {
-            return error;
-        }
-        return 'неизвестная ошибка';
+
+        return 'unknown error';
     }
 
     private async prepareAttachment(
@@ -632,7 +661,7 @@ export class ChatService {
     ): any {
         if (!selection) return content;
         if (typeof content === 'string') {
-            return `[Выбран элемент: ${selection.selector}] ${content}`;
+            return `[Selected element: ${selection.selector}] ${content}`;
         }
         return content;
     }

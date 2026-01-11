@@ -6,7 +6,7 @@ import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, Sessio
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -24,6 +24,7 @@ type PersistedSession = {
     unsent?: UnsentData;
     projectId?: string;
     status?: SessionStatus;
+    errorMessage?: string;
     subject?: string;
 };
 
@@ -171,6 +172,7 @@ export class SessionStore {
 
         clearPersistedSessionData(targetId);
         copyVersionHistory(sourceId, targetId);
+        this.copyArtifacts(sourceId, targetId);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -272,6 +274,7 @@ export class SessionStore {
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
         copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
+        this.copyArtifacts(sourceId, targetId, normalizedTurn);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -380,7 +383,8 @@ export class SessionStore {
                 input: restoredInput,
                 selection: restoredSelection?.selector, // Extract selector string
                 attachment: userMessage?.attachment,
-            }
+            },
+            status: 'idle', // Reset status to idle to clear error state
         };
 
         this.sessions.set(sessionId, updated);
@@ -476,7 +480,7 @@ export class SessionStore {
         // If history exists, user message starts Turn N+1.
         // System/Assistant/Tool messages belong to the SAME turn as the preceding User message.
 
-        // Wait, "lastTurn - номер последнего хода".
+        // Wait, "lastTurn - number of the last turn".
         // If I create a fresh session, lastTurn = 0.
         // First user message -> Turn 1?
         // Let's assume 1-based turns if we want "turn - 1" to make sense for "previous turn".
@@ -787,6 +791,7 @@ export class SessionStore {
                 fastMode: parsed.fastMode ?? false,
                 unsent: parsed.unsent || {},
                 status: parsed.status ?? 'idle',
+                errorMessage: parsed.errorMessage,
                 subject: parsed.subject,
             };
 
@@ -833,6 +838,48 @@ export class SessionStore {
         }
     }
 
+    private copyArtifacts(sourceId: string, targetId: string, maxTurn?: number): void {
+        const sourceDir = path.join(resolveSessionDir(sourceId), 'artifacts');
+        const targetDir = path.join(resolveSessionDir(targetId), 'artifacts');
+
+        if (!fs.existsSync(sourceDir)) {
+            return;
+        }
+
+        try {
+            ensureDirectory(targetDir);
+            const files = fs.readdirSync(sourceDir);
+
+            for (const file of files) {
+                // Filename format: name.ext.turn
+                // We want to copy if turn <= maxTurn (if maxTurn defined)
+
+                if (maxTurn !== undefined) {
+                    const parts = file.split('.');
+                    // Safe check for turn suffix
+                    const turnStr = parts[parts.length - 1];
+                    const turn = parseInt(turnStr, 10);
+
+                    if (!isNaN(turn)) {
+                        if (turn > maxTurn) {
+                            continue;
+                        }
+                    }
+                }
+
+                fs.copyFileSync(
+                    path.join(sourceDir, file),
+                    path.join(targetDir, file)
+                );
+            }
+        } catch (error) {
+            console.error(
+                `Failed to copy artifacts from ${sourceId} to ${targetId}`,
+                error,
+            );
+        }
+    }
+
     private persistSession(session: SessionData): void {
         const sessionDir = resolveSessionDir(session.id);
         const versionDir = resolveVersionDir(session.id, session.currentVersion);
@@ -867,6 +914,7 @@ export class SessionStore {
                 status: session.status,
                 subject: session.subject,
                 fastMode: session.fastMode,
+                errorMessage: session.errorMessage,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1133,6 +1181,7 @@ function cloneSession(session: SessionData): SessionData {
         projectId: session.projectId,
 
         status: session.status,
+        errorMessage: session.errorMessage,
         subject: session.subject,
         fastMode: session.fastMode,
     };

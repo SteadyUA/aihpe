@@ -79,7 +79,6 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
     componentDidUpdate(
         prevProps: WorkareaProps,
-        _prevState: WorkareaState
     ) {
 
         const sessionChanged = prevProps.sessionId !== this.props.sessionId;
@@ -90,12 +89,18 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         if (sessionChanged || versionChanged || activeTurnChanged) {
             // Full reset for new turn/session
             this.setState(
-                {
-                    loading: { html: false, css: false, js: false, plan: false },
-                    unsavedContent: { html: null, css: null, js: null, plan: null },
-                    // Increment iframeKey to force Preview reload if needed
-                    // (Preview handles turn change internally for key derivation, but we can signal explicitly too)
-                    iframeKey: this.state.iframeKey + 1,
+                (prev) => {
+                    const newState: Partial<WorkareaState> = {
+                        loading: { html: false, css: false, js: false, plan: false },
+                        unsavedContent: { html: null, css: null, js: null, plan: null },
+                        iframeKey: prev.iframeKey + 1,
+                    };
+
+                    if (activeTurnChanged) {
+                        newState.hasUnreadPlanChanges = false;
+                    }
+
+                    return newState as WorkareaState;
                 },
                 () => {
                     this.loadContent();
@@ -131,44 +136,61 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
     public clearCache = (version: number, filename?: string, turn?: number) => {
         this.setState(prev => {
             const newCache = { ...prev.versionCache };
+            const newArtifactCache = { ...prev.artifactCache };
+            let hasUnreadPlanChanges = prev.hasUnreadPlanChanges;
 
             if (filename) {
                 // Clear specific file
-                // Find asset type for filename
                 const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
-                if (type && newCache[version]) {
+
+                // Handle Plan (Artifact)
+                if (type === 'plan' && turn !== undefined) {
+                    const isPlanActive = this.props.activeTab === 'plan';
+                    const isCurrentTurn = turn === this.props.displayedTurn;
+
+                    if (!isPlanActive && isCurrentTurn) {
+                        // Don't clear cache, just mark as unread
+                        hasUnreadPlanChanges = true;
+                        // We keep the OLD content in cache so the dot appears (checked via hasPlan in render)
+                    } else {
+                        // Active or other turn -> clear it
+                        if (newArtifactCache[turn]) {
+                            // We must properly delete the key or set to null to force refetch
+                            newArtifactCache[turn] = { ...newArtifactCache[turn], plan: null };
+                        }
+                    }
+                }
+                // Handle Standard Files
+                else if (type && newCache[version]) {
                     newCache[version] = { ...newCache[version], [type]: null };
                 }
-            } else {
-                // Clear all for version
-                delete newCache[version];
-            }
 
-            // Also clear artifact cache if applicable
-            const newArtifactCache = { ...prev.artifactCache };
-            if (turn !== undefined && filename === 'implementation_plan.md') {
-                delete newArtifactCache[turn];
+            } else {
+                // Clear all for version (legacy/full refresh)
+                delete newCache[version];
+                // For artifacts, we might need to clear current turn too if version matches?
+                // But usually this acts on versioned files.
+                // If we need to clear artifacts, we'd expect specific calls.
             }
 
             return {
                 versionCache: newCache,
                 artifactCache: newArtifactCache,
-                iframeKey: prev.iframeKey + 1 // Force iframe refresh
+                hasUnreadPlanChanges,
+                iframeKey: prev.iframeKey + 1
             };
         }, () => {
-            // Check if we need to set unread flag for plan
-            if (filename && filename === FILENAME_MAP['plan'] && this.props.activeTab !== 'plan') {
-                // Only show dot if the update is for the CURRENTLY displayed turn
-                if (turn !== undefined && turn === this.props.displayedTurn) {
-                    this.setState({ hasUnreadPlanChanges: true });
-                }
-            }
-
             // Re-fetch if current and matching active tab
             const { version: currentVersion, sessionId, activeTab } = this.props;
 
-            if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
-                // Check if we cleared the active tab's file
+            // If we are on the plan tab, and we just cleared it (because we were acting on it), fetch again
+            if (activeTab === 'plan' && filename === FILENAME_MAP['plan'] && turn === this.props.displayedTurn) {
+                this.fetchFile('plan');
+                return;
+            }
+
+            if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId && activeTab !== 'plan') {
+                // Standard file fetch
                 if (filename) {
                     const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
                     if (type === activeTab) {
@@ -181,7 +203,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         });
     }
 
-    fetchFile = async (type: AssetType) => {
+    fetchFile = async (type: AssetType, force: boolean = false) => {
         const { sessionId, version, displayedTurn } = this.props;
         if (!sessionId) return;
 
@@ -196,7 +218,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         // SPECIAL HANDLING FOR PLAN (ARTIFACT)
         if (type === 'plan') {
             const currentArtifactCache = this.state.artifactCache[displayedTurn];
-            if (currentArtifactCache && currentArtifactCache[type] !== null && currentArtifactCache[type] !== undefined) {
+            // If we have a value AND force is false, use cache.
+            // Note: We ignored hasUnreadPlanChanges here intentionally - we want cache unless forced.
+            if (!force && currentArtifactCache && currentArtifactCache[type] !== null && currentArtifactCache[type] !== undefined) {
                 return; // Already cached
             }
 
@@ -562,7 +586,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     <span className={styles.versionLabel}>
                         v{version}
                     </span>
-                    {!fastMode && (
+                    {/* {!fastMode && (
                         <button
                             className={classNames(styles.assetTab, {
                                 [styles.active]: activeTab === 'plan',
@@ -571,9 +595,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                         >
                             {hasUnreadPlanChanges && <span className={styles.notificationDot}></span>}
                             Implementation plan
-                            {unsavedContent['plan'] !== null && ' *'}
                         </button>
-                    )}
+                    )} */}
                     <div className={styles.assetsSpacer}></div>
                     {(['html', 'css', 'js'] as const).map((type) => (
                         <button
@@ -605,13 +628,13 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     active={activeTab === 'images'}
                 />
 
-                <Artifact
+                {/* <Artifact
                     content={unsavedContent['plan'] ?? currentArtifacts['plan'] ?? currentFiles['plan'] ?? ''}
                     onProceed={this.handleProceed}
                     active={activeTab === 'plan'}
                     busy={this.props.isBusy}
                     isLatest={this.props.isLatest}
-                />
+                /> */}
 
                 {
                     (['html', 'css', 'js'] as const).map(type => {

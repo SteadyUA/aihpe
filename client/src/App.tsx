@@ -635,7 +635,9 @@ class App extends React.Component<AppProps, AppState> {
                             // It's acceptable.
                             statusMessages: (data.status === 'started' || data.status === 'generating')
                                 ? (session.statusMessages || [])
-                                : [],
+                                : (data.status === 'error' && data.errorMessage)
+                                    ? [data.errorMessage]
+                                    : [],
 
                             // Set pendingRefreshTurn only if completion triggered this fetch
                             pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,

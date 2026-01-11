@@ -528,6 +528,7 @@ export class ChatController {
             history,
             unsent: snapshot.unsent,
             status: snapshot.status,
+            errorMessage: snapshot.errorMessage,
             subject: snapshot.subject,
         };
     }
@@ -591,7 +592,7 @@ export class ChatController {
             if (!files) {
                 return response
                     .status(404)
-                    .json({ message: 'Файлы для указанного хода не найдены' });
+                    .json({ message: 'Files for the specified turn not found' });
             }
 
             const safeId =
@@ -603,7 +604,7 @@ export class ChatController {
                 if (!response.headersSent) {
                     response
                         .status(500)
-                        .json({ message: 'Не удалось сформировать архив' });
+                        .json({ message: 'Failed to create archive' });
                 } else {
                     response.end();
                 }
@@ -656,7 +657,7 @@ export class ChatController {
             console.error('Failed to prepare session archive', error);
             return response
                 .status(500)
-                .json({ message: 'Не удалось подготовить архив' });
+                .json({ message: 'Failed to prepare archive' });
         }
     }
 
@@ -793,7 +794,7 @@ export class ChatController {
         if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
             return response
                 .status(400)
-                .json({ message: 'Некорректный номер хода' });
+                .json({ message: 'Invalid turn number' });
         }
 
         try {
@@ -839,7 +840,7 @@ export class ChatController {
             console.error('Failed to clone session by turn', error);
             return response
                 .status(400)
-                .json({ message: 'Не удалось инициировать клонирование хода' });
+                .json({ message: 'Failed to initiate turn cloning' });
         }
     }
 
@@ -894,7 +895,7 @@ export class ChatController {
             console.error('Failed to update file', error);
             return response
                 .status(500)
-                .json({ message: 'Не удалось обновить файл' });
+                .json({ message: 'Failed to update file' });
         }
     }
     @Post('/api/sessions/:sessionId/:version/images')

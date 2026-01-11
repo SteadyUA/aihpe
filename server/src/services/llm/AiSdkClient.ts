@@ -55,14 +55,13 @@ export class AiSdkClient implements LlmClient {
 
         const systemPrompt = this.buildSystemPrompt(
             request.rulesAndGoal,
-            request.imageGenerationPref,
-            !!request.files['implementation_plan.md']
+            request.imageGenerationPref
         );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
         let currentFiles = { ...request.files };
-        let finalSummary = '';
+
 
         // Tool definitions (kept for usage in loop)
         const tools: Record<string, any> = {
@@ -71,7 +70,7 @@ export class AiSdkClient implements LlmClient {
                     'Read the content of a file. Use this to understand current code before editing.',
                 inputSchema: z.object({
                     file: z
-                        .enum(['index.html', 'styles.css', 'script.js', 'implementation_plan.md'])
+                        .enum(['index.html', 'styles.css', 'script.js'])
                         .describe('The file to read'),
                     summary: z
                         .string()
@@ -83,7 +82,7 @@ export class AiSdkClient implements LlmClient {
                     file,
                     summary,
                 }: {
-                    file: 'index.html' | 'styles.css' | 'script.js' | 'implementation_plan.md';
+                    file: 'index.html' | 'styles.css' | 'script.js';
                     summary: string;
                 }) => {
                     const content = currentFiles[file];
@@ -96,7 +95,7 @@ export class AiSdkClient implements LlmClient {
                     'Edit a file by replacing exact string match. The oldString must match exactly one location in the file.',
                 inputSchema: z.object({
                     file: z
-                        .enum(['index.html', 'styles.css', 'script.js', 'implementation_plan.md'])
+                        .enum(['index.html', 'styles.css', 'script.js'])
                         .describe('The file to edit'),
                     oldString: z
                         .string()
@@ -118,34 +117,23 @@ export class AiSdkClient implements LlmClient {
                     newString,
                     summary,
                 }: {
-                    file: 'index.html' | 'styles.css' | 'script.js' | 'implementation_plan.md';
+                    file: 'index.html' | 'styles.css' | 'script.js';
                     oldString: string;
                     newString: string;
                     summary: string;
                 }) => {
-                    // Logic for Plan-First Workflow:
-                    // 1. If editing implementation_plan.md, we stay on current version (mutable plan).
-                    // 2. If editing code files, we MUST ensure a new version exists.
-                    //    When we switch to a new version, we reset implementation_plan.md to empty to indicate a fresh start.
+                    // Logic for Workflow:
+                    // 1. If editing code files, we MUST ensure a new version exists.
+                    //    This matches the FIRST code edit in this turn.
 
-                    if (file === 'implementation_plan.md') {
-                        // Edit in place. Do NOT trigger ensureNextVersion.
-                    } else {
-                        // Editing code. Ensure new version.
-                        if (this.targetVersion === undefined) {
-                            // This matches the FIRST code edit in this turn.
-                            // We are transitioning from "Planning" to "Implementation".
-                            this.ensureNextVersion(request.sessionId);
-
-                            // currentFiles['implementation_plan.md'] = ''; // DEFERRED: We do not reset plan here anymore. We reset it at the end of generation if version changed.
-                        }
+                    if (this.targetVersion === undefined) {
+                        this.ensureNextVersion(request.sessionId);
                     }
-
 
                     const versionToUpdate = this.targetVersion !== undefined ? this.targetVersion : request.currentVersion;
 
                     let content = currentFiles[file] || '';
-                    if (!content && (file === 'styles.css' || file === 'script.js' || file === 'implementation_plan.md')) {
+                    if (!content && (file === 'styles.css' || file === 'script.js')) {
                         // Allow empty css/js if undefined
                         content = '';
                     } else if (content === undefined) {
@@ -193,21 +181,6 @@ export class AiSdkClient implements LlmClient {
                     return `Successfully updated ${file}`;
                 },
             }),
-            summary: tool({
-                description:
-                    'Call this when you are done making changes to provide a summary of what you did to the user. You can use Markdown to format the message.',
-                inputSchema: z.object({
-                    message: z
-                        .string()
-                        .describe(
-                            'The summary message to display to the user. Use Markdown formatting (bold, italic, lists) to make it more readable.',
-                        ),
-                }),
-                execute: async ({ message }: { message: string }) => {
-                    finalSummary = message;
-                    return 'Summary delivered.';
-                },
-            }),
             update_subject: tool({
                 description: 'Update the subject/topic of the session. Use this tool when the session subject is "..." or generic, and the conversation context allows for a better, short summary (3-5 words).',
                 inputSchema: z.object({
@@ -230,6 +203,7 @@ export class AiSdkClient implements LlmClient {
                 },
             }),
         };
+
 
         // Add image tools
         tools.list_images = tool({
@@ -368,6 +342,8 @@ export class AiSdkClient implements LlmClient {
                 });
 
                 let stepText = '';
+                let streamError: unknown = null;
+
                 for await (const part of result.fullStream) {
                     switch (part.type) {
                         case 'text-delta':
@@ -394,8 +370,13 @@ export class AiSdkClient implements LlmClient {
                             break;
                         case 'error':
                             console.error('Stream error:', part.error);
+                            streamError = part.error;
                             break;
                     }
+                }
+
+                if (streamError) {
+                    throw streamError;
                 }
                 fullText += stepText;
 
@@ -487,38 +468,35 @@ export class AiSdkClient implements LlmClient {
                 // Check for tool calls in the last message
                 const toolCalls = await result.toolCalls;
 
-                if (toolCalls && toolCalls.length > 0) {
-                    // Identify tool calls that were ALREADY executed by the provider/SDK in this step
-                    // by checking if there are 'tool' messages with matching toolCallId in stepMessages
-                    const executedToolCallIds = new Set(
-                        stepMessages
-                            .filter((m) => m.role === 'tool')
-                            .flatMap((m) =>
-                                Array.isArray(m.content)
-                                    ? m.content.map((c: any) => c.toolCallId)
-                                    : [],
-                            ),
-                    );
+                // if (toolCalls && toolCalls.length > 0) {
+                //     // Identify tool calls that were ALREADY executed by the provider/SDK in this step
+                //     // by checking if there are 'tool' messages with matching toolCallId in stepMessages
+                //     const executedToolCallIds = new Set(
+                //         stepMessages
+                //             .filter((m) => m.role === 'tool')
+                //             .flatMap((m) =>
+                //                 Array.isArray(m.content)
+                //                     ? m.content.map((c: any) => c.toolCallId)
+                //                     : [],
+                //             ),
+                //     );
 
-                    if (toolCalls.length > 0) {
-                        // All tools were executed by provider (or we processed results in stepMessages above).
-                        // Check if we should stop loop based on executed tools.
-                        const summaryExecuted = toolCalls.some(
-                            (tc) => tc.toolName === 'summary',
-                        );
-                        // Also stop if variants were generated
-                        const variantsExecuted = toolCalls.some(
-                            (tc) => tc.toolName === 'generate_variant',
-                        );
+                //     // if (toolCalls.length > 0) {
+                //     //     // All tools were executed by provider (or we processed results in stepMessages above).
+                //     //     // Check if we should stop loop based on executed tools.
+                //     //     // Stop if variants were generated
+                //     //     const variantsExecuted = toolCalls.some(
+                //     //         (tc) => tc.toolName === 'generate_variant',
+                //     //     );
 
-                        if (summaryExecuted) {
-                            break;
-                        }
-                    }
-                } else {
-                    // No tool calls, model is done
-                    break;
-                }
+                //     //     if (variantsExecuted) {
+                //     //         break;
+                //     //     }
+                //     // }
+                // } else {
+                //     // No tool calls, model is done
+                //     break;
+                // }
             }
 
             if (this.modelId) {
@@ -538,12 +516,13 @@ export class AiSdkClient implements LlmClient {
             );
 
             // Use the summary from tool if available, otherwise fallback to generated text or generic
-            const summaryText = finalSummary || fullText || 'Changes applied.';
+            // Use the summary from tool if available, otherwise fallback to generated text or generic
+            const summaryText = fullText || 'Changes applied.';
 
             // If we created a new version (targetVersion is set), we should reset the plan for the NEXT turn.
             // effectively, the new version's plan starts empty.
             if (this.targetVersion !== undefined) {
-                currentFiles['implementation_plan.md'] = '';
+                // currentFiles['implementation_plan.md'] = ''; // REMOVED: No more plan file
             }
 
             return {
@@ -554,57 +533,51 @@ export class AiSdkClient implements LlmClient {
             };
         } catch (error) {
             console.error(
-
                 `Failed to generate page with ${this.modelId || 'unknown model'} `,
                 error,
             );
-            return {
-                summary: `Не удалось получить ответ от модели: ${this.formatError(error)}. Предыдущая версия страницы сохранена.`,
-                files: request.files,
-            };
+            // Rethrow the error so ChatService can handle it and set session status to 'error'
+            throw error;
         }
     }
 
     private buildSystemPrompt(
         rulesAndGoal?: string,
-        imageGenerationPref?: string,
-        hasPlan?: boolean
+        imageGenerationPref?: string
     ): string {
 
         let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
-You additionally maintain a 'implementation_plan.md' file that tracks the immediate next steps.
+
+
+The user acts as a Business Analyst who wants to define a set of features to be implemented.
+They want to discuss WHAT features will be implemented and WHY (the goal).
 
 Your goal is to fulfill the user's request by following this strict workflow:
 
-1.  **PLAN FIRST**:
+1.  **PLANNING PHASE**:
     -   All user messages are initially treated as discussion and clarification of the plan.
-    -   Your first priority is always to update 'implementation_plan.md' to reflect the user's request.
-    -   'implementation_plan.md' must be a CONCRETE, ACTIONABLE list of implementation steps.
-    -   **IMPORTANT**: The content of 'implementation_plan.md' MUST be written in the same language as the user's messages.
-    -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN.
+    -   Discuss the features and requirements with the user in the chat.
+    -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN IN THE CHAT.
     -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
-    -   If the user has not explicitly approved the plan, STOP after updating 'implementation_plan.md'.
-    -   **EXCEPTION**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the 'implementation_plan.md' update and proceed directly to implementation.
+    -   **EXCEPTION**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
 
-    -   **STRICT PLAN STRUCTURE**:
-        1.  **# Type of Changes** (H1): Describes the essence of the planned changes.
-        2.  **## Goal** (H2, optional): A single paragraph describing the goal of the changes.
-        3.  **## Proposed Changes** (H2): A section detailing the changes.
-        4.  **List of changes**: A brief list of elements and how they will be modified. 
-            - Use **### Component/Location** (H3) to group changes by file or component.
-            - Ensure every step is clear and executable.
+    -   **PLAN SUMMARY**:
+        -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
+        -   Structure the summary by High-Level Feature -> Goal -> Description.
+        -   Do NOT mention specific filenames or technical details in this summary.
 
-2.  **IMPLEMENT SECOND**:
+2.  **IMPLEMENTATION PHASE**:
     -   ONLY when the user says "ok" or explicitly approves the plan (OR if the user requested "no plan"), proceed to implementation.
     -   Implement the changes in the code files ('index.html', etc.).
     -   When you start editing code files, the system will automatically create a NEW version.
-    -   The 'implementation_plan.md' for the NEW version will be reset to empty. This is normal.
     -   After code generation or image generation, you must re-verify the new plan with the user for the next steps.
-    -   **NOTE**: If the previous step was executed in "fast mode" (without plan), the NEXT step MUST return to the default "PLAN FIRST" workflow unless the user explicitly requests fast mode again.
+    -   **NOTE**: If the previous step was executed in "fast mode" (without plan), the NEXT step MUST return to the default "PLANNING PHASE" workflow unless the user explicitly requests fast mode again.
+
+3.  **COMPLETION AND SUMMARY**:
+    -   When you have completed the requested changes or answered the user's question, provide a final text summary.
 
 Strategy:
-- Use 'read_file' to inspect the code to inform your plan.
-- Use 'edit_file' to update 'implementation_plan.md' first. Ask for confirmation.
+- Use 'read_file' to inspect the code to inform your plan (check feasibility).
 - Use 'edit_file' to apply changes to code files ONLY after confirmation.
 - Use 'generate_variant' if asked for multiple options.
 - Use 'read_subject' to check the current session topic if you are unsure or if it might be outdated.
@@ -625,9 +598,6 @@ Rules:
             prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\n"${imageGenerationPref}"`;
         }
 
-        // if (hasPlan) {
-        //     prompt += `\n\nCONTEXT: A 'implementation_plan.md' file exists from the previous turn. Read it and follow it if you are moving to implementation.`;
-        // }
 
         return prompt;
     }
@@ -691,9 +661,9 @@ Rules:
         }
         if (error && typeof error === 'object' && 'message' in error) {
             return String(
-                (error as { message: unknown }).message || 'неизвестная ошибка',
+                (error as { message: unknown }).message || 'unknown error',
             );
         }
-        return 'неизвестная ошибка';
+        return 'unknown error';
     }
 }
