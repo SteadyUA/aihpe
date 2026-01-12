@@ -4,6 +4,7 @@ import { UiCheckbox } from '../UiCheckbox';
 import { UiDropdown } from '../UiDropdown';
 import { UiButton } from '../UiButton';
 import { Toolbar } from './Toolbar';
+import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
 
 interface Device {
@@ -279,7 +280,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         if (!sessionId) return;
 
         try {
-            const response = await fetch(
+            const response = await apiAuth.fetch(
                 `/api/sessions/${encodeURIComponent(sessionId)}/${version}/archive`,
             );
             if (!response.ok) throw new Error('Failed to download');

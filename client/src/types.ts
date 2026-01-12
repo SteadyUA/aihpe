@@ -22,10 +22,13 @@ export type ChatAttachment = ImageAttachment;
 
 export interface Project {
     id: string;
+    name: string;
     rulesAndGoal: string;
     imageGenerationPref?: string;
     defaultProvider?: LlmProvider;
     sessionIds: string[];
+    activeSessionCount?: number;
+    activeSessionId?: string;
     createdAt: string;
     updatedAt: string;
 }

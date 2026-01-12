@@ -104,7 +104,8 @@
     width: 28px;
     height: 28px;
     border-radius: 4px;
-    border: 1px dashed var(--border-color);
+    border: none;
+    transition: all 0.2s;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
@@ -1005,6 +1006,7 @@
     border-color: var(--group-color);
     border-top-color: transparent;
 }
+
 .sessionTitle {
     overflow: hidden;
     text-overflow: ellipsis;

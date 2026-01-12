@@ -8,10 +8,12 @@ import { LLM_PROVIDERS } from '../constants';
 
 interface ProjectCreationModalProps {
     isOpen: boolean;
-    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => Promise<void>;
+    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => Promise<void>;
+    onClose?: () => void;
 }
 
-export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOpen, onCreate }) => {
+export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOpen, onCreate, onClose }) => {
+    const [name, setName] = useState('');
     const [rulesAndGoal, setRulesAndGoal] = useState('');
     const [imageGenerationPref, setImageGenerationPref] = useState('');
     const [defaultProvider, setDefaultProvider] = useState<LlmProvider>('openai');
@@ -20,7 +22,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
     const handleCreate = async () => {
         setIsCreating(true);
         try {
-            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider);
+            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider, name);
         } finally {
             setIsCreating(false);
         }
@@ -30,7 +32,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
         <UiModal
             isOpen={isOpen}
             title="Create Project"
-            onClose={() => { }} // Not closeable
+            onClose={() => onClose?.()}
             actions={
                 <UiButton
                     onClick={handleCreate}
@@ -43,12 +45,21 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
             className={styles.modal}
         >
             <div className={styles.field}>
+                <label className={styles.label}>Project Name</label>
+                <input
+                    className={styles.input}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Enter project name"
+                    autoFocus
+                />
+            </div>
+            <div className={styles.field}>
                 <label className={styles.label}>Rules and Goal</label>
                 <RichInput
                     value={rulesAndGoal}
                     onChange={setRulesAndGoal}
                     placeholder="Describe your project goal and any specific rules..."
-                    autoFocus
                     rows={2}
                 />
             </div>

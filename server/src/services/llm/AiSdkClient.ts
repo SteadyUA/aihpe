@@ -324,8 +324,9 @@ export class AiSdkClient implements LlmClient {
             // We'll collect new messages here to return them
             // We start after initialMessages
             const collectedNewMessages: ModelMessage[] = [];
+            let stop = false;
 
-            while (steps < maxSteps) {
+            while (steps < maxSteps && !stop) {
                 steps++;
 
                 if (request.onProgress) {
@@ -371,6 +372,15 @@ export class AiSdkClient implements LlmClient {
                         case 'error':
                             console.error('Stream error:', part.error);
                             streamError = part.error;
+                            break;
+                        case 'finish':
+                            if (part.finishReason === 'stop') {
+                                console.log('\n[System] Agent finished (final answer received).');
+                                stop = true;
+                            }
+                            // else if (part.finishReason === 'tool-calls') {
+                            //     console.log('\n[System] Step completed, agent calls tools...');
+                            // }
                             break;
                     }
                 }
@@ -548,7 +558,6 @@ export class AiSdkClient implements LlmClient {
 
         let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
-
 The user acts as a Business Analyst who wants to define a set of features to be implemented.
 They want to discuss WHAT features will be implemented and WHY (the goal).
 
@@ -557,9 +566,11 @@ Your goal is to fulfill the user's request by following this strict workflow:
 1.  **PLANNING PHASE**:
     -   All user messages are initially treated as discussion and clarification of the plan.
     -   Discuss the features and requirements with the user in the chat.
+    -   If the user's request is ambiguous, lacks detail, or you need more context to create a plan, ASK CLARIFYING QUESTIONS. Do not guess.
     -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN IN THE CHAT.
     -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
-    -   **EXCEPTION**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
+    -   **EXCEPTION 1**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
+    -   **EXCEPTION 2**: If you asked CLARIFYING QUESTIONS and the user provided clean answers that make the path forward clear, you may PROCEED directly to implementation without summarizing the plan again.
 
     -   **PLAN SUMMARY**:
         -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
@@ -575,6 +586,7 @@ Your goal is to fulfill the user's request by following this strict workflow:
 
 3.  **COMPLETION AND SUMMARY**:
     -   When you have completed the requested changes or answered the user's question, provide a final text summary.
+    -   **IMPORTANT**: Do NOT mention the planning mode (e.g. "fast mode", "no plan", "continuing without plan") in your final summary. Just describe the changes made.
 
 Strategy:
 - Use 'read_file' to inspect the code to inform your plan (check feasibility).
@@ -584,10 +596,15 @@ Strategy:
 - Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
 
 Rules:
+- **SESSION TITLE**:
+    -   **MANDATORY**: Always check the session subject. If it is "..." or generic, **YOU MUST** use 'update_subject' to set a concise title (3-5 words) reflecting the user's request. Do this early.
 - Preserve valid HTML/CSS/JS syntax.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - 'generate_variant' creates a NEW separate session.
-- Partially autonomous image generation with 'generate_image' is encouraged.
+- **IMAGES**:
+    -   **ALWAYS** use the 'generate_image' tool to create ANY visual assets (photos, icons, illustrations) that the user did not provide.
+    -   **NEVER** use external placeholder URLs (like 'via.placeholder.com', 'unsplash.com', etc.) or broken links. The user wants REAL generated images.
+    -   If a user asks for "an image of a cat", GENERATE IT using 'generate_image'. Do NOT ask if they want to generate it, just do it.
 `;
 
         if (rulesAndGoal) {

@@ -20,6 +20,8 @@ export type LlmProvider = 'openai' | 'google';
 
 export interface Project {
     id: string;
+    accountId?: number;
+    name: string;
     rulesAndGoal: string;
     imageGenerationPref?: string;
     defaultProvider?: LlmProvider;
@@ -27,6 +29,7 @@ export interface Project {
     createdAt: Date;
     updatedAt: Date;
     lastAssignedSessionGroup?: number;
+    activeSessionId?: string;
 }
 
 export interface SessionData {

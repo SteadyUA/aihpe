@@ -1,6 +1,9 @@
 import React from 'react';
 import { SessionBar } from './components/SessionBar';
-
+import { AppHeader } from './components/AppHeader';
+import Projects from './components/Projects';
+import { LoginForm } from './components/LoginForm';
+import { apiAuth } from './utils/api';
 
 import { WorkSession } from './components/WorkSession';
 
@@ -16,6 +19,7 @@ import { ChatAttachment, TabType, Session, Project, LlmProvider } from './types'
 interface AppProps extends RouterProps { }
 
 interface AppState {
+    token: string | null;
     sessions: Record<string, Session>;
     sessionOrder: string[]; // To maintain list order
     activeSessionId: string | null;
@@ -23,6 +27,7 @@ interface AppState {
     sessionToDelete: string | null;
     // Project State
     projectId: string | null;
+    projectName: string;
     projectRulesAndGoal: string;
     projectImageGenerationPref?: string;
     projectDefaultProvider?: LlmProvider;
@@ -38,12 +43,14 @@ class App extends React.Component<AppProps, AppState> {
     constructor(props: AppProps) {
         super(props);
         this.state = {
+            token: localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken'),
             sessions: {},
             sessionOrder: [],
             activeSessionId: null,
             isConnected: false,
             sessionToDelete: null,
             projectId: null,
+            projectName: '',
             projectRulesAndGoal: '',
             projectImageGenerationPref: '',
             projectDefaultProvider: 'openai',
@@ -56,29 +63,68 @@ class App extends React.Component<AppProps, AppState> {
     }
 
     componentDidMount() {
-        // Load Project ID
-        const projectId = SessionStore.loadProjectId();
+        if (this.state.token) {
+            this.initApp();
+        }
+    }
 
-        if (projectId) {
-            this.setState({ projectId }, () => {
-                this.fetchProject(projectId);
+    initApp() {
+        const { router } = this.props;
+        const params = router.params as Record<string, string | undefined>;
+        const sessionId = params['sessionId'];
+
+        if (sessionId) {
+            // Deep link or other route
+            // Fetch session to determine project
+            this.fetchSession(sessionId).then((sessionData) => {
+                if (sessionData && sessionData.projectId) {
+                    this.setState({ projectId: sessionData.projectId }, () => {
+                        this.fetchProject(sessionData.projectId);
+                    });
+                } else {
+                    // Failed to load session or no project id. Redirect to projects.
+                    router.navigate('/projects');
+                }
             });
         } else {
-            this.setState({ showProjectCreation: true });
+            // Root route or direct /projects route
+            const legacyProjectId = SessionStore.loadProjectId();
+
+            if (legacyProjectId && this.state.token) {
+                // Restore migration logic: fetch project (assigns user on server) then clear legacy ID
+                this.fetchProject(legacyProjectId).finally(() => {
+                    SessionStore.clearProjectId();
+                });
+            } else if (router.location.pathname === '/' || router.location.pathname === '') {
+                router.navigate('/projects');
+            }
         }
 
         // Setup persistent SSE connection
         this.setupSse();
     }
 
+    handleLogin = (token: string, refreshToken: string, remember: boolean) => {
+        if (remember) {
+            localStorage.setItem('accessToken', token);
+            localStorage.setItem('refreshToken', refreshToken);
+        } else {
+            sessionStorage.setItem('accessToken', token);
+            sessionStorage.setItem('refreshToken', refreshToken);
+        }
+        this.setState({ token }, () => {
+            this.initApp();
+        });
+    };
+
     fetchProject = async (projectId: string) => {
         try {
             // Fetch project details
-            const res = await fetch(`/api/projects/${projectId}`);
+            const res = await apiAuth.fetch(`/api/projects/${projectId}`);
             if (!res.ok) throw new Error('Failed to fetch project');
 
             // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
-            const data: { id: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number; subject?: string }[] } = await res.json();
+            const data: { id: string; name: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number; subject?: string }[]; activeSessionId?: string } = await res.json();
 
             const { router } = this.props;
             const params = router.params as Record<string, string | undefined>;
@@ -130,6 +176,7 @@ class App extends React.Component<AppProps, AppState> {
                     sessions: sessionsMap,
                     sessionOrder,
                     projectId,
+                    projectName: data.name || 'Untitled',
                     projectRulesAndGoal: data.rulesAndGoal || '',
                     projectImageGenerationPref: data.imageGenerationPref,
                     projectDefaultProvider: data.defaultProvider
@@ -141,8 +188,15 @@ class App extends React.Component<AppProps, AppState> {
                 if (this.state.sessionOrder.length === 0) {
                     this.createSession();
                 } else if (!activeSessionId && this.state.sessionOrder.length > 0) {
-                    // If routing didn't pick one (e.g. root URL), pick first
-                    this.switchSession(this.state.sessionOrder[0]);
+                    const isProjectsPage = this.props.router.location.pathname === '/projects';
+                    if (!isProjectsPage) {
+                        if (data.activeSessionId && this.state.sessions[data.activeSessionId]) {
+                            this.switchSession(data.activeSessionId);
+                        } else {
+                            // If routing didn't pick one (e.g. root URL), pick first
+                            this.switchSession(this.state.sessionOrder[0]);
+                        }
+                    }
                 }
             });
 
@@ -219,6 +273,9 @@ class App extends React.Component<AppProps, AppState> {
                 }
 
                 this.setState({ activeSessionId: newSessionId });
+            } else if (!newSessionId && activeSessionId && this.props.router.location.pathname === '/projects') {
+                // If we navigated to projects, clear active session
+                this.setState({ activeSessionId: null });
             }
 
             // Turn/Tab change via URL for current session
@@ -250,6 +307,7 @@ class App extends React.Component<AppProps, AppState> {
                     if (params['sessionId'] !== activeSessionId) {
                         this.updateUrl(activeSessionId, session.activeTurn, session.activeTab);
                     }
+                    this.saveActiveSession(activeSessionId);
                 }
             }
         }
@@ -267,21 +325,27 @@ class App extends React.Component<AppProps, AppState> {
         // Persistence removed (SessionStore.saveSessions/saveGroups deleted)
     }
 
-    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => {
         try {
-            const res = await fetch('/api/projects', {
+            const response = await apiAuth.fetch('/api/projects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider })
+                body: JSON.stringify({
+                    name,
+                    rulesAndGoal: rulesAndGoal, // Corrected from instruction's 'rules'
+                    imageGenerationPref: imageGenerationPref, // Corrected from instruction's 'imagePref'
+                    defaultProvider: defaultProvider
+                }),
             });
-            if (!res.ok) throw new Error('Failed to create project');
+            if (!response.ok) throw new Error('Failed to create project');
 
-            const project: Project = await res.json();
-            SessionStore.saveProjectId(project.id);
+            const project: Project = await response.json();
+            // SessionStore.saveProjectId(project.id); // Removed
 
             this.setState({
                 projectId: project.id,
                 showProjectCreation: false,
+                projectName: project.name,
                 projectRulesAndGoal: project.rulesAndGoal,
                 projectImageGenerationPref: project.imageGenerationPref,
                 projectDefaultProvider: project.defaultProvider
@@ -294,26 +358,42 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    handleUpdateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => {
+    handleUpdateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => {
         const { projectId } = this.state;
         if (!projectId) return;
 
         try {
-            const res = await fetch(`/api/projects/${projectId}`, {
+            const response = await apiAuth.fetch(`/api/projects/${projectId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider })
+                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider, name })
             });
-            if (!res.ok) throw new Error('Failed to update project');
+            if (!response.ok) throw new Error('Failed to update project');
 
             // Update local state
             this.setState({
+                projectName: name,
                 projectRulesAndGoal: rulesAndGoal,
                 projectImageGenerationPref: imageGenerationPref,
                 projectDefaultProvider: defaultProvider
             });
         } catch (e) {
             console.error('Failed to update project', e);
+        }
+    };
+
+    saveActiveSession = async (sessionId: string) => {
+        const { projectId } = this.state;
+        if (!projectId) return;
+
+        try {
+            await apiAuth.fetch(`/api/projects/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ activeSessionId: sessionId })
+            });
+        } catch (e) {
+            console.error('Failed to save active session', e);
         }
     };
 
@@ -595,7 +675,7 @@ class App extends React.Component<AppProps, AppState> {
 
     fetchSession = async (id: string, isCompletion: boolean = false) => {
         try {
-            const res = await fetch(`/api/sessions/${id}`);
+            const res = await apiAuth.fetch(`/api/sessions/${id}`);
             const data = await res.json();
 
             // Fetch history is now included in the main session endpoint
@@ -606,7 +686,25 @@ class App extends React.Component<AppProps, AppState> {
 
             this.setState(prevState => {
                 const session = prevState.sessions[id];
-                if (!session) return null; // Should probably create it if missing? For now stick to strict.
+                // Handle missing session (e.g. deep link reload)
+                const baseSession: Session = session || {
+                    id,
+                    projectId: data.projectId,
+                    status: 'idle',
+                    messages: [],
+                    statusMessages: [],
+                    requestStartTime: null,
+                    currentTurn: 0,
+                    activeTurn: null,
+                    activeTab: 'preview',
+                    selection: null,
+                    isPicking: false,
+                    group: data.group ?? 0,
+                    pendingRefreshTurn: null,
+                    unsent: {},
+                    subject: data.subject || '...',
+                };
+
 
                 // Only update if turn changed (to update lastUpdate? No, lastUpdate is mainly event driven)
                 // But if we fetched new turn, we should probably ensure UI reflects it.
@@ -615,10 +713,11 @@ class App extends React.Component<AppProps, AppState> {
                     sessions: {
                         ...prevState.sessions,
                         [id]: {
-                            ...session,
+                            ...baseSession,
                             messages: history,
                             currentVersion: data.currentVersion,
                             currentTurn: lastTurn,
+                            projectId: data.projectId ?? baseSession.projectId, // Ensure projectId is up to date
 
                             // Use server provided status directly, mapped to client types
                             // Server: 'started' | 'generating' | 'completed' | 'error' | 'skipped' | 'idle'
@@ -634,18 +733,18 @@ class App extends React.Component<AppProps, AppState> {
                             // If status is busy, and we have no message, we just show Busy.
                             // It's acceptable.
                             statusMessages: (data.status === 'started' || data.status === 'generating')
-                                ? (session.statusMessages || [])
+                                ? (session ? (session.statusMessages || []) : [])
                                 : (data.status === 'error' && data.errorMessage)
                                     ? [data.errorMessage]
                                     : [],
 
                             // Set pendingRefreshTurn only if completion triggered this fetch
-                            pendingRefreshTurn: isCompletion ? lastTurn : session.pendingRefreshTurn,
-                            unsent: data.unsent || session.unsent || {},
+                            pendingRefreshTurn: isCompletion ? lastTurn : (session ? session.pendingRefreshTurn : null),
+                            unsent: data.unsent || (session ? session.unsent : {}) || {},
 
                             // Restore unsent state if present and currently empty/default
-                            selection: (data.unsent?.selection) ?? session.selection,
-                            attachment: (data.unsent?.attachment) ?? session.attachment,
+                            selection: (data.unsent?.selection) ?? (session ? session.selection : null),
+                            attachment: (data.unsent?.attachment) ?? (session ? session.attachment : undefined),
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                             fastMode: (data.unsent?.fastMode) ?? data.fastMode ?? false,
@@ -654,8 +753,10 @@ class App extends React.Component<AppProps, AppState> {
                     }
                 };
             });
+            return data;
         } catch (error) {
             console.error('Failed to fetch session', error);
+            return null;
         }
     };
 
@@ -680,7 +781,7 @@ class App extends React.Component<AppProps, AppState> {
             // We can't really add a session to the map without an ID yet.
             // So we wait for the ID from server.
 
-            App.creatingSessionPromise = fetch('/api/sessions', {
+            App.creatingSessionPromise = apiAuth.fetch('/api/sessions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ projectId: this.state.projectId })
@@ -757,7 +858,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) return;
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${activeSessionId}/clone/${turn}`,
                 { method: 'POST' },
             );
@@ -841,7 +942,7 @@ class App extends React.Component<AppProps, AppState> {
         });
 
         try {
-            await fetch(`/api/sessions/${targetId}/unsent`, {
+            await apiAuth.fetch(`/api/sessions/${targetId}/unsent`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -856,7 +957,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) return;
 
         try {
-            const res = await fetch(`/api/sessions/${activeSessionId}/undo`, { method: 'POST' });
+            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/undo`, { method: 'POST' });
             if (!res.ok) throw new Error('Undo failed');
             const data = await res.json();
 
@@ -909,7 +1010,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!id) return;
 
         // 1. Delete from server
-        fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+        apiAuth.fetch(`/api/sessions/${id}`, { method: 'DELETE' })
             .catch(err => console.error('Failed to delete session on server', err));
 
         // 2. Remove from UI
@@ -979,7 +1080,7 @@ class App extends React.Component<AppProps, AppState> {
         });
 
         try {
-            const res = await fetch(`/api/sessions/${activeSessionId}/chat`, {
+            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1025,7 +1126,7 @@ class App extends React.Component<AppProps, AppState> {
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await fetch(`/api/sessions/${activeSessionId}/uploads`, {
+        const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/uploads`, {
             method: 'POST',
             body: formData
         });
@@ -1049,7 +1150,7 @@ class App extends React.Component<AppProps, AppState> {
         if (!activeSessionId) return;
 
         try {
-            await fetch(`/api/sessions/${activeSessionId}/uploads/${attachment.filename}`, {
+            await apiAuth.fetch(`/api/sessions/${activeSessionId}/uploads/${attachment.filename}`, {
                 method: 'DELETE'
             });
 
@@ -1125,8 +1226,49 @@ class App extends React.Component<AppProps, AppState> {
 
 
 
+    handleProjects = () => {
+        this.props.router.navigate('/projects');
+    }
+
+    handleLogout = () => {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        sessionStorage.removeItem('accessToken');
+        sessionStorage.removeItem('refreshToken');
+        this.setState({ token: null, projectId: null });
+        // Optional: Close SSE
+        if (this.evtSource) {
+            this.evtSource.close();
+            this.evtSource = null;
+        }
+    };
+
+    switchProject = (projectId: string, targetSessionId?: string) => {
+        if (projectId === this.state.projectId && !targetSessionId) {
+            this.props.router.navigate('/');
+            return;
+        }
+
+        // SessionStore.saveProjectId(projectId); // Removed
+        // Clean session state for new project
+        this.setState({
+            projectId,
+            sessions: {},
+            sessionOrder: [],
+            activeSessionId: null
+        }, () => {
+            this.fetchProject(projectId);
+            if (targetSessionId) {
+                this.props.router.navigate(`/session/${targetSessionId}`);
+            } else {
+                this.props.router.navigate('/');
+            }
+        });
+    };
+
     render() {
         const {
+            token,
             showProjectCreation,
             showProjectSettings,
             projectId,
@@ -1140,6 +1282,14 @@ class App extends React.Component<AppProps, AppState> {
             sessions
         } = this.state;
 
+
+        if (!token) {
+            return <LoginForm onLogin={this.handleLogin} />;
+        }
+
+
+
+        const isProjectsPage = this.props.router.location.pathname === '/projects';
 
         // Derive props for SessionBar
         const statusMap: Record<string, string> = {};
@@ -1160,7 +1310,7 @@ class App extends React.Component<AppProps, AppState> {
             <div
                 className={styles.app}
                 style={{
-                    gridTemplateColumns: `${this.state.chatWidth}px auto 1fr`,
+                    gridTemplateColumns: isProjectsPage ? '1fr' : `${this.state.chatWidth}px auto 1fr`,
                     cursor: this.state.isResizing ? 'col-resize' : 'default',
                     userSelect: this.state.isResizing ? 'none' : 'auto'
                 } as React.CSSProperties}
@@ -1175,6 +1325,7 @@ class App extends React.Component<AppProps, AppState> {
                     <ProjectSettingsModal
                         isOpen={showProjectSettings}
                         projectId={projectId}
+                        currentName={this.state.projectName}
                         currentRulesAndGoal={projectRulesAndGoal}
                         currentImageGenerationPref={projectImageGenerationPref}
                         currentDefaultProvider={projectDefaultProvider}
@@ -1189,23 +1340,42 @@ class App extends React.Component<AppProps, AppState> {
                     onConfirm={this.confirmDeleteSession}
                     onCancel={this.cancelDeleteSession}
                 />
-                <div className={styles.sessionBarWrapper}>
-                    <SessionBar
-                        sessions={sessionOrder}
-                        activeSessionId={activeSessionId}
-                        onSwitch={this.switchSession}
-                        onCreate={this.createSession}
-                        onRemove={this.removeSession}
-                        statusMap={statusMap}
-                        groups={groups}
-                        subjects={this.extractSubjects(this.state.sessions)}
-                        pendingSessions={pendingSessions}
+
+                {/* Global Header */}
+                <div className={styles.sessionBarWrapper} style={isProjectsPage ? { width: '100%' } : {}}>
+                    <AppHeader
                         isConnected={isConnected}
-                        onProjectSettings={this.toggleProjectSettings}
-                    />
+                        onSettings={this.toggleProjectSettings}
+                        onSignOut={this.handleLogout}
+                        onProjects={this.handleProjects}
+                    >
+                        {isProjectsPage ? (
+                            <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
+                        ) : (
+                            <SessionBar
+                                sessions={sessionOrder}
+                                activeSessionId={activeSessionId}
+                                onSwitch={this.switchSession}
+                                onCreate={this.createSession}
+                                onRemove={this.removeSession}
+                                statusMap={statusMap}
+                                groups={groups}
+                                subjects={this.extractSubjects(this.state.sessions)}
+                                pendingSessions={pendingSessions}
+                                onProjectSettings={this.toggleProjectSettings}
+                                projectName={this.state.projectName}
+                            />
+                        )}
+                    </AppHeader>
                 </div>
 
-                {
+                {/* Main Content */}
+                {isProjectsPage ? (
+                    <Projects
+                        currentProjectId={projectId}
+                        onSelectProject={this.switchProject}
+                    />
+                ) : (
                     sessionOrder.map(sessionId => {
                         const session = sessions[sessionId];
                         if (!session) return null;
@@ -1236,7 +1406,7 @@ class App extends React.Component<AppProps, AppState> {
                             />
                         );
                     })
-                }
+                )}
             </div>
         );
     }

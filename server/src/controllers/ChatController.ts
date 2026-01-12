@@ -10,6 +10,7 @@ import {
     Res,
     UseBefore, // eslint-disable-line @typescript-eslint/no-unused-vars
 } from 'routing-controllers';
+import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Request, Response } from 'express';
 import multer from 'multer';
 import archiver from 'archiver';
@@ -127,6 +128,10 @@ class CreateProjectRequest {
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
+
+    @IsOptional()
+    @IsString()
+    name?: string;
 }
 
 class UpdateProjectRequest {
@@ -141,6 +146,14 @@ class UpdateProjectRequest {
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
+
+    @IsOptional()
+    @IsString()
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    activeSessionId?: string;
 }
 
 @Service()
@@ -169,13 +182,25 @@ export class ChatController {
     }
 
     @Post('/api/projects')
-    createProject(@Body() body: CreateProjectRequest) {
-        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider);
+    @UseBefore(AuthMiddleware)
+    createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId);
+    }
+
+    @Get('/api/projects')
+    @UseBefore(AuthMiddleware)
+    getUserProjects(@Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        if (!accountId) return [];
+        return this.projectService.getUserProjects(accountId);
     }
 
     @Get('/api/projects/:projectId')
-    getProject(@Param('projectId') projectId: string, @Res() response: Response) {
-        const project = this.projectService.getProject(projectId);
+    @UseBefore(AuthMiddleware)
+    getProject(@Param('projectId') projectId: string, @Res() response: Response, @Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        const project = this.projectService.getProject(projectId, accountId);
         if (!project) {
             return response.status(404).json({ message: 'Project not found' });
         }
@@ -194,22 +219,29 @@ export class ChatController {
         }, [] as { sessionId: string, group: number, status: string, subject?: string }[]);
 
         return {
+            id: project.id,
+            name: project.name,
             rulesAndGoal: project.rulesAndGoal,
             imageGenerationPref: project.imageGenerationPref,
             defaultProvider: project.defaultProvider,
+            activeSessionId: project.activeSessionId,
             sessions,
         };
     }
 
     @Patch('/api/projects/:projectId')
+    @UseBefore(AuthMiddleware)
     updateProject(
         @Param('projectId') projectId: string,
         @Body() body: UpdateProjectRequest,
+        @Req() request: Request
     ) {
         const updateData: any = {};
         if (body.rulesAndGoal !== undefined) updateData.rulesAndGoal = body.rulesAndGoal;
         if (body.imageGenerationPref !== undefined) updateData.imageGenerationPref = body.imageGenerationPref;
         if (body.defaultProvider !== undefined) updateData.defaultProvider = body.defaultProvider;
+        if (body.name !== undefined) updateData.name = body.name;
+        if (body.activeSessionId !== undefined) updateData.activeSessionId = body.activeSessionId;
 
         // Since projectService.updateProject expects specific args or a partial object?
         // Let's check how it's called. 
@@ -220,10 +252,43 @@ export class ChatController {
         // I need to be careful about what updateProject expects. 
         // Let's assume for now I pass the body with rulesAndGoal.
 
-        return this.projectService.updateProject(projectId, updateData);
+        const accountId = (request as any).user?.accountId;
+        return this.projectService.updateProject(projectId, updateData, accountId);
+    }
+
+    @Delete('/api/projects/:projectId')
+    @UseBefore(AuthMiddleware)
+    deleteProject(
+        @Param('projectId') projectId: string,
+        @Req() request: Request,
+        @Res() response: Response
+    ) {
+        const accountId = (request as any).user?.accountId;
+        // Check ownership
+        const project = this.projectService.getProject(projectId, accountId);
+        if (!project) {
+            return response.status(404).json({ message: 'Project not found' });
+        }
+
+        // Delete all sessions associated with the project
+        const sessionIds = this.projectService.getProjectSessions(projectId);
+        for (const sessionId of sessionIds) {
+            try {
+                this.sessionStore.deleteSession(sessionId);
+            } catch (e) {
+                console.error(`Failed to delete session ${sessionId} during project deletion`, e);
+                // Continue deleting other sessions and the project
+            }
+        }
+
+        // Delete the project itself
+        this.projectService.deleteProject(projectId);
+
+        return response.status(200).json({ message: 'Project deleted' });
     }
 
     @Post('/api/sessions')
+    @UseBefore(AuthMiddleware)
     createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
         const { projectId } = body;
         const { id, group } = this.sessionStore.prepareCreate(); // prepareCreate doesn't need projectId
@@ -281,6 +346,7 @@ export class ChatController {
 
 
     @Post('/api/sessions/:sessionId/unsent')
+    @UseBefore(AuthMiddleware)
     saveUnsent(
         @Param('sessionId') sessionId: string,
         @Body() body: UnsentDataRequest,
@@ -318,6 +384,7 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/chat')
+    @UseBefore(AuthMiddleware)
     async sendMessage(
         @Param('sessionId') sessionId: string,
         @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider, fastMode?: boolean },
@@ -349,6 +416,7 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/uploads')
+    @UseBefore(AuthMiddleware)
     async uploadImage(
         @Param('sessionId') sessionId: string,
         @Req() req: Request,
@@ -430,6 +498,7 @@ export class ChatController {
     }
 
     @Delete('/api/sessions/:sessionId/uploads/:filename')
+    @UseBefore(AuthMiddleware)
     deleteUploadedFile(
         @Param('sessionId') sessionId: string,
         @Param('filename') filename: string,
@@ -510,6 +579,7 @@ export class ChatController {
     }
 
     @Get('/api/sessions/:sessionId')
+    @UseBefore(AuthMiddleware)
     getSession(@Param('sessionId') sessionId: string) {
         const snapshot =
             this.sessionStore.snapshot(sessionId) ??
@@ -529,6 +599,7 @@ export class ChatController {
             unsent: snapshot.unsent,
             status: snapshot.status,
             errorMessage: snapshot.errorMessage,
+            projectId: snapshot.projectId,
             subject: snapshot.subject,
         };
     }
@@ -536,33 +607,19 @@ export class ChatController {
 
 
     @Delete('/api/sessions/:sessionId')
+    @UseBefore(AuthMiddleware)
     deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
-            // Attempt to get session to find its project
-            // Use snapshot or getOrCreate. Since we are deleting, we just need metadata.
-            // If it doesn't exist on disk, getOrCreate might create a fresh one, which is fine as it returns default props,
-            // but we want to avoid creating files if we are about to delete.
-            // But SessionStore.getOrCreate DOES create files.
-            // We should use a method that returns undefined if not found, OR check if it exists.
-            // But for now, getOrCreate is standard. If it creates a temp one, we delete it anyway.
-            // Better: use sessionStore.snapshot(sessionId) ?? loadFromDisk logic?
-            // Actually, if we just want to clean up, retrieving it first is safer to ensure consistency.
-
-            // Wait, if it didn't exist, getOrCreate creates it with empty projectId.
-            // Effectively we wouldn't remove it from any project.
-            // But we have the projectId in the Project Entity!
-            // BUT ChatController doesn't know the projectId from the request params.
-            // So relying on the session file is necessary.
-            // If the session file is corrupted/missing, we might fail to clean up the project reference?
-            // This suggests a data integrity issue if file is missing but project has reference.
-            // For now, let's proceed with getOrCreate to read the projectId.
-
+            // Retrieve session to identify the project it belongs to.
             const session = this.sessionStore.getOrCreate(sessionId);
+
             if (session.projectId) {
                 this.projectService.removeSessionFromProject(session.projectId, sessionId);
             }
 
+            // Remove session files
             this.sessionStore.deleteSession(sessionId);
+
             return response.status(200).json({ message: 'Session deleted' });
         } catch (error) {
             console.error('Failed to delete session', error);
@@ -574,6 +631,7 @@ export class ChatController {
 
 
     @Get('/api/sessions/:sessionId/:version/archive')
+    @UseBefore(AuthMiddleware)
     async downloadArchive(
         @Param('sessionId') sessionId: string,
         @Param('version') versionParam: string,
@@ -736,6 +794,7 @@ export class ChatController {
 
 
     @Get('/api/sessions/:sessionId/artifacts/:turn/:filename')
+    @UseBefore(AuthMiddleware)
     getArtifact(
         @Param('sessionId') sessionId: string,
         @Param('turn') turnParam: string,
@@ -769,6 +828,7 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/undo')
+    @UseBefore(AuthMiddleware)
     undoLastTurn(
         @Param('sessionId') sessionId: string,
         @Res() response: Response,
@@ -785,6 +845,7 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/clone/:turn')
+    @UseBefore(AuthMiddleware)
     cloneTurn(
         @Param('sessionId') sessionId: string,
         @Param('turn') turnParam: string,

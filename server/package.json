@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "create-account": "ts-node src/scripts/create-account.ts",
+    "change-password": "ts-node src/scripts/change-password.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +16,7 @@
   "dependencies": {
     "@ai-sdk/google": "^2.0.47",
     "@ai-sdk/openai": "^2.0.87",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "ai": "^5.0.113",
     "archiver": "^7.0.1",
@@ -22,6 +25,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "marked": "^17.0.1",
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",

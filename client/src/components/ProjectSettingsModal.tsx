@@ -10,21 +10,24 @@ interface ProjectSettingsModalProps {
     isOpen: boolean;
     projectId: string; // Kept for reference if needed, though not used directly in logic below
     currentRulesAndGoal: string;
+    currentName?: string;
     currentImageGenerationPref?: string;
     currentDefaultProvider?: LlmProvider;
-    onUpdate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider) => Promise<void>;
+    onUpdate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => Promise<void>;
     onClose: () => void;
 }
 
 export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     isOpen,
     currentRulesAndGoal,
+    currentName,
     currentImageGenerationPref,
     currentDefaultProvider,
     onUpdate,
     onClose
 }) => {
     const [rulesAndGoal, setRulesAndGoal] = useState(currentRulesAndGoal || '');
+    const [name, setName] = useState(currentName || '');
     const [imageGenerationPref, setImageGenerationPref] = useState(currentImageGenerationPref || '');
     const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(currentDefaultProvider || 'openai');
     const [isSaving, setIsSaving] = useState(false);
@@ -33,15 +36,16 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     useEffect(() => {
         if (isOpen) {
             setRulesAndGoal(currentRulesAndGoal || '');
+            setName(currentName || '');
             setImageGenerationPref(currentImageGenerationPref || '');
             setDefaultProvider(currentDefaultProvider || 'openai');
         }
-    }, [isOpen, currentRulesAndGoal, currentImageGenerationPref, currentDefaultProvider]);
+    }, [isOpen, currentRulesAndGoal, currentName, currentImageGenerationPref, currentDefaultProvider]);
 
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            await onUpdate(rulesAndGoal, imageGenerationPref, defaultProvider);
+            await onUpdate(rulesAndGoal, imageGenerationPref, defaultProvider, name);
             onClose();
         } finally {
             setIsSaving(false);
@@ -69,6 +73,15 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             }
             className={styles.modal}
         >
+            <div className={styles.field}>
+                <label className={styles.label}>Project Name</label>
+                <input
+                    className={styles.input}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Enter project name"
+                />
+            </div>
             <div className={styles.field}>
                 <label className={styles.label}>Rules and Goal</label>
                 <RichInput

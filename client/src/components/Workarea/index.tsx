@@ -12,6 +12,7 @@ import { Preview } from './Preview';
 import { Images } from './Images';
 import { Editor } from './Editor';
 import { Artifact } from './Artifact';
+import { apiAuth } from '../../utils/api';
 
 interface WorkareaProps {
     sessionId: string | null;
@@ -229,7 +230,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             }));
 
             try {
-                const res = await fetch(
+                const res = await apiAuth.fetch(
                     `/api/sessions/${sessionId}/artifacts/${displayedTurn}/${filename}`,
                 );
 
@@ -284,7 +285,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         }));
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${version}/files/${filename}`,
             );
             if (!res.ok) throw new Error('Failed to fetch file');
@@ -361,7 +362,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             const filenameMap: Record<AssetType, string> = FILENAME_MAP;
             const filename = filenameMap[typeToSave as AssetType];
 
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${version}/files/${filename}`,
                 {
                     method: 'POST',

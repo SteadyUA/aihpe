@@ -30,8 +30,13 @@ export class ProjectService {
                         delete (p as any).goal;
                     }
 
+                    if (!(p as any).name) {
+                        (p as any).name = 'Untitled';
+                    }
+
                     this.projects.set(p.id, {
                         ...p,
+                        name: (p as any).name,
                         createdAt: new Date(p.createdAt),
                         updatedAt: new Date(p.updatedAt),
                     });
@@ -50,10 +55,12 @@ export class ProjectService {
         fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     }
 
-    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider): Project {
+    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number): Project {
         const id = randomUUID();
         const project: Project = {
             id,
+            accountId,
+            name: name || 'Untitled',
             rulesAndGoal,
             imageGenerationPref,
             defaultProvider,
@@ -66,12 +73,33 @@ export class ProjectService {
         return project;
     }
 
-    getProject(id: string): Project | undefined {
-        return this.projects.get(id);
+    getProject(id: string, currentUserId?: number): Project | undefined {
+        const project = this.projects.get(id);
+        if (!project) return undefined;
+
+        // Lazy migration: if project has no owner, assign to current user
+        if (project.accountId === undefined && currentUserId !== undefined) {
+            project.accountId = currentUserId;
+            this.saveProjects();
+        }
+
+        // Access control: if project has owner, and it's not current user, deny access
+        // We throw generic 'not found' to avoid leaking existence, or explicit error?
+        // Let's return undefined to look like it doesn't exist for this user.
+        if (project.accountId !== undefined && currentUserId !== undefined && project.accountId !== currentUserId) {
+            return undefined;
+        }
+
+        return project;
     }
 
-    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider'>>): Project {
-        const project = this.projects.get(id);
+    getUserProjects(accountId: number): Project[] {
+        return Array.from(this.projects.values()).filter(p => p.accountId === accountId);
+    }
+
+    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId'>>, currentUserId?: number): Project {
+        // Use getProject to handle access checks
+        const project = this.getProject(id, currentUserId);
         if (!project) {
             throw new Error(`Project ${id} not found`);
         }
@@ -88,9 +116,8 @@ export class ProjectService {
 
     addSessionToProject(projectId: string, sessionId: string): void {
         const project = this.projects.get(projectId);
+
         if (!project) {
-            // If project doesn't exist, we might want to error, or create a default one?
-            // For now, let's error as strict mode.
             throw new Error(`Project ${projectId} not found`);
         }
 
@@ -109,6 +136,8 @@ export class ProjectService {
             this.saveProjects();
         }
     }
+
+
 
     getProjectSessions(projectId: string): string[] {
         const project = this.projects.get(projectId);
@@ -130,5 +159,12 @@ export class ProjectService {
         this.saveProjects();
 
         return nextGroup;
+    }
+
+    deleteProject(id: string): void {
+        if (this.projects.has(id)) {
+            this.projects.delete(id);
+            this.saveProjects();
+        }
     }
 }

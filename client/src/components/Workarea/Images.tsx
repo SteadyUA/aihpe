@@ -6,6 +6,7 @@ import { UiModal } from '../UiModal';
 import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
+import { apiAuth } from '../../utils/api';
 import styles from './Images.module.css';
 
 interface ImageMetadata {
@@ -106,7 +107,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         this.setState({ loading: true });
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${this.props.version}/images`,
             );
             if (!res.ok) throw new Error('Failed to fetch images');
@@ -211,7 +212,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             }
             formData.append('file', file);
             try {
-                await fetch(`/api/sessions/${sessionId}/${version}/images`, {
+                await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/images`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -256,7 +257,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         this.setState({ isSavingDescription: true });
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/description`,
                 {
                     method: 'POST',
@@ -297,7 +298,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         }, 1000);
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/describe`,
                 { method: 'GET' }
             );
@@ -339,7 +340,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         this.setState({ isDeleting: true });
 
         try {
-            const res = await fetch(
+            const res = await apiAuth.fetch(
                 `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}`,
                 {
                     method: 'DELETE',

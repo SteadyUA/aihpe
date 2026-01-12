@@ -17,6 +17,13 @@
         sans-serif;
     --font-mono:
         ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Aliases/New vars */
+    --bg-primary: var(--bg-color);
+    --bg-secondary: var(--panel-bg);
+    --bg-tertiary: #f1f5f9;
+    --text-tertiary: #94a3b8;
+    --text-error: var(--danger);
 }
 
 * {
