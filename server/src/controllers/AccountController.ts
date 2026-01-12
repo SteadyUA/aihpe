@@ -1,6 +1,8 @@
-import { JsonController, Post, Body, HttpError } from 'routing-controllers';
+import { JsonController, Post, Body, HttpError, UseBefore, Req, Res } from 'routing-controllers';
 import { Service } from 'typedi';
 import { AccountService } from '../services/AccountService';
+import { AuthMiddleware } from '../middlewares/AuthMiddleware';
+import { Request, Response } from 'express';
 
 interface LoginRequest {
     login: string;
@@ -9,6 +11,11 @@ interface LoginRequest {
 
 interface RefreshRequest {
     refreshToken: string;
+}
+
+interface ChangePasswordRequest {
+    oldPassword: string;
+    newPassword: string;
 }
 
 @JsonController('/api/account')
@@ -30,5 +37,21 @@ export class AccountController {
             throw new HttpError(400, 'Refresh token is required');
         }
         return this.accountService.refresh(body.refreshToken);
+    }
+
+    @Post('/change-password')
+    @UseBefore(AuthMiddleware)
+    changePassword(@Body() body: ChangePasswordRequest, @Req() request: Request, @Res() response: Response) {
+        const user = (request as any).user;
+        if (!user || !user.login) {
+            throw new HttpError(401, 'Unauthorized');
+        }
+
+        if (!body.oldPassword || !body.newPassword) {
+            throw new HttpError(400, 'Old and new passwords are required');
+        }
+
+        this.accountService.changePassword(user.login, body.oldPassword, body.newPassword);
+        return response.status(200).json({ message: 'Password changed successfully' });
     }
 }

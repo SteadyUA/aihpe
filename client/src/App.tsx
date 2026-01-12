@@ -2,6 +2,7 @@ import React from 'react';
 import { SessionBar } from './components/SessionBar';
 import { AppHeader } from './components/AppHeader';
 import Projects from './components/Projects';
+import Settings from './components/Settings';
 import { LoginForm } from './components/LoginForm';
 import { apiAuth } from './utils/api';
 
@@ -258,21 +259,47 @@ class App extends React.Component<AppProps, AppState> {
             const newTab = router.searchParams.get('tab') as TabType;
 
             // Session change via URL
-            if (newSessionId && newSessionId !== activeSessionId && sessions[newSessionId]) {
-                const turnVal = newTurn ? parseInt(newTurn, 10) : null;
-                const tabVal = newTab || 'preview';
-                const targetSession = sessions[newSessionId];
+            if (newSessionId && newSessionId !== activeSessionId) {
+                if (sessions[newSessionId]) {
+                    // Session exists in state
+                    const turnVal = newTurn ? parseInt(newTurn, 10) : null;
+                    const tabVal = newTab || 'preview';
+                    const targetSession = sessions[newSessionId];
 
-                // Ensure target session matches URL params before switching active ID
-                // ensuring updateUrl later sees correct values and doesn't wipe URL params
-                if (targetSession.activeTurn !== turnVal || targetSession.activeTab !== tabVal) {
-                    this.updateSession(newSessionId, {
-                        activeTurn: turnVal,
-                        activeTab: tabVal
+                    // Ensure target session matches URL params before switching active ID
+                    // ensuring updateUrl later sees correct values and doesn't wipe URL params
+                    if (targetSession.activeTurn !== turnVal || targetSession.activeTab !== tabVal) {
+                        this.updateSession(newSessionId, {
+                            activeTurn: turnVal,
+                            activeTab: tabVal
+                        });
+                    }
+
+                    this.setState({ activeSessionId: newSessionId });
+                } else {
+                    // Session does NOT exist in state (e.g. back button to a session we haven't loaded yet)
+                    // We need to fetch it.
+                    this.fetchSession(newSessionId).then((sessionData) => {
+                        if (sessionData) {
+                            // Check if we need to switch project context (or load it if missing)
+                            if (sessionData.projectId && sessionData.projectId !== this.state.projectId) {
+                                this.setState({ projectId: sessionData.projectId }, () => {
+                                    this.fetchProject(sessionData.projectId).then(() => {
+                                        // After project is loaded, ensure we switch to this session
+                                        // fetchProject might have set a default activeSessionId, so we override it
+                                        this.switchSession(newSessionId);
+                                    });
+                                });
+                            } else {
+                                // Project is same or we just loaded session, switch to it
+                                this.switchSession(newSessionId);
+                            }
+                        } else {
+                            // Failed to load, maybe redirect?
+                            // For now, let's just stay or let user handle it.
+                        }
                     });
                 }
-
-                this.setState({ activeSessionId: newSessionId });
             } else if (!newSessionId && activeSessionId && this.props.router.location.pathname === '/projects') {
                 // If we navigated to projects, clear active session
                 this.setState({ activeSessionId: null });
@@ -1230,6 +1257,10 @@ class App extends React.Component<AppProps, AppState> {
         this.props.router.navigate('/projects');
     }
 
+    handleSettings = () => {
+        this.props.router.navigate('/settings');
+    }
+
     handleLogout = () => {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
@@ -1290,6 +1321,7 @@ class App extends React.Component<AppProps, AppState> {
 
 
         const isProjectsPage = this.props.router.location.pathname === '/projects';
+        const isSettingsPage = this.props.router.location.pathname === '/settings';
 
         // Derive props for SessionBar
         const statusMap: Record<string, string> = {};
@@ -1310,7 +1342,7 @@ class App extends React.Component<AppProps, AppState> {
             <div
                 className={styles.app}
                 style={{
-                    gridTemplateColumns: isProjectsPage ? '1fr' : `${this.state.chatWidth}px auto 1fr`,
+                    gridTemplateColumns: (isProjectsPage || isSettingsPage) ? '1fr' : `${this.state.chatWidth}px auto 1fr`,
                     cursor: this.state.isResizing ? 'col-resize' : 'default',
                     userSelect: this.state.isResizing ? 'none' : 'auto'
                 } as React.CSSProperties}
@@ -1342,15 +1374,17 @@ class App extends React.Component<AppProps, AppState> {
                 />
 
                 {/* Global Header */}
-                <div className={styles.sessionBarWrapper} style={isProjectsPage ? { width: '100%' } : {}}>
+                <div className={styles.sessionBarWrapper} style={(isProjectsPage || isSettingsPage) ? { width: '100%' } : {}}>
                     <AppHeader
                         isConnected={isConnected}
-                        onSettings={this.toggleProjectSettings}
+                        onSettings={this.handleSettings}
                         onSignOut={this.handleLogout}
                         onProjects={this.handleProjects}
                     >
                         {isProjectsPage ? (
                             <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
+                        ) : isSettingsPage ? (
+                            <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>Settings</div>
                         ) : (
                             <SessionBar
                                 sessions={sessionOrder}
@@ -1375,6 +1409,8 @@ class App extends React.Component<AppProps, AppState> {
                         currentProjectId={projectId}
                         onSelectProject={this.switchProject}
                     />
+                ) : isSettingsPage ? (
+                    <Settings />
                 ) : (
                     sessionOrder.map(sessionId => {
                         const session = sessions[sessionId];

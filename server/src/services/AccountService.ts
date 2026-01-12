@@ -90,14 +90,19 @@ export class AccountService {
         return accountId;
     }
 
-    changePassword(login: string, password: string): void {
+    changePassword(login: string, oldPass: string, newPass: string): void {
         const account = Object.values(this.data.accounts).find(acc => acc.login === login);
         if (!account) {
             throw new Error(`Account with login "${login}" not found`);
         }
 
-        const passwordHash = this.hashPassword(password);
-        account.passwordHash = passwordHash;
+        const oldHash = this.hashPassword(oldPass);
+        if (oldHash !== account.passwordHash) {
+            throw new Error('Invalid old password');
+        }
+
+        const newHash = this.hashPassword(newPass);
+        account.passwordHash = newHash;
 
         // Revoke tokens on password change
         delete account.tokens;
