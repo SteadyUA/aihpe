@@ -27,8 +27,8 @@ export interface Project {
     imageGenerationPref?: string;
     defaultProvider?: LlmProvider;
     sessionIds: string[];
-    activeSessionCount?: number;
     activeSessionId?: string;
+    modelRole?: string;
     createdAt: string;
     updatedAt: string;
 }

@@ -15,6 +15,7 @@ export interface GeneratePageRequest {
     fastMode?: boolean;
     subject?: string;
     onPatch?: (patch: { subject?: string }) => void;
+    modelRole?: string;
 }
 
 

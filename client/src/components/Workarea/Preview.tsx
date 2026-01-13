@@ -47,9 +47,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
     constructor(props: PreviewProps) {
         super(props);
+        const storedIsMobile = localStorage.getItem('preview_is_mobile');
+        const storedDeviceIndex = localStorage.getItem('preview_device_index');
+
         this.state = {
-            isMobile: false,
-            deviceIndex: 0,
+            isMobile: storedIsMobile === 'true', // Default false if null
+            deviceIndex: storedDeviceIndex ? parseInt(storedDeviceIndex, 10) : 0,
             scale: 1,
             reloadCount: 0,
         };
@@ -261,11 +264,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     handleDeviceChange = (value: string) => {
-        this.setState({ deviceIndex: Number(value) });
+        const index = Number(value);
+        this.setState({ deviceIndex: index });
+        localStorage.setItem('preview_device_index', String(index));
     };
 
     toggleMobile = (checked: boolean) => {
         this.setState({ isMobile: checked });
+        localStorage.setItem('preview_is_mobile', String(checked));
     };
 
     handleNewWindow = () => {

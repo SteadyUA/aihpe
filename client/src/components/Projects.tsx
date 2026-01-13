@@ -62,7 +62,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         this.props.onSelectProject(projectId, lastSessionId);
     };
 
-    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: string, name: string) => {
+    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: string, name: string, modelRole: string) => {
         try {
             const res = await apiAuth.fetch('/api/projects', {
                 method: 'POST',
@@ -71,7 +71,8 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                     name,
                     rulesAndGoal,
                     imageGenerationPref,
-                    defaultProvider
+                    defaultProvider,
+                    modelRole
                 }),
             });
 
@@ -163,7 +164,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                 <div className={styles.projectName}>{project.name}</div>
                                 <div className={styles.projectRules}>{project.rulesAndGoal}</div>
                                 <div className={styles.projectFooter}>
-                                    <span>{project.activeSessionCount || 0} Sessions</span>
+                                    <span>{project.sessionIds?.length || 0} Sessions</span>
                                     <button
                                         className={styles.deleteButton}
                                         onClick={(e) => this.handleRequestDelete(e, project)}

@@ -13,7 +13,8 @@ interface ProjectSettingsModalProps {
     currentName?: string;
     currentImageGenerationPref?: string;
     currentDefaultProvider?: LlmProvider;
-    onUpdate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => Promise<void>;
+    currentModelRole?: string;
+    onUpdate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string, modelRole: string) => Promise<void>;
     onClose: () => void;
 }
 
@@ -23,6 +24,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     currentName,
     currentImageGenerationPref,
     currentDefaultProvider,
+    currentModelRole,
     onUpdate,
     onClose
 }) => {
@@ -30,6 +32,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     const [name, setName] = useState(currentName || '');
     const [imageGenerationPref, setImageGenerationPref] = useState(currentImageGenerationPref || '');
     const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(currentDefaultProvider || 'openai');
+    const [modelRole, setModelRole] = useState(currentModelRole || '');
     const [isSaving, setIsSaving] = useState(false);
 
     // Sync state when props change or modal opens
@@ -39,13 +42,14 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             setName(currentName || '');
             setImageGenerationPref(currentImageGenerationPref || '');
             setDefaultProvider(currentDefaultProvider || 'openai');
+            setModelRole(currentModelRole || '');
         }
-    }, [isOpen, currentRulesAndGoal, currentName, currentImageGenerationPref, currentDefaultProvider]);
+    }, [isOpen, currentRulesAndGoal, currentName, currentImageGenerationPref, currentDefaultProvider, currentModelRole]);
 
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            await onUpdate(rulesAndGoal, imageGenerationPref, defaultProvider, name);
+            await onUpdate(rulesAndGoal, imageGenerationPref, defaultProvider, name, modelRole);
             onClose();
         } finally {
             setIsSaving(false);
@@ -114,6 +118,16 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                         </option>
                     ))}
                 </select>
+            </div>
+            <div className={styles.field}>
+                <label className={styles.label}>Model Role</label>
+                <textarea
+                    className={styles.input}
+                    value={modelRole}
+                    onChange={(e) => setModelRole(e.target.value)}
+                    placeholder="e.g. You are an expert web developer..."
+                    rows={2}
+                />
             </div>
         </UiModal>
     );

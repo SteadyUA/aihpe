@@ -207,10 +207,10 @@ export class ChatService {
             effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
 
-        // Fetch project context
         const project = this.projectService.getProject(currentSessionData.projectId);
         const rulesAndGoal = project?.rulesAndGoal;
         const imageGenerationPref = project?.imageGenerationPref;
+        const modelRole = project?.modelRole;
 
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
@@ -227,6 +227,7 @@ export class ChatService {
                 currentVersion: currentSessionData.currentVersion,
                 rulesAndGoal,
                 imageGenerationPref,
+                modelRole,
                 fastMode: fastModeOverride ?? currentSessionData.fastMode,
                 subject: currentSessionData.subject,
                 onPatch: (patch) => {

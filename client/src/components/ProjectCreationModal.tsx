@@ -8,7 +8,7 @@ import { LLM_PROVIDERS } from '../constants';
 
 interface ProjectCreationModalProps {
     isOpen: boolean;
-    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => Promise<void>;
+    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string, modelRole: string) => Promise<void>;
     onClose?: () => void;
 }
 
@@ -17,12 +17,13 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
     const [rulesAndGoal, setRulesAndGoal] = useState('');
     const [imageGenerationPref, setImageGenerationPref] = useState('');
     const [defaultProvider, setDefaultProvider] = useState<LlmProvider>('openai');
+    const [modelRole, setModelRole] = useState('');
     const [isCreating, setIsCreating] = useState(false);
 
     const handleCreate = async () => {
         setIsCreating(true);
         try {
-            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider, name);
+            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider, name, modelRole);
         } finally {
             setIsCreating(false);
         }
@@ -86,6 +87,16 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
                         </option>
                     ))}
                 </select>
+            </div>
+            <div className={styles.field}>
+                <label className={styles.label}>Model Role</label>
+                <textarea
+                    className={styles.input}
+                    value={modelRole}
+                    onChange={(e) => setModelRole(e.target.value)}
+                    placeholder="e.g. You are an expert web developer"
+                    rows={2}
+                />
             </div>
         </UiModal>
     );

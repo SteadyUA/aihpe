@@ -51,7 +51,9 @@ export class AccountController {
             throw new HttpError(400, 'Old and new passwords are required');
         }
 
-        this.accountService.changePassword(user.login, body.oldPassword, body.newPassword);
+
+        this.accountService.verifyPassword(user.login, body.oldPassword);
+        this.accountService.changePassword(user.login, body.newPassword);
         return response.status(200).json({ message: 'Password changed successfully' });
     }
 }

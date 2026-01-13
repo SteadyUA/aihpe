@@ -90,15 +90,22 @@ export class AccountService {
         return accountId;
     }
 
-    changePassword(login: string, oldPass: string, newPass: string): void {
+    verifyPassword(login: string, password: string): void {
         const account = Object.values(this.data.accounts).find(acc => acc.login === login);
         if (!account) {
             throw new Error(`Account with login "${login}" not found`);
         }
 
-        const oldHash = this.hashPassword(oldPass);
-        if (oldHash !== account.passwordHash) {
-            throw new Error('Invalid old password');
+        const hash = this.hashPassword(password);
+        if (hash !== account.passwordHash) {
+            throw new Error('Invalid password');
+        }
+    }
+
+    changePassword(login: string, newPass: string): void {
+        const account = Object.values(this.data.accounts).find(acc => acc.login === login);
+        if (!account) {
+            throw new Error(`Account with login "${login}" not found`);
         }
 
         const newHash = this.hashPassword(newPass);

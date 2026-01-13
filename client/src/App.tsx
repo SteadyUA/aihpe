@@ -32,6 +32,7 @@ interface AppState {
     projectRulesAndGoal: string;
     projectImageGenerationPref?: string;
     projectDefaultProvider?: LlmProvider;
+    projectModelRole?: string;
     showProjectCreation: boolean;
     showProjectSettings: boolean;
     chatWidth: number;
@@ -55,6 +56,7 @@ class App extends React.Component<AppProps, AppState> {
             projectRulesAndGoal: '',
             projectImageGenerationPref: '',
             projectDefaultProvider: 'openai',
+            projectModelRole: '',
             showProjectCreation: false,
             showProjectSettings: false,
             chatWidth: parseInt(localStorage.getItem('chatWidth') || '400', 10),
@@ -67,6 +69,7 @@ class App extends React.Component<AppProps, AppState> {
         if (this.state.token) {
             this.initApp();
         }
+        this.updateTitle();
     }
 
     initApp() {
@@ -125,7 +128,7 @@ class App extends React.Component<AppProps, AppState> {
             if (!res.ok) throw new Error('Failed to fetch project');
 
             // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
-            const data: { id: string; name: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; sessions: { sessionId: string; group: number; subject?: string }[]; activeSessionId?: string } = await res.json();
+            const data: { id: string; name: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; modelRole?: string; sessions: { sessionId: string; group: number; subject?: string }[]; activeSessionId?: string } = await res.json();
 
             const { router } = this.props;
             const params = router.params as Record<string, string | undefined>;
@@ -180,7 +183,8 @@ class App extends React.Component<AppProps, AppState> {
                     projectName: data.name || 'Untitled',
                     projectRulesAndGoal: data.rulesAndGoal || '',
                     projectImageGenerationPref: data.imageGenerationPref,
-                    projectDefaultProvider: data.defaultProvider
+                    projectDefaultProvider: data.defaultProvider,
+                    projectModelRole: data.modelRole
                 };
             }, () => {
                 const activeSessionId = this.handleInitialRouting();
@@ -350,7 +354,28 @@ class App extends React.Component<AppProps, AppState> {
         }
 
         // Persistence removed (SessionStore.saveSessions/saveGroups deleted)
+
+        this.updateTitle();
     }
+
+    updateTitle = () => {
+        const { router } = this.props;
+        const { pathname } = router.location;
+        const { sessions, activeSessionId, projectName } = this.state;
+
+        if (pathname === '/settings') {
+            document.title = 'Settings';
+        } else if (pathname === '/projects') {
+            document.title = 'Projects';
+        } else if (activeSessionId && sessions[activeSessionId] && pathname.startsWith('/session/')) {
+            const session = sessions[activeSessionId];
+            const subject = session.subject || '...';
+            const project = projectName || 'AiLand';
+            document.title = `${project} - ${subject}`;
+        } else {
+            document.title = 'AiLand';
+        }
+    };
 
     handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => {
         try {
@@ -375,7 +400,8 @@ class App extends React.Component<AppProps, AppState> {
                 projectName: project.name,
                 projectRulesAndGoal: project.rulesAndGoal,
                 projectImageGenerationPref: project.imageGenerationPref,
-                projectDefaultProvider: project.defaultProvider
+                projectDefaultProvider: project.defaultProvider,
+                projectModelRole: project.modelRole
             }, () => {
                 // Fetch to init session list (will be empty, then createSession)
                 this.fetchProject(project.id);
@@ -385,7 +411,7 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    handleUpdateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string) => {
+    handleUpdateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string, modelRole: string) => {
         const { projectId } = this.state;
         if (!projectId) return;
 
@@ -393,7 +419,7 @@ class App extends React.Component<AppProps, AppState> {
             const response = await apiAuth.fetch(`/api/projects/${projectId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider, name })
+                body: JSON.stringify({ rulesAndGoal, imageGenerationPref, defaultProvider, name, modelRole })
             });
             if (!response.ok) throw new Error('Failed to update project');
 
@@ -402,7 +428,8 @@ class App extends React.Component<AppProps, AppState> {
                 projectName: name,
                 projectRulesAndGoal: rulesAndGoal,
                 projectImageGenerationPref: imageGenerationPref,
-                projectDefaultProvider: defaultProvider
+                projectDefaultProvider: defaultProvider,
+                projectModelRole: modelRole
             });
         } catch (e) {
             console.error('Failed to update project', e);
@@ -1361,6 +1388,7 @@ class App extends React.Component<AppProps, AppState> {
                         currentRulesAndGoal={projectRulesAndGoal}
                         currentImageGenerationPref={projectImageGenerationPref}
                         currentDefaultProvider={projectDefaultProvider}
+                        currentModelRole={this.state.projectModelRole}
                         onUpdate={this.handleUpdateProject}
                         onClose={this.toggleProjectSettings}
                     />
