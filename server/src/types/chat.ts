@@ -30,6 +30,7 @@ export interface Project {
     updatedAt: Date;
     lastAssignedSessionGroup?: number;
     activeSessionId?: string;
+    modelRole?: string;
 }
 
 export interface SessionData {

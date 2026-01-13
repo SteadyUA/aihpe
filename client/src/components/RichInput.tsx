@@ -12,6 +12,7 @@ interface RichInputProps {
     onKeyDown?: (e: React.KeyboardEvent) => void;
     onBlur?: () => void;
     onPaste?: (e: React.ClipboardEvent) => void;
+    onImagePaste?: (src: string) => void;
     tabIndex?: number;
     autoFocus?: boolean;
     rows?: number;
@@ -131,8 +132,28 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
         let md = '';
 
         if (html) {
+            // Processing HTML to handle images
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const images = doc.querySelectorAll('img');
+
+            if (images.length === 1 && this.props.onImagePaste) {
+                // Single image: Extract and upload
+                const src = images[0].getAttribute('src');
+                if (src) {
+                    this.props.onImagePaste(src);
+                }
+                images[0].remove();
+            } else if (images.length > 0) {
+                // Multiple images or no handler: Strip all images
+                images.forEach(img => img.remove());
+            }
+
+            // Serialize back to HTML string for Turndown
+            const cleanedHtml = doc.body.innerHTML;
+
             // Turndown the pasted HTML
-            md = this.turndownService.turndown(html);
+            md = this.turndownService.turndown(cleanedHtml);
         } else {
             md = text;
         }

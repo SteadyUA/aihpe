@@ -55,7 +55,8 @@ export class AiSdkClient implements LlmClient {
 
         const systemPrompt = this.buildSystemPrompt(
             request.rulesAndGoal,
-            request.imageGenerationPref
+            request.imageGenerationPref,
+            request.modelRole
         );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
@@ -553,10 +554,14 @@ export class AiSdkClient implements LlmClient {
 
     private buildSystemPrompt(
         rulesAndGoal?: string,
-        imageGenerationPref?: string
+        imageGenerationPref?: string,
+        modelRole?: string
     ): string {
 
-        let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
+        const roleDefinition = modelRole || 'You are an expert web developer';
+
+        console.log(roleDefinition);
+        let prompt = `${roleDefinition} that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
 The user acts as a Business Analyst who wants to define a set of features to be implemented.
 They want to discuss WHAT features will be implemented and WHY (the goal).
@@ -574,7 +579,7 @@ Your goal is to fulfill the user's request by following this strict workflow:
 
     -   **PLAN SUMMARY**:
         -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
-        -   Structure the summary by High-Level Feature -> Goal -> Description.
+        -   For each feature, provide a clear description of the change and its goal. Use natural language (e.g., "Improve navigation by replacing the progress bar to make it more visible").
         -   Do NOT mention specific filenames or technical details in this summary.
 
 2.  **IMPLEMENTATION PHASE**:

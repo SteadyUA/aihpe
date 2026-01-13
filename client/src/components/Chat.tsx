@@ -541,30 +541,70 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     };
 
     handlePaste = async (e: React.ClipboardEvent) => {
-        // 1. Check for files in clipboard
-        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-            // Find the first image file
-            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
-            if (file) {
-                e.preventDefault(); // Prevent default paste behavior (e.g. pasting file name)
-                await this.performUpload(file);
-                // Optionally focus here too? Usually paste keeps focus if handled correctly.
-                return;
-            }
-        }
-
-        // 2. Check items if no direct file object (sometimes screenshots are items but not "files" property in some contexts, though typically they appear in files)
-        // Usually items API covers it.
+        // Prioritize finding images in clipboard items (covers screenshots and files)
         const items = e.clipboardData.items;
+
         for (let i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf('image') !== -1) {
-                const blob = items[i].getAsFile();
+            const item = items[i];
+            // Check for image type (e.g., image/png, image/jpeg)
+            if (item.type.indexOf('image') !== -1) {
+                const blob = item.getAsFile();
                 if (blob) {
                     e.preventDefault();
                     await this.performUpload(blob);
                     return;
                 }
             }
+        }
+
+        // Fallback: Check for files array directly if items recursion didn't catch it
+        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
+            if (file) {
+                e.preventDefault();
+                await this.performUpload(file);
+                return;
+            }
+        }
+    };
+
+    handleImageSrcPaste = async (src: string) => {
+        try {
+            let blob: Blob | null = null;
+            let filename = 'pasted-image.png';
+
+            if (src.startsWith('data:')) {
+                // Data URI
+                const res = await fetch(src);
+                blob = await res.blob();
+                // extract ext from type?
+                const type = blob.type;
+                const ext = type.split('/')[1] || 'png';
+                filename = `pasted-image.${ext}`;
+            } else {
+                // Public URL?
+                // Try to fetch (might fail due to CORS)
+                try {
+                    const res = await fetch(src);
+                    if (res.ok) {
+                        blob = await res.blob();
+                        const urlParts = src.split('/');
+                        const lastPart = urlParts[urlParts.length - 1];
+                        if (lastPart) filename = lastPart.split('?')[0]; // simple attempt
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch pasted image src', src, e);
+                    // We silently fail upload, but image is stripped from text effectively.
+                    return;
+                }
+            }
+
+            if (blob) {
+                const file = new File([blob], filename, { type: blob.type });
+                this.performUpload(file);
+            }
+        } catch (e) {
+            console.error('Error handling pasted image src', e);
         }
     };
 
@@ -782,6 +822,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 value={input}
                                 onChange={this.handleRichInputChange}
                                 onPaste={this.handlePaste}
+                                onImagePaste={this.handleImageSrcPaste}
                                 placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
                                 disabled={isFormDisabled}
                                 tabIndex={1}

@@ -132,6 +132,10 @@ class CreateProjectRequest {
     @IsOptional()
     @IsString()
     name?: string;
+
+    @IsOptional()
+    @IsString()
+    modelRole?: string;
 }
 
 class UpdateProjectRequest {
@@ -154,6 +158,10 @@ class UpdateProjectRequest {
     @IsOptional()
     @IsString()
     activeSessionId?: string;
+
+    @IsOptional()
+    @IsString()
+    modelRole?: string;
 }
 
 @Service()
@@ -185,7 +193,7 @@ export class ChatController {
     @UseBefore(AuthMiddleware)
     createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
         const accountId = (request as any).user?.accountId;
-        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId);
+        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId, body.modelRole);
     }
 
     @Get('/api/projects')
@@ -225,6 +233,7 @@ export class ChatController {
             imageGenerationPref: project.imageGenerationPref,
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
+            modelRole: project.modelRole,
             sessions,
         };
     }
@@ -242,6 +251,7 @@ export class ChatController {
         if (body.defaultProvider !== undefined) updateData.defaultProvider = body.defaultProvider;
         if (body.name !== undefined) updateData.name = body.name;
         if (body.activeSessionId !== undefined) updateData.activeSessionId = body.activeSessionId;
+        if (body.modelRole !== undefined) updateData.modelRole = body.modelRole;
 
         // Since projectService.updateProject expects specific args or a partial object?
         // Let's check how it's called. 

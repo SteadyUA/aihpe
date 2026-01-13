@@ -34,6 +34,10 @@ export class ProjectService {
                         (p as any).name = 'Untitled';
                     }
 
+                    if (!p.modelRole) {
+                        p.modelRole = 'You are an expert web developer';
+                    }
+
                     this.projects.set(p.id, {
                         ...p,
                         name: (p as any).name,
@@ -55,7 +59,7 @@ export class ProjectService {
         fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
     }
 
-    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number): Project {
+    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string): Project {
         const id = randomUUID();
         const project: Project = {
             id,
@@ -64,6 +68,7 @@ export class ProjectService {
             rulesAndGoal,
             imageGenerationPref,
             defaultProvider,
+            modelRole: modelRole || 'You are an expert web developer',
             sessionIds: [],
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -97,7 +102,7 @@ export class ProjectService {
         return Array.from(this.projects.values()).filter(p => p.accountId === accountId);
     }
 
-    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId'>>, currentUserId?: number): Project {
+    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole'>>, currentUserId?: number): Project {
         // Use getProject to handle access checks
         const project = this.getProject(id, currentUserId);
         if (!project) {
