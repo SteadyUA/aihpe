@@ -191,29 +191,29 @@ export class ChatController {
 
     @Post('/api/projects')
     @UseBefore(AuthMiddleware)
-    createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
+    async createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
         const accountId = (request as any).user?.accountId;
-        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId, body.modelRole);
+        return await this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId, body.modelRole);
     }
 
     @Get('/api/projects')
     @UseBefore(AuthMiddleware)
-    getUserProjects(@Req() request: Request) {
+    async getUserProjects(@Req() request: Request) {
         const accountId = (request as any).user?.accountId;
         if (!accountId) return [];
-        return this.projectService.getUserProjects(accountId);
+        return await this.projectService.getUserProjects(accountId);
     }
 
     @Get('/api/projects/:projectId')
     @UseBefore(AuthMiddleware)
-    getProject(@Param('projectId') projectId: string, @Res() response: Response, @Req() request: Request) {
+    async getProject(@Param('projectId') projectId: string, @Res() response: Response, @Req() request: Request) {
         const accountId = (request as any).user?.accountId;
-        const project = this.projectService.getProject(projectId, accountId);
+        const project = await this.projectService.getProject(projectId, accountId);
         if (!project) {
             return response.status(404).json({ message: 'Project not found' });
         }
 
-        const sessionIds = this.projectService.getProjectSessions(projectId);
+        const sessionIds = await this.projectService.getProjectSessions(projectId);
         const sessions = sessionIds.reduce((acc, id) => {
             const s = this.sessionStore.getOrCreate(id);
             // Strict check: verify the session actually belongs to this project.
@@ -240,7 +240,7 @@ export class ChatController {
 
     @Patch('/api/projects/:projectId')
     @UseBefore(AuthMiddleware)
-    updateProject(
+    async updateProject(
         @Param('projectId') projectId: string,
         @Body() body: UpdateProjectRequest,
         @Req() request: Request
@@ -263,25 +263,25 @@ export class ChatController {
         // Let's assume for now I pass the body with rulesAndGoal.
 
         const accountId = (request as any).user?.accountId;
-        return this.projectService.updateProject(projectId, updateData, accountId);
+        return await this.projectService.updateProject(projectId, updateData, accountId);
     }
 
     @Delete('/api/projects/:projectId')
     @UseBefore(AuthMiddleware)
-    deleteProject(
+    async deleteProject(
         @Param('projectId') projectId: string,
         @Req() request: Request,
         @Res() response: Response
     ) {
         const accountId = (request as any).user?.accountId;
         // Check ownership
-        const project = this.projectService.getProject(projectId, accountId);
+        const project = await this.projectService.getProject(projectId, accountId);
         if (!project) {
             return response.status(404).json({ message: 'Project not found' });
         }
 
         // Delete all sessions associated with the project
-        const sessionIds = this.projectService.getProjectSessions(projectId);
+        const sessionIds = await this.projectService.getProjectSessions(projectId);
         for (const sessionId of sessionIds) {
             try {
                 this.sessionStore.deleteSession(sessionId);
@@ -292,7 +292,7 @@ export class ChatController {
         }
 
         // Delete the project itself
-        this.projectService.deleteProject(projectId);
+        await this.projectService.deleteProject(projectId);
 
         return response.status(200).json({ message: 'Project deleted' });
     }
@@ -308,7 +308,7 @@ export class ChatController {
             try {
                 // Determine provider: explicitly requested > project default > 'openai' (default in session store)
                 // SessionStore.executeCreate handles defaults if undefined is passed, but we want project default logic.
-                const project = this.projectService.getProject(projectId);
+                const project = await this.projectService.getProject(projectId);
                 const provider = project?.defaultProvider; // If project has a default, pass it.
 
                 // If executeCreate accepted provider, we'd pass it here. 
@@ -323,7 +323,7 @@ export class ChatController {
                     this.sessionStore.upsert(id, { provider });
                 }
 
-                this.projectService.addSessionToProject(projectId, id);
+                await this.projectService.addSessionToProject(projectId, id);
                 this.sseService.emitSessionCreated({
                     sourceSessionId: 'system',
                     newSessionId: id,
@@ -618,13 +618,13 @@ export class ChatController {
 
     @Delete('/api/sessions/:sessionId')
     @UseBefore(AuthMiddleware)
-    deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
+    async deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
             // Retrieve session to identify the project it belongs to.
             const session = this.sessionStore.getOrCreate(sessionId);
 
             if (session.projectId) {
-                this.projectService.removeSessionFromProject(session.projectId, sessionId);
+                await this.projectService.removeSessionFromProject(session.projectId, sessionId);
             }
 
             // Remove session files

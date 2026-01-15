@@ -3,6 +3,8 @@ import 'dotenv/config';
 import { Container } from 'typedi';
 import { AccountService } from '../services/AccountService';
 
+import { AppDataSource } from '../data-source';
+
 async function main() {
     const args = process.argv.slice(2);
     if (args.length !== 2) {
@@ -18,10 +20,11 @@ async function main() {
     }
 
     try {
+        await AppDataSource.initialize();
         // We use Container to get the instance, although it has no dependencies, 
         // this maintains consistency if dependencies are added later.
         const accountService = Container.get(AccountService);
-        const accountId = accountService.createAccount(login, password);
+        const accountId = await accountService.createAccount(login, password);
         console.log(`Account created successfully. Account ID: ${accountId}`);
     } catch (error: any) {
         console.error('Failed to create account:', error.message);

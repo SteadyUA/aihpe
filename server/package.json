@@ -8,7 +8,12 @@
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "create-account": "ts-node src/scripts/create-account.ts",
-    "change-password": "ts-node src/scripts/change-password.ts"
+    "change-password": "ts-node src/scripts/change-password.ts",
+    "migrate-data": "ts-node src/scripts/migrate-data.ts",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
   },
   "keywords": [],
   "author": "",
@@ -30,7 +35,9 @@
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.3",
+    "sqlite3": "^5.1.7",
     "typedi": "^0.10.0",
+    "typeorm": "^0.3.28",
     "zod": "^4.2.1"
   },
   "devDependencies": {
