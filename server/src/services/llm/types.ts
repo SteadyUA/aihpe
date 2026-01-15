@@ -9,19 +9,20 @@ export interface GeneratePageRequest {
     allowVariants?: boolean;
     currentVersion: number;
     onProgress?: (chunk: string) => void;
-    projectGoal?: string;
+    rulesAndGoal?: string;
     imageGenerationPref?: string;
+    onVariantRequest?: (instruction: string) => Promise<string>;
+    fastMode?: boolean;
+    subject?: string;
+    onPatch?: (patch: { subject?: string }) => void;
+    modelRole?: string;
 }
 
-export interface VariantRequest {
-    count: number;
-    instructions: string[];
-}
+
 
 export interface GeneratePageResult {
     summary: string;
     files: SessionFiles;
-    variantRequest?: VariantRequest;
     newMessages?: ChatMessage[];
     targetVersion?: number;
 }

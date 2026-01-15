@@ -1,21 +1,21 @@
 import React from 'react';
-import { marked } from 'marked';
 import classNames from 'classnames';
-import { ElementPicker } from './ElementPicker';
+import { createMarkedInstance } from '../utils/markdownUtils';
+
 import { UiButton } from './UiButton';
+import { UiDropdown } from './UiDropdown';
 import { UiTarget } from './UiTarget';
 import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
-
-
-marked.setOptions({ breaks: true });
-
-marked.setOptions({ breaks: true });
+import { RichInput } from './RichInput';
 import { MessageData, LlmProvider, ChatAttachment } from '../types';
+
+
 
 interface MessageProps {
     msg: MessageData;
+    id?: string;
     onSelectChip?: (selector: string) => void;
     onCloneTurn?: (turn: number) => void;
     onPreviewTurn?: (turn: number) => void;
@@ -24,6 +24,11 @@ interface MessageProps {
     isLastAssistant?: boolean;
     status?: string;
     onUndo?: () => void;
+    sessionIds?: string[];
+    onSwitchSession?: (id: string) => void;
+    isPending?: boolean;
+    statusMessages?: string[];
+    startTime?: number;
 }
 
 const formatTime = (dateString?: string) => {
@@ -33,10 +38,96 @@ const formatTime = (dateString?: string) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
+const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
+    const [elapsed, setElapsed] = React.useState(0);
+
+    React.useEffect(() => {
+        if (!startTime) {
+            setElapsed(0);
+            return;
+        }
+
+        const update = () => {
+            const now = Date.now();
+            setElapsed(Math.floor((now - startTime) / 1000));
+        };
+
+        update();
+        const interval = setInterval(update, 1000);
+        return () => clearInterval(interval);
+    }, [startTime]);
+
+    if (!startTime || elapsed <= 0) return null;
+
+    return (
+        <span className={styles.timer}>
+            {`${elapsed}s`}
+        </span>
+    );
+};
+
+const processContent = (text: string, sessionIds: string[] = []) => {
+    if (!text) return '';
+
+    // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
+    return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
+        // Case insensitive check
+        const matchLower = id.toLowerCase();
+
+        const foundId = sessionIds.find(existingId => {
+            const idLower = existingId.toLowerCase();
+            return idLower === matchLower || idLower.startsWith(matchLower);
+        });
+
+        if (foundId) {
+            return `[${id.substring(0, 8)}](#session-${foundId})`;
+        }
+        return match;
+    });
+};
+
+const areArraysEqual = (a?: any[], b?: any[]) => {
+    if (a === b) return true;
+    if (!a || !b) return a === b;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+};
+
 class Message extends React.Component<MessageProps> {
+    shouldComponentUpdate(nextProps: MessageProps) {
+        const { msg, sessionIds, statusMessages, ...otherProps } = this.props;
+        const { msg: nextMsg, sessionIds: nextSessionIds, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
+
+        // 1. Primitive props check (shallow comparison of the rest)
+        const keys = Object.keys(otherProps) as (keyof typeof otherProps)[];
+        for (const key of keys) {
+            if (otherProps[key] !== nextOtherProps[key]) return true;
+        }
+        // Also check if nextProps has new keys (though unlikely with TS)
+        if (Object.keys(nextOtherProps).length !== keys.length) return true;
+
+        // 2. Message content check
+        if (msg.content !== nextMsg.content) return true;
+        if (msg.role !== nextMsg.role) return true;
+        if (msg.turn !== nextMsg.turn) return true;
+        // Attachment check (reference or value if needed, simpler to ref check for now)
+        if (msg.attachment !== nextMsg.attachment) return true;
+        if (msg.selection?.selector !== nextMsg.selection?.selector) return true;
+
+        // 3. Array checks
+        if (!areArraysEqual(sessionIds, nextSessionIds)) return true;
+        if (!areArraysEqual(statusMessages, nextStatusMessages)) return true;
+
+        return false;
+    }
+
     render() {
         const {
             msg,
+            id,
             onSelectChip,
             onCloneTurn,
             onPreviewTurn,
@@ -45,34 +136,49 @@ class Message extends React.Component<MessageProps> {
             isLastAssistant,
             status,
             onUndo,
+            isPending,
+            statusMessages,
+            startTime,
         } = this.props;
         const isUser = msg.role === 'user';
         const isAssistant = msg.role === 'assistant';
-        const isSystem = msg.role === 'system';
-
-        const hasTurn = isAssistant && typeof msg.turn === 'number';
 
         const messageClass = classNames(styles.message, {
             [styles.user]: isUser,
             [styles.assistant]: isAssistant,
-            [styles.system]: isSystem,
-            [styles.hasVersion]: hasTurn,
-            [styles.activeVersion]: isActiveTurn,
+            [styles.activeTurn]: isActiveTurn,
             [styles.dimmed]: isDimmed,
+            [styles.pending]: isPending,
         });
-
-
 
         return (
             <div
+                id={id}
                 className={messageClass}
                 onClick={
-                    hasTurn && onPreviewTurn
+                    isAssistant && onPreviewTurn
                         ? () => onPreviewTurn(msg.turn!)
                         : undefined
                 }
             >
-                <div className={styles.messageContent}>
+                <div
+                    className={styles.messageContent}
+                    onClick={(e) => {
+                        // Check if click was on a session link
+                        const target = e.target as HTMLElement;
+                        if (target.tagName === 'A') {
+                            const href = target.getAttribute('href');
+                            if (href && href.startsWith('#session-')) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const sessionId = href.replace('#session-', '');
+                                if (this.props.onSwitchSession) {
+                                    this.props.onSwitchSession(sessionId);
+                                }
+                            }
+                        }
+                    }}
+                >
                     {msg.selection && (
                         <div
                             className={styles.selectionChip}
@@ -85,18 +191,34 @@ class Message extends React.Component<MessageProps> {
                         </div>
                     )}
 
-                    {/* Render Text Content */}
-                    {/* Render Text Content */}
-                    {(msg.content || (!msg.attachment && isUser)) && (
-                        isAssistant ? (
+                    {/* Render Content */}
+                    {isPending ? (
+                        statusMessages && statusMessages.length > 0 ? (
+                            (() => {
+                                const maxItems = 3;
+                                const start = Math.max(0, statusMessages.length - maxItems);
+                                const visibleMessages = statusMessages.slice(start);
+                                const startIndex = start + 1;
+
+                                return (
+                                    <ol start={startIndex} className={styles.statusList}>
+                                        {visibleMessages.map((msg, idx) => (
+                                            <li key={start + idx}>{msg}</li>
+                                        ))}
+                                    </ol>
+                                );
+                            })()
+                        ) : (
+                            <span className={styles.blinkingCursor}>▋</span>
+                        )
+                    ) : (
+                        (msg.content || (!msg.attachment && isUser)) && (
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: marked.parse(msg.content) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content, this.props.sessionIds)) as string,
                                 }}
                             />
-                        ) : (
-                            <div className="message-text">{msg.content}</div>
                         )
                     )}
 
@@ -110,7 +232,9 @@ class Message extends React.Component<MessageProps> {
                                 title={msg.attachment.originalName || msg.attachment.filename}
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    window.open(msg.attachment!.url, '_blank');
+                                    if (msg.attachment) {
+                                        window.open(msg.attachment.url, '_blank');
+                                    }
                                 }}
                             />
                         </div>
@@ -119,6 +243,12 @@ class Message extends React.Component<MessageProps> {
                 </div>
                 {/* Message Actions */}
                 <div className={styles.messageActions}>
+                    {isPending && (
+                        <>
+                            <span className={styles.spinner}></span>
+                            <DurationTimer startTime={startTime} />
+                        </>
+                    )}
                     {/* Timestamp for user messages */}
                     {isUser && msg.createdAt && (
                         <div className={styles.messageMeta}>
@@ -218,13 +348,18 @@ interface ChatProps {
     onAttachmentChange?: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
     onSaveUnsent?: (data: { input?: string | null }) => void;
+    sessionIds?: string[];
+    onSwitchSession?: (id: string) => void;
+    fastMode?: boolean;
+    onFastModeChange?: (value: boolean) => void;
+    sessionTitle?: string;
+
 }
 
 interface ChatState {
     isLoading: boolean;
     error: string | null;
     input: string;
-    elapsedSeconds: number;
     showUndoConfirmation: boolean;
     isUploading: boolean;
 }
@@ -232,7 +367,8 @@ interface ChatState {
 export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
-    private timerInterval: any = null;
+    private isUserScroll = false;
+    private richInputRef = React.createRef<RichInput>();
 
     constructor(props: ChatProps) {
         super(props);
@@ -241,7 +377,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             error: null,
             input: '',
             isUploading: false,
-            elapsedSeconds: 0,
             showUndoConfirmation: false,
         };
         if (props.unsentInput) {
@@ -255,54 +390,60 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidMount() {
-        this.scrollToBottom();
-        this.updateTimer();
+        if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
+            this.scrollToTurn(this.props.activeTurn);
+        } else {
+            this.scrollToBottom();
+        }
     }
 
     componentDidUpdate(prevProps: ChatProps) {
+        const lastMsg = this.props.messages[this.props.messages.length - 1];
+        const prevLastMsg = prevProps.messages[prevProps.messages.length - 1];
+        const contentChanged = lastMsg?.content !== prevLastMsg?.content;
+
         if (
             prevProps.messages.length !== this.props.messages.length ||
             prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
-            prevProps.status !== this.props.status
+            prevProps.status !== this.props.status ||
+            contentChanged
         ) {
-            this.scrollToBottom();
+            const isAtBottom = this.props.activeTurn === null || this.props.activeTurn === undefined;
+            const isLatestTurnActive = lastMsg && typeof lastMsg.turn === 'number' && this.props.activeTurn === lastMsg.turn;
+
+            if (isAtBottom || isLatestTurnActive) {
+                this.scrollToBottom();
+            }
         }
 
-        if (prevProps.startTime !== this.props.startTime || prevProps.status !== this.props.status) {
-            this.updateTimer();
+        if (prevProps.activeTurn !== this.props.activeTurn) {
+            if (this.isUserScroll) {
+                this.isUserScroll = false;
+            } else if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
+                this.scrollToTurn(this.props.activeTurn);
+            } else {
+                this.scrollToBottom();
+            }
         }
 
         if (prevProps.unsentInput !== this.props.unsentInput && this.props.unsentInput !== undefined) {
-            // Only update if it's different and not just undefined (or maybe blank string is valid)
-            // Beware of overriding user input if they are typing?
-            // Usually unsentInput updates come from LOAD or UNDO.
-            // If local input is different?
-            // Let's assume unsentInput prop is the truth from server/store.
             if (this.props.unsentInput !== this.state.input) {
                 this.setState({ input: this.props.unsentInput });
             }
         }
+
+        const justFinishedPicking = prevProps.isPicking && !this.props.isPicking;
+        const justClearedSelection = prevProps.selection && !this.props.selection;
+        const attachmentChanged = prevProps.attachment !== this.props.attachment;
+        const providerChanged = prevProps.provider !== this.props.provider;
+        const fastModeChanged = prevProps.fastMode !== this.props.fastMode;
+
+        if (justFinishedPicking || justClearedSelection || (attachmentChanged && !this.state.isUploading) || providerChanged || fastModeChanged) {
+            this.richInputRef.current?.focus();
+        }
     }
 
     componentWillUnmount() {
-        if (this.timerInterval) clearInterval(this.timerInterval);
-    }
-
-    updateTimer = () => {
-        if (this.timerInterval) clearInterval(this.timerInterval);
-        this.timerInterval = null;
-
-        if (this.props.status === 'busy' && this.props.startTime) {
-            const tick = () => {
-                const now = Date.now();
-                const start = this.props.startTime || now;
-                this.setState({ elapsedSeconds: Math.floor((now - start) / 1000) });
-            };
-            tick();
-            this.timerInterval = setInterval(tick, 1000);
-        } else {
-            this.setState({ elapsedSeconds: 0 });
-        }
     }
 
 
@@ -328,6 +469,24 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
+    scrollToTurn = (turn: number) => {
+        // Use timeout to allow render to complete if necessary
+        setTimeout(() => {
+            const el = document.getElementById(`msg-turn-${turn}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 100);
+    };
+
+    public submit = (text: string) => {
+        if (this.props.disabled) return;
+        this.props.onSend(text);
+        if (this.props.onAttachmentChange) {
+            this.props.onAttachmentChange(undefined);
+        }
+    };
+
     handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (this.props.disabled) return;
@@ -344,6 +503,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         this.setState({ input: e.target.value });
+    };
+
+    handleRichInputChange = (value: string) => {
+        this.setState({ input: value });
     };
 
     performUpload = async (file: File) => {
@@ -378,29 +541,70 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     };
 
     handlePaste = async (e: React.ClipboardEvent) => {
-        // 1. Check for files in clipboard
-        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-            // Find the first image file
-            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
-            if (file) {
-                e.preventDefault(); // Prevent default paste behavior (e.g. pasting file name)
-                await this.performUpload(file);
-                return;
-            }
-        }
-
-        // 2. Check items if no direct file object (sometimes screenshots are items but not "files" property in some contexts, though typically they appear in files)
-        // Usually items API covers it.
+        // Prioritize finding images in clipboard items (covers screenshots and files)
         const items = e.clipboardData.items;
+
         for (let i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf('image') !== -1) {
-                const blob = items[i].getAsFile();
+            const item = items[i];
+            // Check for image type (e.g., image/png, image/jpeg)
+            if (item.type.indexOf('image') !== -1) {
+                const blob = item.getAsFile();
                 if (blob) {
                     e.preventDefault();
                     await this.performUpload(blob);
                     return;
                 }
             }
+        }
+
+        // Fallback: Check for files array directly if items recursion didn't catch it
+        if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+            const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
+            if (file) {
+                e.preventDefault();
+                await this.performUpload(file);
+                return;
+            }
+        }
+    };
+
+    handleImageSrcPaste = async (src: string) => {
+        try {
+            let blob: Blob | null = null;
+            let filename = 'pasted-image.png';
+
+            if (src.startsWith('data:')) {
+                // Data URI
+                const res = await fetch(src);
+                blob = await res.blob();
+                // extract ext from type?
+                const type = blob.type;
+                const ext = type.split('/')[1] || 'png';
+                filename = `pasted-image.${ext}`;
+            } else {
+                // Public URL?
+                // Try to fetch (might fail due to CORS)
+                try {
+                    const res = await fetch(src);
+                    if (res.ok) {
+                        blob = await res.blob();
+                        const urlParts = src.split('/');
+                        const lastPart = urlParts[urlParts.length - 1];
+                        if (lastPart) filename = lastPart.split('?')[0]; // simple attempt
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch pasted image src', src, e);
+                    // We silently fail upload, but image is stripped from text effectively.
+                    return;
+                }
+            }
+
+            if (blob) {
+                const file = new File([blob], filename, { type: blob.type });
+                this.performUpload(file);
+            }
+        } catch (e) {
+            console.error('Error handling pasted image src', e);
         }
     };
 
@@ -411,6 +615,30 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         if (this.props.onAttachmentChange) {
             this.props.onAttachmentChange(undefined);
         }
+    };
+
+    handlePreviewTurn = (turn: number) => {
+        this.isUserScroll = true;
+        if (this.props.onPreviewTurn) {
+            this.props.onPreviewTurn(turn);
+        }
+    };
+
+    handleContainerClick = (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement;
+        // const interactiveTags = ['SELECT', 'BUTTON', 'INPUT', 'TEXTAREA', 'A'];
+        const interactiveTags = ['SELECT'];
+
+        let el: HTMLElement | null = target;
+        while (el && el !== e.currentTarget) {
+            if (interactiveTags.includes(el.tagName)) {
+                return;
+            }
+            if (el.getAttribute('contenteditable') === 'true') return;
+            el = el.parentElement;
+        }
+
+        this.richInputRef.current?.focus();
     };
 
     render() {
@@ -427,14 +655,17 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onPreviewTurn,
             disabled,
             provider,
-            onProviderChange,
-            onUpload,
+            onProviderChange = () => { },
+            // onUpload, // Accessed via this.props.onUpload
             attachment,
             // Restore missing ones
             onClearSelection,
             onSelectChip,
+            sessionIds,
+            onSwitchSession,
+            sessionTitle
         } = this.props;
-        const { input, elapsedSeconds, isUploading, isLoading } = this.state;
+        const { input, isUploading, isLoading } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
 
         let effectiveActiveTurn = activeTurn;
@@ -462,8 +693,22 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }
 
+        let latestTurn = 0;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (typeof messages[i].turn === 'number') {
+                latestTurn = messages[i].turn!;
+                break;
+            }
+        }
+
+        const isPendingActive = latestTurn === effectiveActiveTurn;
+        const shouldPendingDim = foundActive && !isPendingActive;
+
         return (
             <div className={styles.chatPanel}>
+                <div className={styles.sessionHeader}>
+                    {sessionTitle || '...'}
+                </div>
                 <div className={styles.messages} id="messages">
                     {messages.map((m, i) => {
                         // Use strict equality for safely finding the match
@@ -479,95 +724,227 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
                         return (
                             <Message
+                                id={
+                                    m.role === 'assistant' && typeof m.turn === 'number'
+                                        ? `msg-turn-${m.turn}`
+                                        : undefined
+                                }
                                 key={i}
                                 msg={m}
                                 onSelectChip={onSelectChip}
                                 onCloneTurn={onCloneTurn}
-                                onPreviewTurn={onPreviewTurn}
+                                onPreviewTurn={this.handlePreviewTurn}
                                 isActiveTurn={isTurnMatch}
                                 isDimmed={shouldDim}
                                 isLastAssistant={i === lastAssistantIndex}
                                 onUndo={this.handleUndo}
+                                sessionIds={sessionIds}
+                                onSwitchSession={onSwitchSession}
                             />
                         );
                     })}
                     {status === 'busy' && (
-                        <div
-                            className={classNames(
-                                styles.message,
-                                styles.assistant,
-                                styles.pending,
-                            )}
-                        >
-                            <div className={styles.messageContent}>
-                                {statusMessages && statusMessages.length > 0 ? (
-                                    (() => {
-                                        const maxItems = 3;
-                                        const start = Math.max(0, statusMessages.length - maxItems);
-                                        const visibleMessages = statusMessages.slice(start);
-                                        const startIndex = start + 1; // 1-based index for <ol>
-
-                                        return (
-                                            <ol className={styles.statusList} start={startIndex}>
-                                                {visibleMessages.map((msg, idx) => (
-                                                    <li key={start + idx}>{msg}</li>
-                                                ))}
-                                            </ol>
-                                        );
-                                    })()
-                                ) : (
-                                    <p>Thinking...</p>
-                                )}
-                            </div>
-                            <div className={styles.messageActions}>
-                                <span className={styles.spinner}></span>
-                                <span className={styles.timer}>
-                                    {elapsedSeconds > 0 ? `${elapsedSeconds}s` : ''}
-                                </span>
-                            </div>
-                        </div>
+                        <Message
+                            id={
+                                latestTurn
+                                    ? `msg-turn-${latestTurn}`
+                                    : undefined
+                            }
+                            msg={{
+                                role: 'assistant',
+                                content: '',
+                                turn: latestTurn,
+                                version: 0,
+                            }}
+                            statusMessages={statusMessages}
+                            startTime={this.props.startTime || undefined}
+                            isPending={true}
+                            isActiveTurn={isPendingActive}
+                            isDimmed={shouldPendingDim}
+                            // Mimic props required for interaction
+                            onPreviewTurn={onPreviewTurn}
+                            // Additional props
+                            sessionIds={sessionIds}
+                            onSwitchSession={onSwitchSession}
+                        />
                     )}
                     <div ref={this.messagesEndRef} />
                 </div>
 
-                <form className={styles.chatForm} onSubmit={this.handleSubmit}>
-
-                    {/* Attachment Preview (Above Toolbar) */}
-                    {attachment && (
-                        <div className={styles.attachmentList}>
-                            <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
-                                <img
-                                    src={attachment.url}
-                                    alt={attachment.originalName || attachment.filename}
-                                    className={styles.imagePreview}
-                                    title={attachment.originalName || attachment.filename}
-                                />
-                            </UiTarget>
+                {status === 'error' ? (
+                    <div className={styles.chatForm}>
+                        <div className={styles.errorContainer}>
+                            <div className={styles.errorMessage}>
+                                <h3>An error occurred</h3>
+                                <p>{statusMessages && statusMessages.length > 0 ? statusMessages[statusMessages.length - 1] : 'Unknown error'}</p>
+                            </div>
+                            <UiButton
+                                variant="secondary"
+                                onClick={this.props.onUndo}
+                            >
+                                Undo last turn
+                            </UiButton>
                         </div>
-                    )}
+                    </div>
+                ) : (
+                    <form className={styles.chatForm} onSubmit={this.handleSubmit}>
 
-                    {/* Toolbar */}
-                    <div className={styles.toolbar}>
-                        {onUpload && (
-                            <>
-                                <input
-                                    type="file"
-                                    ref={this.fileInputRef}
-                                    style={{ display: 'none' }}
-                                    onChange={this.handleFileChange}
-                                    accept="image/*"
-                                />
-                                <UiButton
-                                    type="button"
-                                    variant="secondary"
-                                    size="icon"
-                                    onClick={() => this.fileInputRef.current?.click()}
-                                    disabled={isFormDisabled || isUploading || !!attachment} // Disable if attachment exists
-                                    title={!!attachment ? "Only one attachment allowed" : "Attach image"}
-                                >
-                                    {isUploading ? (
-                                        <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
-                                    ) : (
+                        {/* Unified Input Container */}
+                        <div className={styles.inputContainer} onClick={this.handleContainerClick}>
+                            <div className={styles.selections}>
+                                {/* Element Picker (Top) */}
+                                {selection && (
+                                    <div className={styles.pickerContainer}>
+                                        <UiTarget onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
+                                            <code className={styles.selectionValue}>{selection}</code>
+                                        </UiTarget>
+                                    </div>
+                                )}
+
+                                {/* Attachment Preview */}
+                                {attachment && (
+                                    <div className={styles.attachmentList}>
+                                        <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
+                                            <img
+                                                src={attachment.url}
+                                                alt={attachment.originalName || attachment.filename}
+                                                className={styles.imagePreview}
+                                                title={attachment.originalName || attachment.filename}
+                                            />
+                                        </UiTarget>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Rich Input */}
+                            <RichInput
+                                ref={this.richInputRef}
+                                value={input}
+                                onChange={this.handleRichInputChange}
+                                onPaste={this.handlePaste}
+                                onImagePaste={this.handleImageSrcPaste}
+                                placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
+                                disabled={isFormDisabled}
+                                tabIndex={1}
+                                className={styles.headlessInput}
+                                editorClassName={styles.headlessEditor}
+                                onBlur={() => {
+                                    if (this.props.onSaveUnsent) {
+                                        this.props.onSaveUnsent({ input: this.state.input });
+                                    }
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        this.handleSubmit(e);
+                                    }
+                                }}
+                            />
+
+                            {/* Input Controls Footer */}
+                            <div className={styles.inputControls}>
+                                <div className={styles.inputControlsLeft}>
+                                    {/* Pick Element Button */}
+                                    <UiButton
+                                        type="button"
+                                        variant={isPicking ? 'ghost-active' : 'ghost'}
+                                        size="icon"
+                                        onClick={isPicking ? onCancelPick : onPickElement}
+                                        disabled={isFormDisabled}
+                                        title={isPicking ? "Cancel selection" : "Select element"}
+                                    >
+                                        <svg
+                                            width="18"
+                                            height="18"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        >
+                                            <path d="M1 1h4" />
+                                            <path d="M1 1v4" />
+                                            <path d="M1 23v-4" />
+                                            <path d="M1 23h4" />
+                                            <path d="M23 1h-4" />
+                                            <path d="M23 1v4" />
+                                            <path d="M10 1h4" />
+                                            <path d="M1 10v4" />
+                                            <path d="M23 10v4" />
+                                            <path d="M10 23h4" />
+                                            <path d="M21 21l-9-9" />
+                                            <path d="M12 12l8 3" />
+                                            <path d="M12 12l3 8" />
+                                        </svg>
+                                    </UiButton>
+
+                                    {/* Upload Button */}
+                                    <div>
+                                        <input
+                                            type="file"
+                                            ref={this.fileInputRef}
+                                            style={{ display: 'none' }}
+                                            onChange={this.handleFileChange}
+                                            accept="image/*"
+                                        />
+                                        <UiButton
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => this.fileInputRef.current?.click()}
+                                            disabled={isFormDisabled || isUploading || !!attachment}
+                                            title={!!attachment ? "Only one attachment allowed" : "Attach image"}
+                                        >
+                                            {isUploading ? (
+                                                <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
+                                            ) : (
+                                                <svg
+                                                    width="16"
+                                                    height="16"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                                </svg>
+                                            )}
+                                        </UiButton>
+                                    </div>
+
+                                    {/* Mode Toggle */}
+                                    <UiDropdown
+                                        value={this.props.fastMode ? 'fast' : 'plan'}
+                                        options={[
+                                            { value: 'plan', label: 'Planning' },
+                                            { value: 'fast', label: 'Fast mode' }
+                                        ]}
+                                        onChange={(val) => this.props.onFastModeChange?.(val === 'fast')}
+                                        disabled={isFormDisabled}
+                                        variant="ghost"
+                                    />
+                                    <ProviderSelector
+                                        value={provider}
+                                        onChange={onProviderChange}
+                                        disabled={isFormDisabled || isLoading || isUploading}
+                                        className={styles.imageToggle}
+                                        variant="ghost"
+                                    />
+                                </div>
+
+                                <div className={styles.inputControlsRight}>
+                                    {/* Send Button */}
+                                    <UiButton
+                                        type="submit"
+                                        variant="primary"
+                                        size="icon"
+                                        disabled={isFormDisabled || !input.trim()}
+                                        tabIndex={2}
+                                        onClick={this.handleSubmit}
+                                    >
                                         <svg
                                             width="16"
                                             height="16"
@@ -578,59 +955,15 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                             strokeLinecap="round"
                                             strokeLinejoin="round"
                                         >
-                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                                         </svg>
-                                    )}
-                                </UiButton>
-                            </>
-                        )}
-
-                        <ElementPicker
-                            selection={selection ?? null}
-                            isPicking={isPicking}
-                            onPick={onPickElement}
-                            onCancel={onCancelPick}
-                            onClear={onClearSelection}
-                            disabled={isFormDisabled}
-                            className={styles.elementPicker}
-                        />
-                    </div>
-
-                    <textarea
-                        value={input}
-                        onChange={this.handleInputChange}
-                        onPaste={this.handlePaste}
-                        placeholder={isFormDisabled ? "Please wait..." : "Describe changes..."}
-                        rows={4}
-                        disabled={isFormDisabled}
-                        tabIndex={1}
-                        onBlur={() => {
-                            if (this.props.onSaveUnsent) {
-                                this.props.onSaveUnsent({ input: this.state.input });
-                            }
-                        }}
-                    />
-                    <div
-                        className={styles.formActions}
-                    >
-                        {onProviderChange && (
-                            <ProviderSelector
-                                value={provider}
-                                onChange={onProviderChange}
-                                disabled={isFormDisabled || isLoading || isUploading}
-                                className={styles.imageToggle}
-                            />
-                        )}
-                        <UiButton
-                            type="submit"
-                            variant="primary"
-                            disabled={isFormDisabled}
-                            tabIndex={2}
-                        >
-                            Send
-                        </UiButton>
-                    </div>
-                </form>
+                                    </UiButton>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                )}
 
                 <ConfirmationModal
                     isOpen={this.state.showUndoConfirmation}

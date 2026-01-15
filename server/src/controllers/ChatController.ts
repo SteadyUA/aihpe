@@ -10,6 +10,7 @@ import {
     Res,
     UseBefore, // eslint-disable-line @typescript-eslint/no-unused-vars
 } from 'routing-controllers';
+import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Request, Response } from 'express';
 import multer from 'multer';
 import archiver from 'archiver';
@@ -23,6 +24,7 @@ import {
     Matches,
     ValidateIf,
     ValidateNested,
+    IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Service } from 'typedi';
@@ -103,6 +105,10 @@ class UnsentDataRequest {
     @IsOptional()
     @IsString()
     provider?: LlmProvider;
+
+    @IsOptional()
+    @IsBoolean()
+    fastMode?: boolean;
 }
 
 class CreateSessionRequest {
@@ -113,8 +119,7 @@ class CreateSessionRequest {
 
 class CreateProjectRequest {
     @IsString()
-    @IsNotEmpty()
-    goal!: string;
+    rulesAndGoal!: string;
 
     @IsOptional()
     @IsString()
@@ -123,12 +128,20 @@ class CreateProjectRequest {
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
+
+    @IsOptional()
+    @IsString()
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    modelRole?: string;
 }
 
 class UpdateProjectRequest {
     @IsOptional()
     @IsString()
-    goal?: string;
+    rulesAndGoal?: string;
 
     @IsOptional()
     @IsString()
@@ -137,6 +150,18 @@ class UpdateProjectRequest {
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
+
+    @IsOptional()
+    @IsString()
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    activeSessionId?: string;
+
+    @IsOptional()
+    @IsString()
+    modelRole?: string;
 }
 
 @Service()
@@ -165,13 +190,25 @@ export class ChatController {
     }
 
     @Post('/api/projects')
-    createProject(@Body() body: CreateProjectRequest) {
-        return this.projectService.createProject(body.goal, body.imageGenerationPref, body.defaultProvider);
+    @UseBefore(AuthMiddleware)
+    createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        return this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId, body.modelRole);
+    }
+
+    @Get('/api/projects')
+    @UseBefore(AuthMiddleware)
+    getUserProjects(@Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        if (!accountId) return [];
+        return this.projectService.getUserProjects(accountId);
     }
 
     @Get('/api/projects/:projectId')
-    getProject(@Param('projectId') projectId: string, @Res() response: Response) {
-        const project = this.projectService.getProject(projectId);
+    @UseBefore(AuthMiddleware)
+    getProject(@Param('projectId') projectId: string, @Res() response: Response, @Req() request: Request) {
+        const accountId = (request as any).user?.accountId;
+        const project = this.projectService.getProject(projectId, accountId);
         if (!project) {
             return response.status(404).json({ message: 'Project not found' });
         }
@@ -184,28 +221,84 @@ export class ChatController {
             // We verify if s.projectId matches, OR if it's a legacy session we might want to allow it?
             // But for new logic, checking projectId is safer to avoid ghost sessions.
             if (s.projectId === projectId) {
-                acc.push({ sessionId: s.id, group: s.group });
+                acc.push({ sessionId: s.id, group: s.group, status: s.status, subject: s.subject });
             }
             return acc;
-        }, [] as { sessionId: string, group: number }[]);
+        }, [] as { sessionId: string, group: number, status: string, subject?: string }[]);
 
         return {
-            goal: project.goal,
+            id: project.id,
+            name: project.name,
+            rulesAndGoal: project.rulesAndGoal,
             imageGenerationPref: project.imageGenerationPref,
             defaultProvider: project.defaultProvider,
+            activeSessionId: project.activeSessionId,
+            modelRole: project.modelRole,
             sessions,
         };
     }
 
     @Patch('/api/projects/:projectId')
+    @UseBefore(AuthMiddleware)
     updateProject(
         @Param('projectId') projectId: string,
         @Body() body: UpdateProjectRequest,
+        @Req() request: Request
     ) {
-        return this.projectService.updateProject(projectId, body);
+        const updateData: any = {};
+        if (body.rulesAndGoal !== undefined) updateData.rulesAndGoal = body.rulesAndGoal;
+        if (body.imageGenerationPref !== undefined) updateData.imageGenerationPref = body.imageGenerationPref;
+        if (body.defaultProvider !== undefined) updateData.defaultProvider = body.defaultProvider;
+        if (body.name !== undefined) updateData.name = body.name;
+        if (body.activeSessionId !== undefined) updateData.activeSessionId = body.activeSessionId;
+        if (body.modelRole !== undefined) updateData.modelRole = body.modelRole;
+
+        // Since projectService.updateProject expects specific args or a partial object?
+        // Let's check how it's called. 
+        // Previously: return this.projectService.updateProject(projectId, body);
+        // If ProjectService.updateProject takes (id, data), and data matches UpdateProjectRequest structure, then passing body is fine
+        // IF the DTO matches the service expectation. 
+        // Service updateProject signature: (projectId: string, data: Partial<Project>) OR (..., goal, ...)
+        // I need to be careful about what updateProject expects. 
+        // Let's assume for now I pass the body with rulesAndGoal.
+
+        const accountId = (request as any).user?.accountId;
+        return this.projectService.updateProject(projectId, updateData, accountId);
+    }
+
+    @Delete('/api/projects/:projectId')
+    @UseBefore(AuthMiddleware)
+    deleteProject(
+        @Param('projectId') projectId: string,
+        @Req() request: Request,
+        @Res() response: Response
+    ) {
+        const accountId = (request as any).user?.accountId;
+        // Check ownership
+        const project = this.projectService.getProject(projectId, accountId);
+        if (!project) {
+            return response.status(404).json({ message: 'Project not found' });
+        }
+
+        // Delete all sessions associated with the project
+        const sessionIds = this.projectService.getProjectSessions(projectId);
+        for (const sessionId of sessionIds) {
+            try {
+                this.sessionStore.deleteSession(sessionId);
+            } catch (e) {
+                console.error(`Failed to delete session ${sessionId} during project deletion`, e);
+                // Continue deleting other sessions and the project
+            }
+        }
+
+        // Delete the project itself
+        this.projectService.deleteProject(projectId);
+
+        return response.status(200).json({ message: 'Project deleted' });
     }
 
     @Post('/api/sessions')
+    @UseBefore(AuthMiddleware)
     createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
         const { projectId } = body;
         const { id, group } = this.sessionStore.prepareCreate(); // prepareCreate doesn't need projectId
@@ -256,12 +349,14 @@ export class ChatController {
             files: {},
             updatedAt: new Date().toISOString(),
             projectId,
+            status: 'idle',
         });
     }
 
 
 
     @Post('/api/sessions/:sessionId/unsent')
+    @UseBefore(AuthMiddleware)
     saveUnsent(
         @Param('sessionId') sessionId: string,
         @Body() body: UnsentDataRequest,
@@ -278,7 +373,7 @@ export class ChatController {
         // If value is defined (and not null), update it.
         // If value is undefined, ignore (preserve existing).
 
-        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider'];
+        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider', 'fastMode'];
 
         for (const field of fields) {
             const value = body[field];
@@ -299,21 +394,39 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/chat')
-    sendMessage(
+    @UseBefore(AuthMiddleware)
+    async sendMessage(
         @Param('sessionId') sessionId: string,
-        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider },
+        @Body() body: { message: string; attachment?: any; selection?: { selector: string }, provider?: LlmProvider, fastMode?: boolean },
+        @Res() response: Response,
     ) {
-        return this.chatService.handleUserMessage(
+        const result = await this.chatService.addUserMessage(
             sessionId,
             body.message,
             body.attachment,
-            true, // allowVariants
             body.selection,
             body.provider,
+            body.fastMode,
         );
+
+        if (!result.skipped && result.promptData) {
+            setImmediate(() => {
+                this.chatService.generateResponse(
+                    sessionId,
+                    result.promptData!,
+                    result.turn,
+                    true,
+                ).catch(e => console.error('Background generation error', e));
+            });
+        }
+
+        return response.status(201).json({
+            turn: result.turn,
+        });
     }
 
     @Post('/api/sessions/:sessionId/uploads')
+    @UseBefore(AuthMiddleware)
     async uploadImage(
         @Param('sessionId') sessionId: string,
         @Req() req: Request,
@@ -395,6 +508,7 @@ export class ChatController {
     }
 
     @Delete('/api/sessions/:sessionId/uploads/:filename')
+    @UseBefore(AuthMiddleware)
     deleteUploadedFile(
         @Param('sessionId') sessionId: string,
         @Param('filename') filename: string,
@@ -475,6 +589,7 @@ export class ChatController {
     }
 
     @Get('/api/sessions/:sessionId')
+    @UseBefore(AuthMiddleware)
     getSession(@Param('sessionId') sessionId: string) {
         const snapshot =
             this.sessionStore.snapshot(sessionId) ??
@@ -489,41 +604,32 @@ export class ChatController {
             currentVersion: snapshot.currentVersion,
             currentTurn: snapshot.lastTurn ?? 0,
             provider: snapshot.provider ?? 'openai',
+            fastMode: snapshot.fastMode ?? false,
             history,
             unsent: snapshot.unsent,
+            status: snapshot.status,
+            errorMessage: snapshot.errorMessage,
+            projectId: snapshot.projectId,
+            subject: snapshot.subject,
         };
     }
 
 
 
     @Delete('/api/sessions/:sessionId')
+    @UseBefore(AuthMiddleware)
     deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
-            // Attempt to get session to find its project
-            // Use snapshot or getOrCreate. Since we are deleting, we just need metadata.
-            // If it doesn't exist on disk, getOrCreate might create a fresh one, which is fine as it returns default props,
-            // but we want to avoid creating files if we are about to delete.
-            // But SessionStore.getOrCreate DOES create files.
-            // We should use a method that returns undefined if not found, OR check if it exists.
-            // But for now, getOrCreate is standard. If it creates a temp one, we delete it anyway.
-            // Better: use sessionStore.snapshot(sessionId) ?? loadFromDisk logic?
-            // Actually, if we just want to clean up, retrieving it first is safer to ensure consistency.
-
-            // Wait, if it didn't exist, getOrCreate creates it with empty projectId.
-            // Effectively we wouldn't remove it from any project.
-            // But we have the projectId in the Project Entity!
-            // BUT ChatController doesn't know the projectId from the request params.
-            // So relying on the session file is necessary.
-            // If the session file is corrupted/missing, we might fail to clean up the project reference?
-            // This suggests a data integrity issue if file is missing but project has reference.
-            // For now, let's proceed with getOrCreate to read the projectId.
-
+            // Retrieve session to identify the project it belongs to.
             const session = this.sessionStore.getOrCreate(sessionId);
+
             if (session.projectId) {
                 this.projectService.removeSessionFromProject(session.projectId, sessionId);
             }
 
+            // Remove session files
             this.sessionStore.deleteSession(sessionId);
+
             return response.status(200).json({ message: 'Session deleted' });
         } catch (error) {
             console.error('Failed to delete session', error);
@@ -534,26 +640,19 @@ export class ChatController {
 
 
 
-    @Get('/api/sessions/:sessionId/turns/:turn/archive')
+    @Get('/api/sessions/:sessionId/:version/archive')
+    @UseBefore(AuthMiddleware)
     async downloadArchive(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response
-                .status(400)
-                .json({ message: 'Некорректный номер хода' });
-        }
-
         try {
-            // Resolve version from turn
-            const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-            if (version === undefined) {
+            const version = Number.parseInt(versionParam, 10);
+            if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
                 return response
-                    .status(404)
-                    .json({ message: 'Ход не найден или не содержит файлов' });
+                    .status(400)
+                    .json({ message: 'Invalid version' });
             }
 
             // Get code files
@@ -561,7 +660,7 @@ export class ChatController {
             if (!files) {
                 return response
                     .status(404)
-                    .json({ message: 'Файлы для указанного хода не найдены' });
+                    .json({ message: 'Files for the specified turn not found' });
             }
 
             const safeId =
@@ -573,7 +672,7 @@ export class ChatController {
                 if (!response.headersSent) {
                     response
                         .status(500)
-                        .json({ message: 'Не удалось сформировать архив' });
+                        .json({ message: 'Failed to create archive' });
                 } else {
                     response.end();
                 }
@@ -583,15 +682,15 @@ export class ChatController {
             response.setHeader('Content-Type', 'application/zip');
             response.setHeader(
                 'Content-Disposition',
-                `attachment; filename="session-${safeId}-turn${turn}.zip"`,
+                `attachment; filename="session-${safeId}-version${version}.zip"`,
             );
 
             archive.pipe(response);
 
             // Add code files
-            archive.append(files.html ?? '', { name: 'index.html' });
-            archive.append(files.css ?? '', { name: 'styles.css' });
-            archive.append(files.js ?? '', { name: 'script.js' });
+            for (const [filename, content] of Object.entries(files)) {
+                archive.append(content, { name: filename });
+            }
 
             // Add images
             try {
@@ -622,80 +721,78 @@ export class ChatController {
 
             void archive.finalize();
             return response;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to prepare session archive', error);
             return response
                 .status(500)
-                .json({ message: 'Не удалось подготовить архив' });
+                .json({ message: 'Failed to prepare archive' });
         }
     }
 
-    @Get('/api/sessions/:sessionId/turns/:turn/static/:filename')
-    getStaticFile(
+    @Get('/api/sessions/:sessionId/:version/files/:filename')
+    getFile(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() response: Response,
     ) {
-        // Basic validation
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).send('Invalid turn');
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
         }
 
-        // Allow alphanumeric, dashes, underscores, dots only
-        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
-            return response.status(400).send('Invalid filename');
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return response.status(404).send('Turn not found');
-        }
-
-        const validFiles = ['index.html', 'styles.css', 'script.js'];
+        const validFiles = ['index.html', 'styles.css', 'script.js', 'implementation_plan.md'];
         if (validFiles.includes(filename)) {
             const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
                 return response.status(404).send('Files not found');
             }
 
-            let content = '';
+            let content = files[filename];
             let contentType = 'text/plain';
 
-            switch (filename) {
-                case 'index.html':
-                    content = files.html;
-                    contentType = 'text/html';
-                    break;
-                case 'styles.css':
-                    content = files.css;
-                    contentType = 'text/css';
-                    break;
-                case 'script.js':
-                    content = files.js;
-                    contentType = 'application/javascript';
-                    break;
+            if (filename === 'index.html') contentType = 'text/html';
+            else if (filename === 'styles.css') contentType = 'text/css';
+            else if (filename === 'script.js') contentType = 'application/javascript';
+            else if (filename === 'implementation_plan.md') contentType = 'text/markdown';
+
+            if (content === undefined) {
+                // Should not happen if validFiles checked, but safety
+                return response.status(404).send('File content missing');
             }
 
             response.setHeader('Content-Type', contentType);
             return response.send(content);
         }
 
+        // Validate filename for fallback (alphanumeric, dashes, underscores, dots) to prevent path traversal
+        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        // Fallback for other files (images, variants of text files not in cache map?)
         const cwd = process.cwd();
         const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+        const safeVersion = version;
         const filePath = path.join(sessionRoot, safeId, 'versions', String(safeVersion), filename);
 
         if (fs.existsSync(filePath)) {
             const ext = path.extname(filename).toLowerCase();
             let contentType = 'application/octet-stream';
+            // Only allow serving images and specific text files if they fell through
             if (ext === '.png') contentType = 'image/png';
             if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+            if (ext === '.gif') contentType = 'image/gif';
+            if (ext === '.webp') contentType = 'image/webp';
+            if (ext === '.svg') contentType = 'image/svg+xml';
             if (ext === '.html') contentType = 'text/html';
             if (ext === '.css') contentType = 'text/css';
             if (ext === '.js') contentType = 'application/javascript';
+
+            if (contentType === 'application/octet-stream') {
+                // Fallback or potentially deny non-images if strict
+            }
 
             response.setHeader('Content-Type', contentType);
             return fs.createReadStream(filePath);
@@ -705,7 +802,43 @@ export class ChatController {
     }
 
 
+
+    @Get('/api/sessions/:sessionId/artifacts/:turn/:filename')
+    @UseBefore(AuthMiddleware)
+    getArtifact(
+        @Param('sessionId') sessionId: string,
+        @Param('turn') turnParam: string,
+        @Param('filename') filename: string,
+        @Res() response: Response,
+    ) {
+        const turn = Number.parseInt(turnParam, 10);
+        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
+            return response.status(400).send('Invalid turn');
+        }
+
+        // Security check for filename
+        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
+            return response.status(400).send('Invalid filename');
+        }
+
+        const content = this.sessionStore.getArtifact(sessionId, turn, filename);
+
+        if (content === undefined) {
+            return response.status(404).send('Artifact not found');
+        }
+
+        let contentType = 'text/plain';
+        if (filename.endsWith('.md')) contentType = 'text/markdown';
+        else if (filename.endsWith('.html')) contentType = 'text/html';
+        else if (filename.endsWith('.css')) contentType = 'text/css';
+        else if (filename.endsWith('.js')) contentType = 'application/javascript';
+
+        response.setHeader('Content-Type', contentType);
+        return response.send(content);
+    }
+
     @Post('/api/sessions/:sessionId/undo')
+    @UseBefore(AuthMiddleware)
     undoLastTurn(
         @Param('sessionId') sessionId: string,
         @Res() response: Response,
@@ -721,7 +854,8 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/clone')
+    @Post('/api/sessions/:sessionId/clone/:turn')
+    @UseBefore(AuthMiddleware)
     cloneTurn(
         @Param('sessionId') sessionId: string,
         @Param('turn') turnParam: string,
@@ -731,7 +865,7 @@ export class ChatController {
         if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
             return response
                 .status(400)
-                .json({ message: 'Некорректный номер хода' });
+                .json({ message: 'Invalid turn number' });
         }
 
         try {
@@ -777,38 +911,28 @@ export class ChatController {
             console.error('Failed to clone session by turn', error);
             return response
                 .status(400)
-                .json({ message: 'Не удалось инициировать клонирование хода' });
+                .json({ message: 'Failed to initiate turn cloning' });
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/static/:filename')
+    @Post('/api/sessions/:sessionId/:version/files/:filename')
     updateStaticFile(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Req() req: Request,
         @Res() response: Response
     ) {
         // Basic validation
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).send('Invalid turn');
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).send('Invalid version');
         }
 
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return response.status(404).send('Turn not found');
-        }
+        // Removed getVersionForTurn logic as we receive version directly
 
-        // Map filename to SessionFiles key
-        let fileKey: 'html' | 'css' | 'js' | undefined;
-        if (filename === 'index.html') fileKey = 'html';
-        else if (filename === 'styles.css') fileKey = 'css';
-        else if (filename === 'script.js') fileKey = 'js';
-
-        if (!fileKey) {
-            return response.status(400).send('Invalid filename');
-        }
+        // Map filename to SessionFiles key - REMOVED
+        // We now use filename directly
 
         const body = req.body;
         console.log(`[updateStaticFile] Saving ${filename}. Content-Type: ${req.headers['content-type']}. Body Type: ${typeof body}`);
@@ -818,9 +942,9 @@ export class ChatController {
         if (typeof body === 'string') {
             content = body;
         } else if (typeof body === 'object' && body !== null) {
-            // Fallback for JSON { content: "..." } or { html: "..." }
+            // Fallback for JSON { content: "..." }
             if (typeof body.content === 'string') content = body.content;
-            else if (typeof body[fileKey] === 'string') content = body[fileKey];
+            else if (typeof body[filename] === 'string') content = body[filename];
             else {
                 console.error('[updateStaticFile] Missing content in object body', body);
                 return response.status(400).send('Missing content');
@@ -834,7 +958,7 @@ export class ChatController {
             this.sessionStore.updateSessionFile(
                 sessionId,
                 version,
-                fileKey,
+                filename,
                 content
             );
             return response.status(200).send('OK');
@@ -842,24 +966,19 @@ export class ChatController {
             console.error('Failed to update file', error);
             return response
                 .status(500)
-                .json({ message: 'Не удалось обновить файл' });
+                .json({ message: 'Failed to update file' });
         }
     }
-    @Post('/api/sessions/:sessionId/turns/:turn/images')
+    @Post('/api/sessions/:sessionId/:version/images')
     async uploadGalleryImage(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Req() req: Request,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         const storage = multer.memoryStorage(); // Or temp disk storage
@@ -908,22 +1027,17 @@ export class ChatController {
         });
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    @Post('/api/sessions/:sessionId/:version/images/:filename/description')
     async updateImageDescription(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Body() body: { description: string },
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         if (typeof body.description !== 'string') {
@@ -943,21 +1057,16 @@ export class ChatController {
         }
     }
 
-    @Delete('/api/sessions/:sessionId/turns/:turn/images/:filename')
+    @Delete('/api/sessions/:sessionId/:version/images/:filename')
     async deleteImage(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         try {
@@ -975,21 +1084,16 @@ export class ChatController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/turns/:turn/images/:filename/describe')
+    @Get('/api/sessions/:sessionId/:version/images/:filename/describe')
     async generateImageDescription(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Param('filename') filename: string,
         @Res() res: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return res.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            return res.status(404).json({ message: 'Turn not found' });
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return res.status(400).json({ message: 'Invalid version' });
         }
 
         try {
@@ -1004,22 +1108,15 @@ export class ChatController {
         }
     }
 
-    @Get('/api/sessions/:sessionId/turns/:turn/images')
+    @Get('/api/sessions/:sessionId/:version/images')
     async getImages(
         @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
+        @Param('version') versionParam: string,
         @Res() response: Response,
     ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).json({ message: 'Invalid turn' });
-        }
-
-        const version = this.sessionStore.getVersionForTurn(sessionId, turn);
-        if (version === undefined) {
-            // Fallback to empty list or 404? 
-            // If turn exists but has no version, it's effectively version 0 for images usually
-            return response.json([]);
+        const version = Number.parseInt(versionParam, 10);
+        if (!Number.isFinite(version) || Number.isNaN(version) || version < 0) {
+            return response.status(400).json({ message: 'Invalid version' });
         }
 
         return this.imageService.listImages(sessionId, version);

@@ -1,0 +1,132 @@
+.artifactContainer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    background-color: var(--bg-primary);
+}
+
+.content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2rem;
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    color: var(--text-primary);
+    margin: 1rem;
+    background-color: white;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+    color: var(--text-primary);
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.content h1 {
+    font-size: 1.5em;
+    /* Reduced from 2em */
+}
+
+.content h2 {
+    font-size: 1.3em;
+    /* Reduced from 1.5em */
+    border-bottom: 1px solid var(--border-color);
+    /* padding-bottom: 0.3em; */
+}
+
+.content h3 {
+    font-size: 1.1em;
+    /* Reduced from 1.25em */
+}
+
+.content p {
+    margin-bottom: 1em;
+}
+
+.content ul,
+.content ol {
+    margin-left: 2em;
+    margin-bottom: 1em;
+}
+
+.content code {
+    background-color: var(--bg-secondary);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+}
+
+.content pre {
+    background-color: var(--bg-secondary);
+    padding: 1rem;
+    border-radius: 5px;
+    overflow-x: auto;
+    margin-bottom: 1em;
+}
+
+.content pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+.content blockquote {
+    border-left: 4px solid var(--border-color);
+    margin: 0;
+    padding-left: 1rem;
+    color: var(--text-secondary);
+    margin-bottom: 1em;
+}
+
+.content a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.content a:hover {
+    text-decoration: underline;
+}
+
+/* GitHub Alerts style */
+.content blockquote p {
+    margin: 0;
+}
+
+.content> :first-child {
+    margin-top: 0;
+}
+
+.implementedLabel {
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    background-color: var(--bg-tertiary);
+    border-radius: 4px;
+    font-size: 0.9em;
+    height: 28px;
+    line-height: 20px;
+}
+
+.colorContainer {
+    font-family: var(--font-mono);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+    font-size: 0.85rem;
+}
+
+.colorSwatch {
+    display: block;
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}

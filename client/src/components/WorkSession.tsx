@@ -2,6 +2,7 @@ import React from 'react';
 import { Chat } from './Chat';
 import { Workarea } from './Workarea';
 import { Session, LlmProvider, ChatAttachment } from '../types';
+import { ResizeHandle } from './ResizeHandle';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
@@ -18,18 +19,42 @@ interface WorkSessionProps {
     onDeleteAttachment?: (attachment: ChatAttachment) => void;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
-    onSaveUnsent?: (data: { input?: string | null }) => void;
+    onSaveUnsent?: (data: { input?: string | null; fastMode?: boolean }) => void;
+    onResizeStart?: (e: React.MouseEvent) => void;
+    isResizing?: boolean;
+    sessionIds: string[];
+    onSwitchSession: (id: string) => void;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
     private picker: ElementPicker;
     private previewRef: React.RefObject<Workarea | null>;
+    private chatRef: React.RefObject<Chat | null>;
+    private hasInitialScrollHappened = false;
 
     constructor(props: WorkSessionProps) {
         super(props);
         this.picker = new ElementPicker();
+        this.picker.setOnSelect(this.handleElementSelected);
         this.previewRef = React.createRef();
+        this.chatRef = React.createRef();
     }
+
+    getVersionForTurn = (turn: number): number => {
+        const { session } = this.props;
+        // Look backwards from the end of history to find the first message with a version <= turn
+        // Just like the server does
+        const relevantHistory = session.messages.filter(m => m.turn <= turn);
+        if (relevantHistory.length === 0) return 0;
+
+        for (let i = relevantHistory.length - 1; i >= 0; i--) {
+            const msg = relevantHistory[i];
+            if (typeof msg.version === 'number') {
+                return msg.version;
+            }
+        }
+        return 0;
+    };
 
     getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
         // Prepare to hide: Save scroll position before display becomes none
@@ -40,6 +65,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     }
 
     componentDidUpdate(prevProps: WorkSessionProps) {
+        // 0. Handle Initial Scroll on Visibility Reveal (For background loaded sessions)
+        if (this.props.isVisible && !this.hasInitialScrollHappened && this.chatRef.current) {
+            // If we have an active turn, scroll to it, otherwise bottom
+            if (this.props.session.activeTurn !== null && this.props.session.activeTurn !== undefined) {
+                this.chatRef.current.scrollToTurn(this.props.session.activeTurn);
+            } else {
+                this.chatRef.current.scrollToBottom();
+            }
+            this.hasInitialScrollHappened = true;
+        }
+
         // 1. Handle Session Switch (Visibility Change)
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();
@@ -68,13 +104,18 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.stopPicking();
         }
 
-        // 3. Handle Explicit Cache Refresh (e.g. on Turn completion)
+        // 3. Handle Explicit Cache Refresh (e.g. on Turn completion or File Change)
         if (this.props.session.pendingRefreshTurn !== null) {
             const turnToRefresh = this.props.session.pendingRefreshTurn;
             // Clear cache for this turn
             this.previewRef.current?.clearCache(turnToRefresh);
             // Acknowledge event by clearing the flag in session state
             this.props.onUpdateSession({ pendingRefreshTurn: null });
+        } else if (this.props.session.pendingFileRefresh) {
+            // Granular refresh
+            const { version, filename, turn } = this.props.session.pendingFileRefresh;
+            this.previewRef.current?.clearCache(version, filename, turn);
+            this.props.onUpdateSession({ pendingFileRefresh: null });
         }
 
         // 4. Handle Selection Restoration (e.g. after Undo or Picking)
@@ -92,18 +133,23 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         if (prevProps.session.activeTab !== this.props.session.activeTab) {
             if (this.props.session.activeTab !== 'preview') {
                 this.stopPicking();
+            } else {
+                // Switching TO preview. The iframe is preserved (hidden), so onLoad won't fire.
+                // We must manually restore the selection overlay.
+                if (this.props.session.selection) {
+                    this.visualizeSelection(this.props.session.selection);
+                }
             }
-            // If switching TO preview, iframe reloads -> onLoad handles restoration
         }
     }
 
-    visualizeSelection = (selector: string) => {
+    visualizeSelection = (selector: string, scrollTo: boolean = false) => {
         const previewInstance = this.previewRef.current;
         if (!previewInstance) return;
         const iframe = previewInstance.getIframe();
         if (!iframe) return;
 
-        this.picker.selectBySelector(iframe, selector);
+        this.picker.selectBySelector(iframe, selector, scrollTo);
     };
 
     handlePreviewLoad = () => {
@@ -114,6 +160,27 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
     componentWillUnmount() {
         this.picker.stop();
+    }
+
+    handleElementSelected = (selector: string | null) => {
+        // If we were in picking mode, stop it now
+        if (this.props.session.isPicking) {
+            this.picker.stop();
+            this.props.onUpdateSession({ isPicking: false });
+        }
+
+        // Update selection (e.g. from picking or from passive parent click)
+        this.props.onUpdateSession({ selection: selector });
+
+        // Ensure visualization is correct
+        if (selector) {
+            this.visualizeSelection(selector);
+        } else {
+            // If cleared (selector is null), we don't need to call visualizeSelection(null) 
+            // because clearSelection() in picker handles it, or picker is already stopped/cleared.
+            // But if we want to be safe or if clearing came from outside, we can force clear:
+            this.picker.clearSelection();
+        }
     }
 
     startPicking = () => {
@@ -128,9 +195,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
         this.props.onUpdateSession({ isPicking: true });
 
-        this.picker.start(iframe, (selector) => {
-            this.props.onUpdateSession({ selection: selector, isPicking: false });
-        });
+        this.picker.start(iframe);
     };
 
     stopPicking = () => {
@@ -139,13 +204,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
     };
 
     restoreSelection = (selector: string) => {
-        this.visualizeSelection(selector);
+        this.visualizeSelection(selector, true);
         this.props.onUpdateSession({ selection: selector });
     };
 
     clearSelection = () => {
         this.picker.clearSelection();
         this.props.onUpdateSession({ selection: null });
+    };
+
+    handleProceed = () => {
+        this.chatRef.current?.submit('Proceed');
     };
 
     render() {
@@ -162,7 +231,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             onDeleteAttachment,
             onAttachmentChange,
             unsentInput,
-            onSaveUnsent
+            onSaveUnsent,
+            sessionIds,
+            onSwitchSession
         } = this.props;
 
         if (session.status === 'pending' || session.status === 'unloaded') {
@@ -198,10 +269,13 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
         // Calculate current turn for Preview
         const currentTurn = session.activeTurn ?? session.currentTurn;
+        // Check if we are at the latest turn
+        const isLatest = (session.activeTurn === undefined || session.activeTurn === null || session.activeTurn === session.currentTurn);
 
         return (
             <div style={{ display: isVisible ? 'contents' : 'none' }}>
                 <Chat
+                    ref={this.chatRef}
                     messages={session.messages || []}
                     onSend={onSend}
                     status={session.status || 'idle'}
@@ -226,18 +300,36 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onAttachmentChange={onAttachmentChange}
                     unsentInput={unsentInput}
                     onSaveUnsent={onSaveUnsent}
+                    sessionIds={sessionIds}
+                    onSwitchSession={onSwitchSession}
+                    fastMode={session.unsent?.fastMode ?? session.fastMode}
+                    onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
+                    sessionTitle={session.subject}
+
                 />
+
+                {this.props.onResizeStart && (
+                    <ResizeHandle
+                        onMouseDown={this.props.onResizeStart}
+                        isActive={this.props.isResizing}
+                    />
+                )}
 
                 <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
-                    turn={currentTurn}
+                    version={this.getVersionForTurn(currentTurn)}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
+                    isResizing={this.props.isResizing}
+                    onProceed={this.handleProceed}
+                    isBusy={session.status === 'busy'}
+                    isLatest={isLatest}
+                    displayedTurn={currentTurn}
+                    fastMode={session.unsent?.fastMode ?? session.fastMode}
                 />
             </div>
         );
     }
 }
-

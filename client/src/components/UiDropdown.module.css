@@ -42,3 +42,14 @@
     width: 10px;
     height: 10px;
 }
+
+.ghost .select {
+    background-color: transparent;
+    border-color: transparent;
+    user-select: none;
+}
+
+.ghost .select:hover:not(:disabled) {
+    background-color: rgba(0, 0, 0, 0.05);
+    border-color: transparent;
+}

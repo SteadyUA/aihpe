@@ -1,0 +1,135 @@
+.wrapper {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: var(--bg-color);
+    /* Adjust as needed */
+    min-height: 44px;
+}
+
+.leftSide {
+    /* Restored width for hamburger click area */
+    /* Adjust based on needs */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    position: relative;
+    padding-left: 0.5rem;
+    /* For menu positioning */
+}
+
+.center {
+    flex: 1;
+    overflow: hidden;
+    /* Ensure tabs can scroll if needed */
+    /* padding: 0 0.5rem; */
+}
+
+.rightSide {
+    width: 60px;
+    /* Adjust based on needs */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    position: relative;
+    /* For menu positioning */
+}
+
+.avatar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background-color: var(--bg-secondary, #e5e7eb);
+    /* Fallback color */
+    color: var(--text-primary);
+    cursor: pointer;
+    /* Add pointer cursor */
+    user-select: none;
+}
+
+.hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.hamburger:hover {
+    background-color: var(--bg-hover, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary);
+}
+
+.statusIndicator {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--danger, #ef4444);
+    box-shadow: 0 0 0 2px var(--bg-color);
+    /* White border to separate from avatar */
+    transition: background-color 0.3s;
+}
+
+.statusIndicator.connected {
+    background-color: var(--success, #22c55e);
+    /* Alternative to border if preferred */
+}
+
+.menu {
+    position: absolute;
+    top: 100%;
+    /* Below the avatar/hamburger */
+    margin-top: 0.5rem;
+    background: var(--bg-color);
+    /* Same as header bg */
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    min-width: 150px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem 0;
+    overflow: hidden;
+}
+
+.menu.right {
+    right: 0;
+}
+
+.menu.left {
+    left: 0;
+}
+
+.menuItem {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    transition: background-color 0.2s;
+    background: none;
+    border: none;
+    text-align: left;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.menuItem:hover {
+    background-color: var(--bg-hover, rgba(0, 0, 0, 0.05));
+    color: var(--accent);
+}

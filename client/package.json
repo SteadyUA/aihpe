@@ -11,10 +11,14 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@types/marked": "^6.0.0",
+    "@types/turndown": "^5.0.6",
     "classnames": "^2.5.1",
+    "marked": "^17.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.11.0"
+    "react-router-dom": "^7.11.0",
+    "turndown": "^7.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

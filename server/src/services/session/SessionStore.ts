@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus } from '../../types/chat';
 import { sanitizeHistoryForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -20,8 +20,12 @@ type PersistedSession = {
     currentVersion?: number;
     lastTurn?: number;
     provider?: LlmProvider;
+    fastMode?: boolean;
     unsent?: UnsentData;
     projectId?: string;
+    status?: SessionStatus;
+    errorMessage?: string;
+    subject?: string;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -60,9 +64,10 @@ const DEFAULT_SESSION_SCRIPT = `(() => {
 })();\n`;
 
 const EMPTY_FILES: SessionFiles = {
-    html: '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
-    css: '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
-    js: DEFAULT_SESSION_SCRIPT,
+    'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
+    'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
+    'script.js': DEFAULT_SESSION_SCRIPT,
+    'implementation_plan.md': 'No plan created yet.',
 };
 
 const SESSION_ROOT = resolveSessionRoot();
@@ -72,9 +77,16 @@ const VERSION_DIRNAME = 'versions';
 @Service()
 export class SessionStore {
     private readonly sessions = new Map<string, SessionData>();
+    private nextGroupIndex = Math.floor(Math.random() * 12);
 
     constructor() {
         ensureDirectory(SESSION_ROOT);
+    }
+
+    private getNextGroup(): number {
+        const group = this.nextGroupIndex;
+        this.nextGroupIndex = (this.nextGroupIndex + 1) % 12;
+        return group;
     }
 
     getVersionForTurn(sessionId: string, turn: number): number | undefined {
@@ -107,9 +119,9 @@ export class SessionStore {
         return 0;
     }
 
-    create(projectId: string): SessionData {
+    create(projectId: string, group?: number): SessionData {
         const id = randomUUID();
-        const session = this.createFreshSession(id, projectId);
+        const session = this.createFreshSession(id, projectId, group);
         this.sessions.set(id, session);
         this.persistSession(session);
         return cloneSession(session);
@@ -117,7 +129,7 @@ export class SessionStore {
 
     prepareCreate(): { id: string; group: number } {
         const id = randomUUID();
-        const group = Math.floor(Math.random() * 12);
+        const group = this.getNextGroup();
         return { id, group };
     }
 
@@ -155,10 +167,12 @@ export class SessionStore {
             lastTurn: source.lastTurn,
             provider: source.provider,
             projectId: source.projectId,
+            status: 'idle', // Clone starts idle? Or copy? Usually idle as it's a new session.
         };
 
         clearPersistedSessionData(targetId);
         copyVersionHistory(sourceId, targetId);
+        this.copyArtifacts(sourceId, targetId);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -252,11 +266,15 @@ export class SessionStore {
             lastTurn: normalizedTurn,
             provider: source.provider, // Copy provider settings
             projectId: source.projectId,
+            status: 'idle',
+            subject: source.subject,
+            fastMode: source.fastMode,
         };
 
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
         copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
+        this.copyArtifacts(sourceId, targetId, normalizedTurn);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -331,6 +349,26 @@ export class SessionStore {
                 ? { ...EMPTY_FILES }
                 : readVersionFiles(sessionId, targetVersion) || { ...EMPTY_FILES };
 
+        // 6.5 Restore implementation_plan.md from artifact
+        const previousTurn = currentTurn - 1;
+        const previousPlanArtifact = path.join(
+            resolveSessionDir(sessionId),
+            'artifacts',
+            `implementation_plan.md.${previousTurn}`
+        );
+
+        if (fs.existsSync(previousPlanArtifact)) {
+            try {
+                const planContent = fs.readFileSync(previousPlanArtifact, 'utf-8');
+                snapshot['implementation_plan.md'] = planContent;
+            } catch (e) {
+                console.error(`Failed to restore plan artifact for turn ${previousTurn}`, e);
+            }
+        } else if (previousTurn === 0) {
+            // Turn 0 implies empty or initial plan
+            snapshot['implementation_plan.md'] = EMPTY_FILES['implementation_plan.md'];
+        }
+
         // 7. Update Session
         const updated: SessionData = {
             ...session,
@@ -345,7 +383,8 @@ export class SessionStore {
                 input: restoredInput,
                 selection: restoredSelection?.selector, // Extract selector string
                 attachment: userMessage?.attachment,
-            }
+            },
+            status: 'idle', // Reset status to idle to clear error state
         };
 
         this.sessions.set(sessionId, updated);
@@ -380,11 +419,14 @@ export class SessionStore {
             history: [],
             context: [],
             updatedAt: new Date(),
-            group: group ?? Math.floor(Math.random() * 12),
+            group: group ?? this.getNextGroup(),
             currentVersion: 0,
             lastTurn: 0,
             provider: 'openai', // Default provider
+            fastMode: false,
             unsent: {},
+            status: 'idle',
+            subject: '...',
         };
     }
 
@@ -438,7 +480,7 @@ export class SessionStore {
         // If history exists, user message starts Turn N+1.
         // System/Assistant/Tool messages belong to the SAME turn as the preceding User message.
 
-        // Wait, "lastTurn - номер последнего хода".
+        // Wait, "lastTurn - number of the last turn".
         // If I create a fresh session, lastTurn = 0.
         // First user message -> Turn 1?
         // Let's assume 1-based turns if we want "turn - 1" to make sense for "previous turn".
@@ -533,25 +575,15 @@ export class SessionStore {
     updateSessionFile(
         sessionId: string,
         version: number,
-        filename: keyof SessionFiles,
+        filename: string,
         content: string,
     ): SessionData {
         const session = this.getOrCreate(sessionId);
-
-        // We now allow editing past versions, so this check is removed:
-        // if (version !== session.currentVersion) { ... }
 
         const newFiles: SessionFiles = {
             ...session.files,
         };
 
-        // If we are editing the current version, update the main files object
-        // If we are editing an old version, we need to update that version's files specifically
-        // But wait, the logic for 'current version' files vs 'versioned' files storage is tricky in this store.
-        // 'session.files' holds the HEAD (current version). 
-        // Old versions are stored in 'versions' directory on disk.
-
-        // If editing current version:
         if (version === session.currentVersion) {
             newFiles[filename] = content;
             const updated: SessionData = {
@@ -564,32 +596,12 @@ export class SessionStore {
             return cloneSession(updated);
         }
 
-        // If editing past version:
-        // We don't update 'session.files' because that's HEAD.
-        // We just need to persist the file to the version directory.
-        // However, 'SessionData' object in memory doesn't hold old versions content typically, 
-        // except what's in 'history'.
-        // But 'files' in SessionData is ONLY HEAD.
-
-        // So for past versions, we just write to disk.
-        // And if we want to return the updated session, the session object itself might not change 
-        // (unless we track 'updatedAt').
-
-        // Let's write to disk.
+        // Editing past version
         ensureVersionSnapshot(sessionId, version, readVersionFiles(sessionId, version) || EMPTY_FILES);
-        // We need to overwrite the specific file now.
         const versionDir = resolveVersionDir(sessionId, version);
         ensureDirectory(versionDir);
 
-        // Map abstract filename (html/css/js) to actual filename
-        const actualFilename = filename === 'html' ? 'index.html' :
-            filename === 'css' ? 'styles.css' :
-                filename === 'js' ? 'script.js' :
-                    undefined;
-
-        if (actualFilename) {
-            fs.writeFileSync(path.join(versionDir, actualFilename), content, 'utf-8');
-        }
+        fs.writeFileSync(path.join(versionDir, filename), content, 'utf-8');
 
         const updated: SessionData = {
             ...session,
@@ -628,6 +640,52 @@ export class SessionStore {
         }
 
         return undefined;
+    }
+
+    savePlanArtifact(sessionId: string, turn: number): void {
+        const session = this.getOrCreate(sessionId);
+        // Save the plan state at the END of the current turn.
+
+        const sessionDir = resolveSessionDir(sessionId);
+        const artifactsDir = path.join(sessionDir, 'artifacts');
+
+        ensureDirectory(artifactsDir);
+
+        const planContent = session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'];
+        const artifactPath = path.join(artifactsDir, `implementation_plan.md.${turn}`);
+
+        try {
+            fs.writeFileSync(artifactPath, planContent, 'utf-8');
+        } catch (error) {
+            console.error(`Failed to save plan artifact for session ${sessionId} turn ${turn}`, error);
+        }
+    }
+
+
+    getArtifact(sessionId: string, turn: number, filename: string): string | undefined {
+        const sessionDir = resolveSessionDir(sessionId);
+        const artifactsDir = path.join(sessionDir, 'artifacts');
+        const artifactPath = path.join(artifactsDir, `${filename}.${turn}`);
+
+        if (fs.existsSync(artifactPath)) {
+            try {
+                return fs.readFileSync(artifactPath, 'utf-8');
+            } catch (error) {
+                console.error(`Failed to read artifact ${filename}.${turn} for session ${sessionId}`, error);
+            }
+        } else if (filename === 'implementation_plan.md') {
+            const legacyPath = path.join(artifactsDir, `plan.md.${turn}`);
+            if (fs.existsSync(legacyPath)) {
+                try {
+                    return fs.readFileSync(legacyPath, 'utf-8');
+                } catch (error) {
+                    console.error(`Failed to read legacy artifact plan.md.${turn} for session ${sessionId}`, error);
+                }
+            }
+        }
+
+        // Return default if missing
+        return EMPTY_FILES[filename as keyof SessionFiles];
     }
 
     getAllHistory(sessionId: string): ChatMessage[] | undefined {
@@ -671,6 +729,8 @@ export class SessionStore {
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
             provider: update.provider ?? session.provider,
+            fastMode: update.fastMode ?? session.fastMode,
+            status: update.status ?? session.status,
         };
 
         this.sessions.set(sessionId, merged);
@@ -697,17 +757,21 @@ export class SessionStore {
             const versionDir = resolveVersionDir(sessionId, currentVersion);
 
             const files: SessionFiles = {
-                html: readFileOrDefault(
+                'index.html': readFileOrDefault(
                     path.join(versionDir, 'index.html'),
-                    EMPTY_FILES.html,
+                    EMPTY_FILES['index.html'],
                 ),
-                css: readFileOrDefault(
+                'styles.css': readFileOrDefault(
                     path.join(versionDir, 'styles.css'),
-                    EMPTY_FILES.css,
+                    EMPTY_FILES['styles.css'],
                 ),
-                js: readFileOrDefault(
+                'script.js': readFileOrDefault(
                     path.join(versionDir, 'script.js'),
-                    EMPTY_FILES.js,
+                    EMPTY_FILES['script.js'],
+                ),
+                'implementation_plan.md': readFileOrDefault(
+                    path.join(versionDir, 'implementation_plan.md'),
+                    EMPTY_FILES['implementation_plan.md'],
                 ),
             };
 
@@ -724,7 +788,11 @@ export class SessionStore {
                 currentVersion,
                 lastTurn: parsed.lastTurn ?? 0,
                 provider: parsed.provider ?? 'openai',
-                unsent: parsed.unsent ?? {},
+                fastMode: parsed.fastMode ?? false,
+                unsent: parsed.unsent || {},
+                status: parsed.status ?? 'idle',
+                errorMessage: parsed.errorMessage,
+                subject: parsed.subject,
             };
 
             // Attempt to load messages.json and context.json from session root
@@ -770,6 +838,48 @@ export class SessionStore {
         }
     }
 
+    private copyArtifacts(sourceId: string, targetId: string, maxTurn?: number): void {
+        const sourceDir = path.join(resolveSessionDir(sourceId), 'artifacts');
+        const targetDir = path.join(resolveSessionDir(targetId), 'artifacts');
+
+        if (!fs.existsSync(sourceDir)) {
+            return;
+        }
+
+        try {
+            ensureDirectory(targetDir);
+            const files = fs.readdirSync(sourceDir);
+
+            for (const file of files) {
+                // Filename format: name.ext.turn
+                // We want to copy if turn <= maxTurn (if maxTurn defined)
+
+                if (maxTurn !== undefined) {
+                    const parts = file.split('.');
+                    // Safe check for turn suffix
+                    const turnStr = parts[parts.length - 1];
+                    const turn = parseInt(turnStr, 10);
+
+                    if (!isNaN(turn)) {
+                        if (turn > maxTurn) {
+                            continue;
+                        }
+                    }
+                }
+
+                fs.copyFileSync(
+                    path.join(sourceDir, file),
+                    path.join(targetDir, file)
+                );
+            }
+        } catch (error) {
+            console.error(
+                `Failed to copy artifacts from ${sourceId} to ${targetId}`,
+                error,
+            );
+        }
+    }
+
     private persistSession(session: SessionData): void {
         const sessionDir = resolveSessionDir(session.id);
         const versionDir = resolveVersionDir(session.id, session.currentVersion);
@@ -801,6 +911,10 @@ export class SessionStore {
                 lastTurn: session.lastTurn,
                 provider: session.provider,
                 unsent: session.unsent,
+                status: session.status,
+                subject: session.subject,
+                fastMode: session.fastMode,
+                errorMessage: session.errorMessage,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -809,17 +923,27 @@ export class SessionStore {
             );
             fs.writeFileSync(
                 path.join(versionDir, 'index.html'),
-                session.files.html,
+                session.files['index.html'],
                 'utf-8',
             );
             fs.writeFileSync(
                 path.join(versionDir, 'styles.css'),
-                session.files.css,
+                session.files['styles.css'],
                 'utf-8',
             );
             fs.writeFileSync(
                 path.join(versionDir, 'script.js'),
-                session.files.js,
+                session.files['script.js'],
+                'utf-8',
+            );
+            fs.writeFileSync(
+                path.join(versionDir, 'script.js'),
+                session.files['script.js'],
+                'utf-8',
+            );
+            fs.writeFileSync(
+                path.join(versionDir, 'implementation_plan.md'),
+                session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'],
                 'utf-8',
             );
         } catch (error: any) {
@@ -937,9 +1061,10 @@ function persistVersionFiles(
 ): void {
     const versionDir = resolveVersionDir(sessionId, version);
     ensureDirectory(versionDir);
-    fs.writeFileSync(path.join(versionDir, 'index.html'), files.html, 'utf-8');
-    fs.writeFileSync(path.join(versionDir, 'styles.css'), files.css, 'utf-8');
-    fs.writeFileSync(path.join(versionDir, 'script.js'), files.js, 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'index.html'), files['index.html'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'styles.css'), files['styles.css'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'script.js'), files['script.js'], 'utf-8');
+    fs.writeFileSync(path.join(versionDir, 'implementation_plan.md'), files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'], 'utf-8');
 }
 
 function ensureVersionSnapshot(
@@ -988,17 +1113,21 @@ function readVersionFiles(
         return undefined;
     }
     return {
-        html: readFileOrDefault(
+        'index.html': readFileOrDefault(
             path.join(versionDir, 'index.html'),
-            EMPTY_FILES.html,
+            EMPTY_FILES['index.html'],
         ),
-        css: readFileOrDefault(
+        'styles.css': readFileOrDefault(
             path.join(versionDir, 'styles.css'),
-            EMPTY_FILES.css,
+            EMPTY_FILES['styles.css'],
         ),
-        js: readFileOrDefault(
+        'script.js': readFileOrDefault(
             path.join(versionDir, 'script.js'),
-            EMPTY_FILES.js,
+            EMPTY_FILES['script.js'],
+        ),
+        'implementation_plan.md': readFileOrDefault(
+            path.join(versionDir, 'implementation_plan.md'),
+            EMPTY_FILES['implementation_plan.md'],
         ),
     };
 }
@@ -1050,5 +1179,10 @@ function cloneSession(session: SessionData): SessionData {
         provider: session.provider,
         unsent: session.unsent ? { ...session.unsent } : undefined,
         projectId: session.projectId,
+
+        status: session.status,
+        errorMessage: session.errorMessage,
+        subject: session.subject,
+        fastMode: session.fastMode,
     };
 }

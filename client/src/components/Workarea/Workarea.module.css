@@ -33,7 +33,7 @@
     align-items: center;
     background: #f8fafc;
     border-bottom: 1px solid var(--border-color);
-    padding: 0 0.5rem;
+    /* padding: 0 0.25rem; */
     gap: 0.25rem;
     flex: 0 0 auto;
 }
@@ -47,13 +47,27 @@
     cursor: pointer;
     color: var(--text-secondary);
     border-radius: 4px 4px 0 0;
-    transition: all 0.2s;
     white-space: nowrap;
+    line-height: 16px;
+    height: 30px;
 }
 
 .assetTab:hover {
     background: rgba(0, 0, 0, 0.03);
     color: var(--text-primary);
+}
+
+.versionLabel {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background-color: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin: 0 0.5rem;
+    align-self: center;
+    user-select: none;
+    border: 1px solid var(--border-color);
 }
 
 .assetTab.active,
@@ -62,8 +76,7 @@
     border-color: var(--border-color);
     color: var(--accent);
     font-weight: 500;
-    box-shadow: 0 1px 0 white;
-    margin-bottom: -1px;
+    /* box-shadow: 0 1px 0 white; */
     z-index: 1;
     position: relative;
 }
@@ -75,7 +88,9 @@
     width: 100%;
     border-bottom: 1px solid white;
     bottom: -1px;
-    left: 0;
+    left: 1px;
+    margin-left: -1px;
+    margin-right: -1px;
 }
 
 .assetsSpacer {
@@ -89,6 +104,7 @@
     position: relative;
     background: white;
     display: none;
+    border-left: 1px solid var(--border-color);
 }
 
 .panel.codeView .assetsPanels {
@@ -99,4 +115,15 @@
 .loading {
     padding: 1rem;
     color: var(--text-secondary);
+}
+
+.notificationDot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+    margin-bottom: 0.1rem;
+    background-color: var(--accent);
+    /* Using accent color for notification */
 }

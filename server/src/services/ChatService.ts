@@ -1,5 +1,5 @@
 import { Inject, Service } from 'typedi';
-import { ChatAttachment, ChatMessage, LlmProvider, SessionData } from '../types/chat';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionData, SessionStatus } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
@@ -12,6 +12,7 @@ import path from 'path';
 interface ChatResult {
     message: string;
     session: SessionData;
+    turn: number;
 }
 
 @Service()
@@ -24,14 +25,23 @@ export class ChatService {
         private readonly projectService: ProjectService,
     ) { }
 
-    async handleUserMessage(
+    async addUserMessage(
         sessionId: string,
         userMessage: string,
         attachment?: ChatAttachment,
-        allowVariants: boolean = true,
         selection?: { selector: string },
         provider?: LlmProvider,
-    ): Promise<ChatResult> {
+        fastMode?: boolean,
+    ): Promise<{
+        turn: number;
+        session: SessionData;
+        promptData?: {
+            message: string;
+            attachment?: ChatAttachment;
+            selection?: { selector: string };
+        };
+        skipped: boolean;
+    }> {
         const trimmed = userMessage.trim();
         const normalizedAttachment = await this.prepareAttachment(sessionId, attachment);
         const hasContent =
@@ -47,8 +57,9 @@ export class ChatService {
                 'Message is empty. No changes applied.',
             );
             return {
-                message: 'Message is empty. No changes applied.',
+                turn: session.lastTurn ?? 0,
                 session,
+                skipped: true,
             };
         }
 
@@ -67,7 +78,11 @@ export class ChatService {
         );
         const now = new Date();
         // Determine turn: User message starts a new turn
+        // Determine turn: User message starts a new turn
         const currentTurn = currentSessionData.lastTurn ?? 0;
+
+
+
         const newTurn = currentTurn + 1;
 
         const userMessageEntry: ChatMessage = {
@@ -95,37 +110,78 @@ export class ChatService {
             context: [...currentSessionData.context, contextEntry],
             lastTurn: newTurn, // Update lastTurn
             updatedAt: now,
+            fastMode: fastMode ?? currentSessionData.fastMode, // Persist fastMode if provided
             unsent: undefined // Clear unsent data as we just sent it
         });
 
+        return {
+            turn: newTurn,
+            session: this.sessionStore.getOrCreate(sessionId),
+            promptData: {
+                message: trimmed,
+                attachment: normalizedAttachment,
+                selection,
+            },
+            skipped: false,
+        };
+    }
+
+    async generateResponse(
+        sessionId: string,
+        promptData: {
+            message: string;
+            attachment?: ChatAttachment;
+            selection?: { selector: string };
+        },
+        turn: number,
+        allowVariants: boolean = true,
+        fastModeOverride?: boolean,
+    ): Promise<void> {
         this.notifyStatus(sessionId, 'started', 'Thinking...');
+
+        const currentSessionData = this.sessionStore.getOrCreate(sessionId);
 
         // 2. Prepare conversation history for prompt
         // Use separate context list. Exclude the last message (just added) as it's the instruction.
-        const currentContext = this.sessionStore.getOrCreate(sessionId).context;
+        const currentContext = currentSessionData.context;
+
+        // Apply Step-based Window logic
+        // Shift window every 5 turns (first shift at 15)
+        let startTurn = 1;
+        if (turn >= 15) {
+            const shifts = Math.floor((turn - 15) / 5) + 1;
+            startTurn = 5 * shifts;
+        }
+
+        // We assume the last message in context is the one we just added (the user instruction)
+        // Check if context has message for current turn?
+        // Note: addUserMessage added it. So currentContext should have it at the end.
+        // historyCandidates should exclude it.
+        const historyCandidates = currentContext.slice(0, -1).filter((msg) => (msg.turn ?? 0) >= startTurn);
+
         // hydrate attachments for the prompt/LLM
-        // Note: We need to hydrate ONLY the items that are going to be sent to LLM? 
+        // Note: We need to hydrate ONLY the items that are going to be sent to LLM?
         // Or do we need to hydrate history too?
-        // AI SDK usually handles history images if they have dataUrl. 
+        // AI SDK usually handles history images if they have dataUrl.
         // But our stored history now DOES NOT have dataUrl.
         // We probably need to hydrate the ENTIRE conversation history that has images?
         // Or at least the current message's attachments.
 
-        // For now, let's just hydrate the current request attachments. 
+        // For now, let's just hydrate the current request attachments.
         // If we want history images to work, we'd need to hydrate conversation too.
-        // Given the request, "messages.json не должен сохранять dataUrl", 
+        // Given the request, "messages.json must not save dataUrl",
         // implies we should re-hydrate on read/send using PUBLIC_HOST if/when needed.
         // Current implementation passes 'conversation' to generatePage which builds messages.
         // We should map the conversation and hydrate images there!
 
         // Let's hydrate the current attachment first (for the prompt 'user' message)
-        const hydratedCurrentAttachment = await this.hydrateAttachment(sessionId, normalizedAttachment);
+        const hydratedCurrentAttachment = await this.hydrateAttachment(sessionId, promptData.attachment);
 
         // We also need to hydrate conversation history images if they are used by the model
         // Ideally we should do this in generatePage or before passing.
 
         // Let's create a hydrated copy of the conversation for the LLM
-        const conversation = await Promise.all(currentContext.slice(0, -1).map(async (msg) => {
+        const conversation = await Promise.all(historyCandidates.map(async (msg) => {
             if (msg.attachment) {
                 return {
                     ...msg,
@@ -136,25 +192,25 @@ export class ChatService {
         }));
 
         let selectorsSummary = '';
-        if (normalizedAttachment) {
-            selectorsSummary = `Image: ${normalizedAttachment.filename}`;
+        if (promptData.attachment) {
+            selectorsSummary = `Image: ${promptData.attachment.filename}`;
         }
-        const selectionContext = selection
-            ? `Выбран элемент: ${selection.selector}.`
+        const selectionContext = promptData.selection
+            ? `Selected element: ${promptData.selection.selector}.`
             : '';
 
-        let effectiveInstructions = trimmed;
+        let effectiveInstructions = promptData.message;
         if (selectionContext) {
             effectiveInstructions = `${selectionContext} ${effectiveInstructions}`;
         }
         if (!effectiveInstructions && selectorsSummary) {
-            effectiveInstructions = `Обработай вложенные скриншоты выбранных элементов: ${selectorsSummary}.`;
+            effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
 
-        // Fetch project context
         const project = this.projectService.getProject(currentSessionData.projectId);
-        const projectGoal = project?.goal;
+        const rulesAndGoal = project?.rulesAndGoal;
         const imageGenerationPref = project?.imageGenerationPref;
+        const modelRole = project?.modelRole;
 
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
@@ -169,8 +225,17 @@ export class ChatService {
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
                 currentVersion: currentSessionData.currentVersion,
-                projectGoal,
+                rulesAndGoal,
                 imageGenerationPref,
+                modelRole,
+                fastMode: fastModeOverride ?? currentSessionData.fastMode,
+                subject: currentSessionData.subject,
+                onPatch: (patch) => {
+                    this.sseService.emitSessionUpdate({
+                        sessionId,
+                        ...patch,
+                    });
+                },
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
@@ -191,67 +256,35 @@ export class ChatService {
                         }
                     }
                 },
-            });
+                onVariantRequest: async (instruction) => {
+                    this.notifyStatus(
+                        sessionId,
+                        'generating',
+                        `Tool call: generate_variant`,
+                    );
 
-            if (generation.variantRequest) {
-                const { count, instructions } = generation.variantRequest;
+                    // Re-instantiate session data just in case
+                    const session = this.sessionStore.getOrCreate(sessionId);
 
-                // 1. Update Source Session Context
-                // Persist the tool call (generation.newMessages) in the context
-                // This ensures the model knows it has already proposed variants if the user asks again
-                const currentSession = this.sessionStore.getOrCreate(sessionId);
-
-                // The triggering User message is the last one in the current context
-                const triggerUserMsg = currentSession.context[currentSession.context.length - 1];
-
-                // Prepare new messages (Tool Call) with correct turn and version
-                const toolCallMessages: ChatMessage[] = (generation.newMessages || []).map(msg => ({
-                    ...msg,
-                    turn: newTurn,
-                    version: currentSession.currentVersion,
-                    // Ensure createdAt is a Date
-                    createdAt: new Date(msg.createdAt)
-                }));
-
-                // Upsert source session: Add tool messages to CONTEXT only
-                // (User requested History to remain as "Created variants..." summary only)
-                this.sessionStore.upsert(sessionId, {
-                    context: [...currentSession.context, ...toolCallMessages],
-                });
-
-                this.notifyStatus(
-                    sessionId,
-                    'completed',
-                    `Starting generation of ${count} variants...`,
-                );
-
-                for (let i = 0; i < count; i++) {
-                    // Clone from BEFORE the user request (targetTurn)
-                    const targetTurn = Math.max(0, newTurn - 1);
+                    const targetTurn = Math.max(0, turn - 1);
                     const { id: variantId } = this.sessionStore.prepareClone(sessionId);
                     const variantGroup = Math.floor(Math.random() * 32);
 
-                    // validSession is the session state UP TO targetTurn (clean history/context)
                     const newSession = await this.sessionStore.executeCloneAtTurn(variantId, sessionId, targetTurn);
 
-                    // 2. Inject Context into Variant Session
-                    // We want the new session to "know" about the request and the tool call
-                    // So we append [User Request] + [Tool Call] to its context
-                    // And update its lastTurn so the next message comes after them
-
-                    const contextToInject = [triggerUserMsg, ...toolCallMessages];
-
+                    // 2. Set up the new session
                     this.sessionStore.upsert(newSession.id, {
                         group: variantGroup,
-                        context: [...newSession.context, ...contextToInject],
-                        lastTurn: newTurn, // Advance turn to match the injected messages
+                        context: newSession.context, // Already correct from clone
+                        lastTurn: targetTurn,
                     });
 
-                    // Add the new session to the project
+                    // Add to project
                     if (session.projectId) {
                         this.projectService.addSessionToProject(session.projectId, newSession.id);
                     }
 
+                    // Emit creation event
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
                         newSessionId: newSession.id,
@@ -259,46 +292,69 @@ export class ChatService {
                         projectId: session.projectId,
                     });
 
-                    // Trigger generation for the new session in the background
-                    const variantInstruction =
-                        instructions[i] || effectiveInstructions;
+                    // Recursively call addUserMessage for the new session?
+                    // Wait, generate_variant tool triggers generation for the new session.
+                    // We need to simulate a user message reception there?
+                    // Or just trigger generation?
+                    // handleUserMessage was calling itself recursively.
+                    // Now we should probably call addUserMessage + generateResponse?
+                    // Actually, `instruction` is the user message for the new session.
 
-                    this.handleUserMessage(
+                    this.addUserMessage(
                         newSession.id,
-                        variantInstruction,
+                        instruction,
                         undefined,
-                        false,
-                    ).catch((e) =>
+                        undefined,
+                        undefined,
+                        undefined, // Do NOT persist fastMode
+                    ).then(async (result) => {
+                        if (!result.skipped && result.promptData) {
+                            await this.generateResponse(newSession.id, result.promptData, result.turn, false, true);
+                        }
+                    }).catch((e) =>
                         console.error(
                             `Failed to generate variant for session ${newSession.id}`,
                             e,
                         ),
                     );
-                }
 
-                const summary = `Created ${count} variants in new sessions.`;
-                this.appendAssistantMessage(
-                    sessionId,
-                    summary,
-                    session.currentVersion,
-                    false, // Do not add to context (we already added the real tool call)
-                );
+                    return `Variant created in session: ${newSession.id}`;
+                },
+            });
 
-                return {
-                    message: summary,
-                    session: this.sessionStore.getOrCreate(sessionId),
-                };
-            }
 
-            if (generation.targetVersion) {
+            if (generation.targetVersion !== undefined && generation.targetVersion !== null) {
+                // Merge existing files with new changes to avoid overwriting with partial updates
+                const mergedFiles = { ...currentSessionData.files, ...generation.files };
+
                 const updated = this.sessionStore.updateFiles(
                     sessionId,
-                    generation.files,
+                    mergedFiles,
                     generation.targetVersion,
                 );
                 await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
+
+                // Save implementation_plan.md artifact for the current turn (before notifying changes)
+                this.sessionStore.savePlanArtifact(sessionId, updated.lastTurn ?? 0);
+
+                // Detect and emit file changes
+                for (const [filename, content] of Object.entries(generation.files)) {
+                    const oldContent = currentSessionData.files[filename as keyof typeof currentSessionData.files];
+                    // Compare content. Note: files might be undefined in old session if new.
+                    if (content !== oldContent) {
+                        this.sseService.emitFileChange({
+                            sessionId,
+                            version: generation.targetVersion,
+                            filename,
+                            turn: updated.lastTurn ?? 0,
+                        });
+                    }
+                }
             } else {
                 // No changes to files/version, just append messages
+                // Ensure artifact is saved for this turn even if no files changed
+                const session = this.sessionStore.getOrCreate(sessionId);
+                this.sessionStore.savePlanArtifact(sessionId, session.lastTurn ?? 0);
             }
 
             // Re-fetch strict session state
@@ -371,26 +427,36 @@ export class ChatService {
                 );
             }
 
+            // Construct the assistant message object to send to client
+            const assistantMessage: ChatMessage = {
+                role: 'assistant',
+                content: generation.summary,
+                createdAt: new Date(),
+                version: updated.currentVersion,
+                turn: updated.lastTurn ?? 0,
+            };
+
             this.notifyStatus(
                 sessionId,
                 'completed',
                 'Request completed.',
-                generation.summary,
+                {
+                    message: assistantMessage
+                },
             );
 
-            return {
-                message: generation.summary,
-                session: updated,
-            };
+
+
         } catch (error) {
             const description = this.describeError(error);
             this.notifyStatus(
                 sessionId,
                 'error',
-                'Failed to process request.',
+                description,
                 description,
             );
-            throw error;
+            // We don't throw here as this is a background task now
+            console.error('Generation failed:', error);
         }
     }
 
@@ -406,16 +472,63 @@ export class ChatService {
             message,
             details,
         });
+
+        // Map ChatStatus to SessionStatus for persistence
+        // ChatStatus: 'started' | 'generating' | 'completed' | 'error' | 'skipped'
+        // SessionStatus: ChatStatus | 'idle'
+
+        let newStatus: SessionStatus = status;
+        if (status === 'completed' || status === 'skipped') {
+            newStatus = 'idle';
+        } else if (status === 'started' || status === 'generating') {
+            // Keep as is, or map to 'busy'?
+            // Client uses 'busy' for 'started'.
+            // But we defined SessionStatus = ChatStatus | 'idle'. 
+            // So we store 'started'/'generating'. Client should handle 'started' as busy.
+        }
+
+        this.sessionStore.upsert(sessionId, {
+            status: newStatus,
+            errorMessage: status === 'error' ? message : undefined,
+        });
     }
 
     private describeError(error: unknown): string {
-        if (error instanceof Error && error.message) {
+        let current = error;
+        // Limit depth to avoid infinite loops
+        for (let i = 0; i < 5; i++) {
+            if (current instanceof Error) {
+                // Check if it is a specific error wrapping another one (like RetryError from Vercel AI SDK)
+                // Some retry errors have a 'lastError' property
+                if ((current as any).lastError) {
+                    current = (current as any).lastError;
+                    continue;
+                }
+
+                // If message is generic and there is a cause, look deeper
+                const message = current.message;
+                const isGeneric = message.includes('No output generated') || message.includes('Failed to process');
+
+                if (isGeneric && (current as any).cause) {
+                    current = (current as any).cause;
+                    continue;
+                }
+
+                return message;
+            }
+            break;
+        }
+
+        if (typeof current === 'string') {
+            return current;
+        }
+
+        // Fallback to original if we couldn't dig deeper but it was an error
+        if (error instanceof Error) {
             return error.message;
         }
-        if (typeof error === 'string') {
-            return error;
-        }
-        return 'неизвестная ошибка';
+
+        return 'unknown error';
     }
 
     private async prepareAttachment(
@@ -441,7 +554,7 @@ export class ChatService {
                         type: 'image',
                         filename: attachment.filename,
                         url: attachment.url || '',
-                        // dataUrl: undefined, // Do not store base64
+
                         id: attachment.id?.trim(),
                         originalName: attachment.originalName
                     };
@@ -549,7 +662,7 @@ export class ChatService {
     ): any {
         if (!selection) return content;
         if (typeof content === 'string') {
-            return `[Выбран элемент: ${selection.selector}] ${content}`;
+            return `[Selected element: ${selection.selector}] ${content}`;
         }
         return content;
     }

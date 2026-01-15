@@ -12,7 +12,6 @@ import {
     GeneratePageRequest,
     GeneratePageResult,
     LlmClient,
-    VariantRequest,
 } from './types';
 import { ImageService } from '../image/ImageService';
 
@@ -20,9 +19,9 @@ const FALLBACK_RESPONSE: GeneratePageResult = {
     summary:
         'API key not configured. Returning existing files without modifications. Configure OPENAI_API_KEY or GEMINI_API_KEY.',
     files: {
-        html: '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
-        css: '',
-        js: '',
+        'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
+        'styles.css': '',
+        'script.js': '',
     },
 };
 
@@ -54,13 +53,16 @@ export class AiSdkClient implements LlmClient {
             return FALLBACK_RESPONSE;
         }
 
-        const systemPrompt = this.buildSystemPrompt(request.projectGoal, request.imageGenerationPref);
+        const systemPrompt = this.buildSystemPrompt(
+            request.rulesAndGoal,
+            request.imageGenerationPref,
+            request.modelRole
+        );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
         let currentFiles = { ...request.files };
-        let finalSummary = '';
-        let variantRequest: VariantRequest | undefined;
+
 
         // Tool definitions (kept for usage in loop)
         const tools: Record<string, any> = {
@@ -84,9 +86,8 @@ export class AiSdkClient implements LlmClient {
                     file: 'index.html' | 'styles.css' | 'script.js';
                     summary: string;
                 }) => {
-                    if (file === 'index.html') return currentFiles.html;
-                    if (file === 'styles.css') return currentFiles.css;
-                    if (file === 'script.js') return currentFiles.js;
+                    const content = currentFiles[file];
+                    if (content !== undefined) return content;
                     return 'File not found';
                 },
             }),
@@ -122,12 +123,23 @@ export class AiSdkClient implements LlmClient {
                     newString: string;
                     summary: string;
                 }) => {
-                    this.ensureNextVersion(request.sessionId);
+                    // Logic for Workflow:
+                    // 1. If editing code files, we MUST ensure a new version exists.
+                    //    This matches the FIRST code edit in this turn.
 
-                    let content = '';
-                    if (file === 'index.html') content = currentFiles.html;
-                    else if (file === 'styles.css') content = currentFiles.css;
-                    else if (file === 'script.js') content = currentFiles.js;
+                    if (this.targetVersion === undefined) {
+                        this.ensureNextVersion(request.sessionId);
+                    }
+
+                    const versionToUpdate = this.targetVersion !== undefined ? this.targetVersion : request.currentVersion;
+
+                    let content = currentFiles[file] || '';
+                    if (!content && (file === 'styles.css' || file === 'script.js')) {
+                        // Allow empty css/js if undefined
+                        content = '';
+                    } else if (content === undefined) {
+                        return `Error: File ${file} not found.`;
+                    }
 
                     let targetString = oldString;
                     if (!content.includes(targetString)) {
@@ -145,10 +157,6 @@ export class AiSdkClient implements LlmClient {
                                 '\n',
                             );
                             if (normalizedContent.includes(normalizedTarget)) {
-                                // We found a match with normalized line endings.
-                                // However, simple replace on 'content' won't work directly if indices differ.
-                                // For simplicity/safety, we fail if strict match fails but hints validation
-                                // OR we update the file content to be normalized (acceptable for this project).
                                 content = normalizedContent;
                                 targetString = normalizedTarget;
                             } else if (
@@ -168,29 +176,35 @@ export class AiSdkClient implements LlmClient {
                         return `Error: oldString found multiple times in ${file}. Provide more unique context.`;
 
                     const newContent = content.replace(targetString, newString);
-                    if (file === 'index.html') currentFiles.html = newContent;
-                    else if (file === 'styles.css')
-                        currentFiles.css = newContent;
-                    else if (file === 'script.js') currentFiles.js = newContent;
+                    currentFiles[file] = newContent;
+
+
                     return `Successfully updated ${file}`;
                 },
             }),
-            summary: tool({
-                description:
-                    'Call this when you are done making changes to provide a summary of what you did to the user. You can use Markdown to format the message.',
+            update_subject: tool({
+                description: 'Update the subject/topic of the session. Use this tool when the session subject is "..." or generic, and the conversation context allows for a better, short summary (3-5 words).',
                 inputSchema: z.object({
-                    message: z
-                        .string()
-                        .describe(
-                            'The summary message to display to the user. Use Markdown formatting (bold, italic, lists) to make it more readable.',
-                        ),
+                    subject: z.string().describe('The new subject for the session. Should be concise (3-5 words max) and in the language of the user\'s messages.'),
                 }),
-                execute: async ({ message }: { message: string }) => {
-                    finalSummary = message;
-                    return 'Summary delivered.';
+                execute: async ({ subject }: { subject: string }) => {
+                    this.sessionStore.upsert(request.sessionId, { subject });
+                    if (request.onPatch) {
+                        request.onPatch({ subject });
+                    }
+                    return `Session subject updated to: "${subject}"`;
+                },
+            }),
+            read_subject: tool({
+                description: 'Read the current subject/topic of the session. Use this to check if the subject is still "..." or if it needs updating based on the current context.',
+                inputSchema: z.object({}),
+                execute: async () => {
+                    const currentSubject = request.subject || '...';
+                    return `Current Session Subject: "${currentSubject}"`;
                 },
             }),
         };
+
 
         // Add image tools
         tools.list_images = tool({
@@ -215,6 +229,31 @@ export class AiSdkClient implements LlmClient {
                     })));
                 } catch (error: any) {
                     return `Failed to list images: ${error.message}`;
+                }
+            },
+        });
+
+        tools.image_info = tool({
+            description: 'Get details about a specific image including its description and geometry (width/height). Use this when you need to know the properties of a specific image file.',
+            inputSchema: z.object({
+                filename: z.string().describe('The filename of the image (e.g., "image.png").'),
+                summary: z.string().describe('Explain why you are requesting info for this image. This will be shown to the user.'),
+            }),
+            execute: async ({ filename, summary }: { filename: string; summary: string }) => {
+                try {
+                    const info = await this.imageService.getImageInfo(request.sessionId, request.currentVersion, filename);
+                    if (!info) {
+                        return `Image not found: ${filename}`;
+                    }
+                    return JSON.stringify({
+                        filename: info.filename,
+                        description: info.description,
+                        width: info.width,
+                        height: info.height,
+                        model: info.model
+                    });
+                } catch (error: any) {
+                    return `Failed to get image info: ${error.message}`;
                 }
             },
         });
@@ -256,27 +295,23 @@ export class AiSdkClient implements LlmClient {
         });
 
         if (request.allowVariants) {
-            tools.generate_variants = tool({
+            tools.generate_variant = tool({
                 description:
-                    'Generate multiple variants of the page based on user request. Use this tool when the user asks for multiple variations, alternatives, or different styles/designs of the page. Do NOT implement in-page switchers for this purpose. The instructions for each variant must be actionable commands that describe HOW to modify the current page to achieve the desired look, not just a description of the final state. IMPORTANT: Check conversation history for previous "generate_variants" calls. Do NOT propose variants that have already been generated. Ensure new variants are distinct from any previously generated variants in this session.',
+                    'Generate A SINGLE variant of the page based on user request. Use this tool ONLY when the user explicitly asks for multiple options, variations, or different styles/designs (e.g. "show me 3 versions", "give me options"). Do NOT use this tool for standard edits, fixes, or updates to the current page (e.g. "change background to red" should use edit_file). You can call this tool multiple times to generate multiple variants. The instruction must be an actionable command that describes HOW to modify the current page to achieve the desired look.',
                 inputSchema: z.object({
-                    count: z
-                        .number()
-                        .min(2)
-                        .max(5)
-                        .describe('Number of variants to generate (max 5)'),
-                    instructions: z
-                        .array(z.string())
+                    instruction: z
+                        .string()
                         .describe(
-                            'Specific, actionable instructions for each variant.  Do NOT include "Variant 1", "Variant 2", etc. prefixes. focused on WHAT to change (e.g., "Change background to blue...", "Update font to...").',
+                            'Specific, actionable instruction for this variant. Focused on WHAT to change (e.g., "Change background to blue...", "Update font to..."). Must be in the language of the user\'s messages.',
                         ),
                 }),
                 execute: async (args: {
-                    count: number;
-                    instructions: string[];
+                    instruction: string;
                 }) => {
-                    variantRequest = args;
-                    return 'Variants generation requested.';
+                    if (request.onVariantRequest) {
+                        return await request.onVariantRequest(args.instruction);
+                    }
+                    return 'Variant generation not supported in this context.';
                 },
             });
         }
@@ -290,8 +325,9 @@ export class AiSdkClient implements LlmClient {
             // We'll collect new messages here to return them
             // We start after initialMessages
             const collectedNewMessages: ModelMessage[] = [];
+            let stop = false;
 
-            while (steps < maxSteps) {
+            while (steps < maxSteps && !stop) {
                 steps++;
 
                 if (request.onProgress) {
@@ -308,6 +344,8 @@ export class AiSdkClient implements LlmClient {
                 });
 
                 let stepText = '';
+                let streamError: unknown = null;
+
                 for await (const part of result.fullStream) {
                     switch (part.type) {
                         case 'text-delta':
@@ -334,8 +372,22 @@ export class AiSdkClient implements LlmClient {
                             break;
                         case 'error':
                             console.error('Stream error:', part.error);
+                            streamError = part.error;
+                            break;
+                        case 'finish':
+                            if (part.finishReason === 'stop') {
+                                console.log('\n[System] Agent finished (final answer received).');
+                                stop = true;
+                            }
+                            // else if (part.finishReason === 'tool-calls') {
+                            //     console.log('\n[System] Step completed, agent calls tools...');
+                            // }
                             break;
                     }
+                }
+
+                if (streamError) {
+                    throw streamError;
                 }
                 fullText += stepText;
 
@@ -427,38 +479,35 @@ export class AiSdkClient implements LlmClient {
                 // Check for tool calls in the last message
                 const toolCalls = await result.toolCalls;
 
-                if (toolCalls && toolCalls.length > 0) {
-                    // Identify tool calls that were ALREADY executed by the provider/SDK in this step
-                    // by checking if there are 'tool' messages with matching toolCallId in stepMessages
-                    const executedToolCallIds = new Set(
-                        stepMessages
-                            .filter((m) => m.role === 'tool')
-                            .flatMap((m) =>
-                                Array.isArray(m.content)
-                                    ? m.content.map((c: any) => c.toolCallId)
-                                    : [],
-                            ),
-                    );
+                // if (toolCalls && toolCalls.length > 0) {
+                //     // Identify tool calls that were ALREADY executed by the provider/SDK in this step
+                //     // by checking if there are 'tool' messages with matching toolCallId in stepMessages
+                //     const executedToolCallIds = new Set(
+                //         stepMessages
+                //             .filter((m) => m.role === 'tool')
+                //             .flatMap((m) =>
+                //                 Array.isArray(m.content)
+                //                     ? m.content.map((c: any) => c.toolCallId)
+                //                     : [],
+                //             ),
+                //     );
 
-                    if (toolCalls.length > 0) {
-                        // All tools were executed by provider (or we processed results in stepMessages above).
-                        // Check if we should stop loop based on executed tools.
-                        const summaryExecuted = toolCalls.some(
-                            (tc) => tc.toolName === 'summary',
-                        );
-                        // Also stop if variants were generated
-                        const variantsExecuted = toolCalls.some(
-                            (tc) => tc.toolName === 'generate_variants',
-                        );
+                //     // if (toolCalls.length > 0) {
+                //     //     // All tools were executed by provider (or we processed results in stepMessages above).
+                //     //     // Check if we should stop loop based on executed tools.
+                //     //     // Stop if variants were generated
+                //     //     const variantsExecuted = toolCalls.some(
+                //     //         (tc) => tc.toolName === 'generate_variant',
+                //     //     );
 
-                        if (summaryExecuted || variantsExecuted) {
-                            break;
-                        }
-                    }
-                } else {
-                    // No tool calls, model is done
-                    break;
-                }
+                //     //     if (variantsExecuted) {
+                //     //         break;
+                //     //     }
+                //     // }
+                // } else {
+                //     // No tool calls, model is done
+                //     break;
+                // }
             }
 
             if (this.modelId) {
@@ -478,54 +527,100 @@ export class AiSdkClient implements LlmClient {
             );
 
             // Use the summary from tool if available, otherwise fallback to generated text or generic
-            const summaryText = finalSummary || fullText || 'Changes applied.';
+            // Use the summary from tool if available, otherwise fallback to generated text or generic
+            const summaryText = fullText || 'Changes applied.';
+
+            // If we created a new version (targetVersion is set), we should reset the plan for the NEXT turn.
+            // effectively, the new version's plan starts empty.
+            if (this.targetVersion !== undefined) {
+                // currentFiles['implementation_plan.md'] = ''; // REMOVED: No more plan file
+            }
 
             return {
                 summary: summaryText,
                 files: currentFiles,
-                variantRequest,
                 newMessages,
-                targetVersion: this.targetVersion,
+                targetVersion: this.targetVersion ?? request.currentVersion,
             };
         } catch (error) {
             console.error(
-                `Failed to generate page with ${this.modelId || 'unknown model'}`,
+                `Failed to generate page with ${this.modelId || 'unknown model'} `,
                 error,
             );
-            return {
-                summary: `Не удалось получить ответ от модели: ${this.formatError(error)}. Предыдущая версия страницы сохранена.`,
-                files: request.files,
-            };
+            // Rethrow the error so ChatService can handle it and set session status to 'error'
+            throw error;
         }
     }
 
-    private buildSystemPrompt(projectGoal?: string, imageGenerationPref?: string): string {
+    private buildSystemPrompt(
+        rulesAndGoal?: string,
+        imageGenerationPref?: string,
+        modelRole?: string
+    ): string {
 
-        let prompt = `You are an expert web developer that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
+        const roleDefinition = modelRole || 'You are an expert web developer';
 
-Your goal is to fulfill the user's request by modifying these files.`;
+        console.log(roleDefinition);
+        let prompt = `${roleDefinition} that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
-        if (projectGoal) {
-            prompt += `\n\nCONTEXT - PROJECT GOAL:\nThe user is working on a project with the following goal:\n"${projectGoal}"\nKeep this goal in mind when making decisions about design and functionality.`;
+The user acts as a Business Analyst who wants to define a set of features to be implemented.
+They want to discuss WHAT features will be implemented and WHY (the goal).
+
+Your goal is to fulfill the user's request by following this strict workflow:
+
+1.  **PLANNING PHASE**:
+    -   All user messages are initially treated as discussion and clarification of the plan.
+    -   Discuss the features and requirements with the user in the chat.
+    -   If the user's request is ambiguous, lacks detail, or you need more context to create a plan, ASK CLARIFYING QUESTIONS. Do not guess.
+    -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN IN THE CHAT.
+    -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
+    -   **EXCEPTION 1**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
+    -   **EXCEPTION 2**: If you asked CLARIFYING QUESTIONS and the user provided clean answers that make the path forward clear, you may PROCEED directly to implementation without summarizing the plan again.
+
+    -   **PLAN SUMMARY**:
+        -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
+        -   For each feature, provide a clear description of the change and its goal. Use natural language (e.g., "Improve navigation by replacing the progress bar to make it more visible").
+        -   Do NOT mention specific filenames or technical details in this summary.
+
+2.  **IMPLEMENTATION PHASE**:
+    -   ONLY when the user says "ok" or explicitly approves the plan (OR if the user requested "no plan"), proceed to implementation.
+    -   Implement the changes in the code files ('index.html', etc.).
+    -   When you start editing code files, the system will automatically create a NEW version.
+    -   After code generation or image generation, you must re-verify the new plan with the user for the next steps.
+    -   **NOTE**: If the previous step was executed in "fast mode" (without plan), the NEXT step MUST return to the default "PLANNING PHASE" workflow unless the user explicitly requests fast mode again.
+
+3.  **COMPLETION AND SUMMARY**:
+    -   When you have completed the requested changes or answered the user's question, provide a final text summary.
+    -   **IMPORTANT**: Do NOT mention the planning mode (e.g. "fast mode", "no plan", "continuing without plan") in your final summary. Just describe the changes made.
+
+Strategy:
+- Use 'read_file' to inspect the code to inform your plan (check feasibility).
+- Use 'edit_file' to apply changes to code files ONLY after confirmation.
+- Use 'generate_variant' if asked for multiple options.
+- Use 'read_subject' to check the current session topic if you are unsure or if it might be outdated.
+- Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
+
+Rules:
+- **SESSION TITLE**:
+    -   **MANDATORY**: Always check the session subject. If it is "..." or generic, **YOU MUST** use 'update_subject' to set a concise title (3-5 words) reflecting the user's request. Do this early.
+- Preserve valid HTML/CSS/JS syntax.
+- Do not output the full file content unless absolutely necessary (use 'edit_file').
+- 'generate_variant' creates a NEW separate session.
+- **IMAGES**:
+    -   **ALWAYS** use the 'generate_image' tool to create ANY visual assets (photos, icons, illustrations) that the user did not provide.
+    -   **NEVER** use external placeholder URLs (like 'via.placeholder.com', 'unsplash.com', etc.) or broken links. The user wants REAL generated images.
+    -   If a user asks for "an image of a cat", GENERATE IT using 'generate_image'. Do NOT ask if they want to generate it, just do it.
+`;
+
+        if (rulesAndGoal) {
+            prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\n"${rulesAndGoal}"`;
         }
 
         if (imageGenerationPref) {
-            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\nUser has specified the following preferences for generating images:\n"${imageGenerationPref}"\nApply these preferences when generating or editing images.`;
+            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\n"${imageGenerationPref}"`;
         }
 
-        prompt += `\n\nStrategy:
-1. Use 'read_file' to examine the current content of relevant files. Provide a 'summary' explaining why you need to read it.
-2. Use 'edit_file' to apply specific changes. You should favor targeted edits using unique string replacements to save context window. Provide a 'summary' explaining the change.
-3. If you need to make multiple changes, perform them in steps.
-4. Once you have completed the task, use the 'summary' tool to explain what you did and finish the turn.
-5. IMPORTANT: Do not repeat a tool call if it was successful. Wait for the tool result before proceeding.
 
-Rules:
-- Preserve valid HTML/CSS/JS syntax.
-- Do not output the full file content unless absolutely necessary (use 'edit_file').
-- If the user asks for variants, use 'generate_variants'.
-- You are encouraged to partially autonomously generate images using 'generate_image' when you believe they would enhance the user's request (e.g., adding a hero image to a landing page, visualizing a concept), even if the user didn't explicitly ask for it. Always check for existing images with 'list_images' first to avoid duplicates. Use 'edit_image' to modify existing images.
-`;
         return prompt;
     }
 
@@ -569,7 +664,7 @@ Rules:
         }
 
         const content: (TextPart | ImagePart)[] = [
-            { type: 'text', text: request.instructions },
+            { type: 'text', text: request.fastMode ? `No plan\n${request.instructions}` : request.instructions },
         ];
 
         content.push(...processAttachment(request.attachment));
@@ -588,9 +683,9 @@ Rules:
         }
         if (error && typeof error === 'object' && 'message' in error) {
             return String(
-                (error as { message: unknown }).message || 'неизвестная ошибка',
+                (error as { message: unknown }).message || 'unknown error',
             );
         }
-        return 'неизвестная ошибка';
+        return 'unknown error';
     }
 }

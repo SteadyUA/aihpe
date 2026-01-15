@@ -8,6 +8,7 @@ interface ProviderSelectorProps {
     onChange: (provider: LlmProvider) => void;
     disabled?: boolean;
     className?: string;
+    variant?: 'standard' | 'ghost';
 }
 
 export class ProviderSelector extends React.Component<ProviderSelectorProps> {
@@ -16,7 +17,7 @@ export class ProviderSelector extends React.Component<ProviderSelectorProps> {
     };
 
     render() {
-        const { value = 'openai', disabled, className } = this.props;
+        const { value = 'openai', disabled, className, variant } = this.props;
 
         return (
             <UiDropdown
@@ -26,6 +27,7 @@ export class ProviderSelector extends React.Component<ProviderSelectorProps> {
                 disabled={disabled}
                 className={className}
                 title="Select AI Model Provider"
+                variant={variant}
             />
         );
     }

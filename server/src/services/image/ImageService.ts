@@ -364,17 +364,23 @@ export class ImageService {
         return metadata;
     }
 
+    async getImageInfo(sessionId: string, version: number, filename: string): Promise<ImageMetadata | undefined> {
+        const metadata = this.loadMetadata(sessionId, version);
+        return metadata.find(img => img.filename === filename);
+    }
+
     async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
         const metadata = this.loadMetadata(sessionId, version);
         if (metadata.length === 0) return;
 
         let hasChanges = false;
-        const htmlContent = files.html || '';
-        const cssContent = files.css || '';
+        const htmlContent = files['index.html'] || files['html'] || '';
+        const cssContent = files['styles.css'] || files['css'] || '';
+        const jsContent = files['script.js'] || files['js'] || '';
 
         const updatedMetadata = metadata.map(img => {
             // Check usage
-            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename);
+            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename) || jsContent.includes(img.filename);
 
             if (img.isUsed !== isUsed) {
                 hasChanges = true;

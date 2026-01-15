@@ -1,171 +1,476 @@
 export class ElementPicker {
     private iframe: HTMLIFrameElement | null = null;
-    private onSelect: ((selector: string) => void) | null = null;
+    private onSelect: ((selector: string | null) => void) | null = null;
     private selectedElement: HTMLElement | null = null;
 
-    private overlay: HTMLElement | null = null;
+    private overlayContainer: HTMLElement | null = null;
+    private hoverBox: HTMLElement | null = null;
+    private selectionBox: HTMLElement | null = null;
+
     private overlayHandlers: {
         mousemove: (e: MouseEvent) => void;
         click: (e: MouseEvent) => void;
+        mouseleave: (e: MouseEvent) => void;
+        scroll: () => void;
+        resize: () => void;
     } | null = null;
+
+    setOnSelect(callback: (selector: string | null) => void) {
+        this.onSelect = callback;
+    }
 
     stop() {
         this.removeOverlay();
         this.clearSelection();
         this.iframe = null;
-        this.onSelect = null;
+        // Do not clear onSelect, it might be permanent for the session
     }
 
-    start(iframe: HTMLIFrameElement, onSelect: (selector: string) => void) {
-        this.stop();
+    start(iframe: HTMLIFrameElement) {
+        // If we were already running, stop first
+        if (this.iframe) {
+            this.stop();
+        }
 
         this.iframe = iframe;
-        this.onSelect = onSelect;
-
         const doc = this.iframe.contentDocument;
         if (!doc) return;
 
-        this.injectStyles(doc);
         this.createOverlay(doc);
     }
 
     private createOverlay(doc: Document) {
-        this.overlay = doc.createElement('div');
-        this.overlay.style.position = 'fixed';
-        this.overlay.style.top = '0';
-        this.overlay.style.left = '0';
-        this.overlay.style.width = '100%';
-        this.overlay.style.height = '100%';
-        this.overlay.style.zIndex = '2147483647'; // Max z-index
-        this.overlay.style.backgroundColor = 'transparent';
-        this.overlay.style.cursor = 'default';
+        // Container for all our visuals
+        this.overlayContainer = doc.createElement('div');
+        Object.assign(this.overlayContainer.style, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            width: '100%',
+            height: '100%',
+            zIndex: '2147483647', // Max z-index
+            pointerEvents: 'auto', // Capture events
+            backgroundColor: 'transparent',
+            cursor: 'default',
+        });
 
-        // Handlers attached to the overlay
+        // Inject Styles for Tooltip parts
+        const style = doc.createElement('style');
+        style.textContent = `
+            .element-picker-parent-link::after {
+                content: " >";
+                margin-left: 5px;
+                text-decoration: none;
+                display: inline-block;
+            }
+        `;
+        this.overlayContainer.appendChild(style);
+
+        // Hover Highlight Box
+        this.hoverBox = document.createElement('div');
+        Object.assign(this.hoverBox.style, {
+            position: 'fixed',
+            pointerEvents: 'none',
+            outline: '1px solid #4a90e2',
+            backgroundColor: 'rgba(74, 144, 226, 0.4)',
+            display: 'none',
+            zIndex: '2147483645',
+            boxSizing: 'border-box',
+        });
+
+        // Tooltip for Hover Box
+        const tooltip = document.createElement('div');
+        tooltip.className = 'element-picker-tooltip';
+        Object.assign(tooltip.style, {
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            backgroundColor: '#333',
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            whiteSpace: 'nowrap',
+            marginBottom: '4px',
+            pointerEvents: 'none',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        });
+        this.hoverBox.appendChild(tooltip);
+
+        // Selection Box (Persistent)
+        this.selectionBox = document.createElement('div');
+        Object.assign(this.selectionBox.style, {
+            position: 'fixed',
+            pointerEvents: 'none',
+            outline: '2px solid #10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+            display: 'none',
+            zIndex: '2147483646',
+            boxSizing: 'border-box',
+        });
+
+        // Tooltip for Selection Box
+        const selectionTooltip = document.createElement('div');
+        selectionTooltip.className = 'element-picker-tooltip';
+        Object.assign(selectionTooltip.style, {
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            backgroundColor: '#10b981',
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            whiteSpace: 'nowrap',
+            marginBottom: '4px',
+            pointerEvents: 'auto', // Allow clicking children (parent link)
+            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        });
+        this.selectionBox.appendChild(selectionTooltip);
+
+        this.overlayContainer.appendChild(this.selectionBox);
+        this.overlayContainer.appendChild(this.hoverBox);
+
+        // Handlers
         this.overlayHandlers = {
             mousemove: (e: MouseEvent) => {
+                // If hovering over our own tooltip, ignore
+                if ((e.target as HTMLElement).closest('.element-picker-tooltip')) {
+                    return;
+                }
+
                 e.preventDefault();
                 e.stopPropagation();
 
-                // Hide overlay momentarily to find element underneath
-                this.overlay!.style.pointerEvents = 'none';
-                const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
-                this.overlay!.style.pointerEvents = 'auto'; // Restore immediately
+                // Hide container momentarily to find element underneath
+                if (this.overlayContainer) {
+                    this.overlayContainer.style.pointerEvents = 'none';
+                    const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
+                    this.overlayContainer.style.pointerEvents = 'auto';
 
-                if (el && el !== doc.documentElement && el !== doc.body) {
-                    this.highlightElement(el);
+                    if (el && el !== doc.documentElement && el !== doc.body && el !== this.overlayContainer) {
+                        this.highlightElement(el);
+                    } else {
+                        this.hideHighlight();
+                    }
                 }
             },
             click: (e: MouseEvent) => {
+                // If clicking our own tooltip, do nothing (let bubble to tooltip handlers)
+                if ((e.target as HTMLElement).closest('.element-picker-tooltip')) {
+                    return;
+                }
+
                 e.preventDefault();
                 e.stopPropagation();
 
-                this.overlay!.style.pointerEvents = 'none';
-                const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
-                this.overlay!.style.pointerEvents = 'auto';
+                if (this.overlayContainer) {
+                    this.overlayContainer.style.pointerEvents = 'none';
+                    const el = doc.elementFromPoint(e.clientX, e.clientY) as HTMLElement;
+                    this.overlayContainer.style.pointerEvents = 'auto';
 
-                if (el) {
-                    this.selectElement(el);
-                    const selector = this.generateSelector(el);
-                    this.onSelect?.(selector);
-                    this.removeOverlay(); // Stop picking but keep selection
+                    if (el) {
+                        this.selectElement(el);
+                        const selector = this.generateSelector(el);
+                        this.onSelect?.(selector);
+                    }
+                }
+            },
+            mouseleave: () => {
+                this.hideHighlight();
+            },
+            scroll: () => {
+                if (this.selectedElement && this.selectionBox) {
+                    this.updateBox(this.selectionBox, this.selectedElement);
+                }
+            },
+            resize: () => {
+                if (this.selectedElement && this.selectionBox) {
+                    this.updateBox(this.selectionBox, this.selectedElement);
                 }
             }
         };
 
-        this.overlay.addEventListener('mousemove', this.overlayHandlers.mousemove);
-        this.overlay.addEventListener('click', this.overlayHandlers.click);
+        this.overlayContainer.addEventListener('mousemove', this.overlayHandlers.mousemove);
+        this.overlayContainer.addEventListener('click', this.overlayHandlers.click);
+        this.overlayContainer.addEventListener('mouseleave', this.overlayHandlers.mouseleave);
 
-        doc.body.appendChild(this.overlay);
+        doc.addEventListener('scroll', this.overlayHandlers.scroll, { passive: true, capture: true });
+        doc.defaultView?.addEventListener('resize', this.overlayHandlers.resize);
+
+        doc.body.appendChild(this.overlayContainer);
     }
 
     private removeOverlay() {
-        if (this.overlay && this.overlay.parentNode) {
+        if (this.overlayContainer && this.overlayContainer.parentNode) {
+            const doc = this.overlayContainer.ownerDocument;
+            if (this.overlayHandlers && doc) {
+                doc.removeEventListener('scroll', this.overlayHandlers.scroll, { capture: true });
+                doc.defaultView?.removeEventListener('resize', this.overlayHandlers.resize);
+            }
+
             if (this.overlayHandlers) {
-                this.overlay.removeEventListener('mousemove', this.overlayHandlers.mousemove);
-                this.overlay.removeEventListener('click', this.overlayHandlers.click);
+                this.overlayContainer.removeEventListener('mousemove', this.overlayHandlers.mousemove);
+                this.overlayContainer.removeEventListener('click', this.overlayHandlers.click);
+                this.overlayContainer.removeEventListener('mouseleave', this.overlayHandlers.mouseleave);
                 this.overlayHandlers = null;
             }
-            this.overlay.parentNode.removeChild(this.overlay);
+            this.overlayContainer.parentNode.removeChild(this.overlayContainer);
         }
-        this.overlay = null;
-
-        // Cleanup hover effects
-        if (this.iframe?.contentDocument) {
-            this.iframe.contentDocument
-                .querySelectorAll('.element-picker-hover')
-                .forEach((el) => el.classList.remove('element-picker-hover'));
-        }
+        this.overlayContainer = null;
+        this.hoverBox = null;
+        this.selectionBox = null;
     }
 
     // Programmatically select an element by selector
-    selectBySelector(iframe: HTMLIFrameElement, selector: string) {
-        // If we are not already attached to this iframe, attach context (without starting listeners)
+    selectBySelector(iframe: HTMLIFrameElement, selector: string, scrollTo: boolean = false) {
         this.iframe = iframe;
         const doc = this.iframe.contentDocument;
         if (!doc) return;
 
-        this.injectStyles(doc); // Ensure styles exist
+        if (!this.overlayContainer) {
+            this.createPassiveOverlay(doc);
+        }
 
         const el = doc.querySelector(selector) as HTMLElement;
         if (el) {
             this.selectElement(el);
-            // Optionally scroll to it
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (scrollTo) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
         }
     }
 
-    private injectStyles(doc: Document) {
-        const styleId = 'element-picker-style';
-        if (!doc.getElementById(styleId)) {
-            const style = doc.createElement('style');
-            style.id = styleId;
-            style.textContent = `
-                .element-picker-hover {
-                    outline: 2px dashed #2563eb !important;
-                    outline-offset: 2px !important;
-                    cursor: crosshair !important;
+    // Creates an overlay that allows interaction with the page but holds our visual boxes
+    private createPassiveOverlay(doc: Document) {
+        this.overlayContainer = doc.createElement('div');
+        Object.assign(this.overlayContainer.style, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            width: '100%',
+            height: '100%',
+            zIndex: '2147483647',
+            pointerEvents: 'none', // Crucial: allow clicks to pass through
+            backgroundColor: 'transparent',
+        });
+
+        // Inject Styles for Tooltip parts
+        const style = doc.createElement('style');
+        style.textContent = `
+            .element-picker-parent-link::after {
+                content: " >";
+                margin-left: 5px;
+                text-decoration: none;
+                display: inline-block;
+            }
+        `;
+        this.overlayContainer.appendChild(style);
+
+        this.selectionBox = document.createElement('div');
+        Object.assign(this.selectionBox.style, {
+            position: 'fixed',
+            pointerEvents: 'none', // Box itself passes clicks
+            outline: '2px solid #10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+            display: 'none',
+            zIndex: '2147483646',
+            boxSizing: 'border-box',
+        });
+
+        // Tooltip for Selection Box
+        const selectionTooltip = document.createElement('div');
+        selectionTooltip.className = 'element-picker-tooltip';
+        Object.assign(selectionTooltip.style, {
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            backgroundColor: '#10b981',
+            color: 'white',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            whiteSpace: 'nowrap',
+            marginBottom: '4px',
+            pointerEvents: 'auto', // Allow clicking children (parent link)
+            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        });
+        this.selectionBox.appendChild(selectionTooltip);
+
+        this.overlayContainer.appendChild(this.selectionBox);
+
+        // Need to update position on scroll even in passive mode
+        this.overlayHandlers = {
+            mousemove: () => { },
+            click: () => { },
+            mouseleave: () => { },
+            scroll: () => {
+                if (this.selectedElement && this.selectionBox) {
+                    this.updateBox(this.selectionBox, this.selectedElement);
                 }
-                .element-picker-selected {
-                    outline: 3px solid #10b981 !important;
-                    outline-offset: 2px !important;
-                    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2) inset !important;
+            },
+            resize: () => {
+                if (this.selectedElement && this.selectionBox) {
+                    this.updateBox(this.selectionBox, this.selectedElement);
                 }
-            `;
-            doc.head.appendChild(style);
-        }
+            }
+        };
+        doc.addEventListener('scroll', this.overlayHandlers.scroll, { passive: true, capture: true });
+        doc.defaultView?.addEventListener('resize', this.overlayHandlers.resize);
+
+        doc.body.appendChild(this.overlayContainer);
     }
 
     private highlightElement(target: HTMLElement) {
-        if (this.selectedElement) {
-            this.selectedElement.classList.remove('element-picker-selected');
-        }
+        if (!this.hoverBox || !this.overlayContainer) return;
+        this.updateBox(this.hoverBox, target);
+        // Hover tooltip doesn't need parent interaction usually, only selection
+        this.updateTooltip(this.hoverBox, target, false);
+    }
 
-        // Clean up previous hover
-        if (this.iframe?.contentDocument) {
-            this.iframe.contentDocument
-                .querySelectorAll('.element-picker-hover')
-                .forEach((el) => el.classList.remove('element-picker-hover'));
+    private hideHighlight() {
+        if (this.hoverBox) {
+            this.hoverBox.style.display = 'none';
         }
-
-        target.classList.add('element-picker-hover');
     }
 
     private selectElement(target: HTMLElement) {
-        if (this.selectedElement) {
-            this.selectedElement.classList.remove('element-picker-selected');
-        }
-
-        // Remove hover class just in case
-        target.classList.remove('element-picker-hover');
-
-        target.classList.add('element-picker-selected');
         this.selectedElement = target;
+        if (this.selectionBox) {
+            this.updateBox(this.selectionBox, target);
+            this.updateTooltip(this.selectionBox, target, true); // Show parent info on selection
+        }
+    }
+
+    private updateTooltip(box: HTMLElement, target: HTMLElement, showParent: boolean) {
+        const tooltip = box.firstElementChild as HTMLElement;
+        if (tooltip) {
+            tooltip.innerHTML = ''; // Clear prev content
+
+            // 1. Parent Element (if requested and exists)
+            if (showParent && target.parentElement && target.parentElement.tagName !== 'BODY' && target.parentElement.tagName !== 'HTML') {
+                const parent = target.parentElement;
+                const parentTag = parent.tagName.toLowerCase();
+                // Create clickable span
+                const parentSpan = document.createElement('span');
+                parentSpan.className = 'element-picker-parent-link'; // Hook for pseudo-element
+                parentSpan.style.textDecoration = 'underline';
+                parentSpan.style.cursor = 'pointer';
+                parentSpan.style.marginRight = '5px';
+                parentSpan.style.color = '#e0e7ff'; // light indigo/white
+                parentSpan.title = 'Select parent';
+
+                const parentId = parent.id ? `#${parent.id}` : '';
+
+                const parentClassName = parent.className && typeof parent.className === 'string'
+                    ? `.${parent.className.split(' ').join('.')}`
+                    : '';
+                const maxParentClassLen = 20;
+                const truncatedParentClass = parentClassName.length > maxParentClassLen
+                    ? parentClassName.substring(0, maxParentClassLen) + '...'
+                    : parentClassName;
+
+                parentSpan.textContent = `${parentTag}${parentId}${truncatedParentClass}`; // Separator is now in CSS ::after
+
+                parentSpan.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const selector = this.generateSelector(parent);
+                    this.selectElement(parent);
+                    this.onSelect?.(selector);
+                };
+
+                tooltip.appendChild(parentSpan);
+            }
+
+            // 2. Current Element Info
+            const tagName = target.tagName.toLowerCase();
+            const idId = target.id ? `#${target.id}` : '';
+            const className = target.className && typeof target.className === 'string'
+                ? `.${target.className.split(' ').join('.')}`
+                : '';
+
+            const maxClassLen = 30;
+            const truncatedClass = className.length > maxClassLen
+                ? className.substring(0, maxClassLen) + '...'
+                : className;
+
+            const dims = `${Math.round(target.getBoundingClientRect().width)}x${Math.round(target.getBoundingClientRect().height)}`;
+
+            const infoSpan = document.createElement('span');
+            infoSpan.textContent = `${tagName}${idId}${truncatedClass} | ${dims}`;
+            tooltip.appendChild(infoSpan);
+
+            // 3. Clear Button (only if selectable)
+            if (showParent) {
+                const clearBtn = document.createElement('span');
+                clearBtn.innerHTML = `&times;`; // Times symbol (X)
+                // Or SVG:
+                // clearBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+                Object.assign(clearBtn.style, {
+                    cursor: 'pointer',
+                    borderRadius: '50%',
+                    width: '16px',
+                    height: '16px',
+                    marginLeft: '5px',
+                    marginBottom: '-4px',
+                    marginRight: '-4px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: '0.7',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    lineHeight: '1',
+                });
+                clearBtn.title = 'Clear selection';
+
+                clearBtn.onmouseenter = () => clearBtn.style.opacity = '1';
+                clearBtn.onmouseleave = () => clearBtn.style.opacity = '0.7';
+
+                clearBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.clearSelection();
+                    this.onSelect?.(null);
+                };
+                tooltip.appendChild(clearBtn);
+            }
+
+            // Adjust position if top is clipped
+            const rect = target.getBoundingClientRect();
+            if (rect.top < 30) {
+                tooltip.style.bottom = 'auto';
+                tooltip.style.top = '100%';
+                tooltip.style.marginTop = '4px';
+                tooltip.style.marginBottom = '0';
+            } else {
+                tooltip.style.bottom = '100%';
+                tooltip.style.top = 'auto';
+                tooltip.style.marginTop = '0';
+                tooltip.style.marginBottom = '4px';
+            }
+        }
+    }
+
+    private updateBox(box: HTMLElement, target: HTMLElement) {
+        const rect = target.getBoundingClientRect();
+        Object.assign(box.style, {
+            display: 'block',
+            top: `${rect.top}px`,
+            left: `${rect.left}px`,
+            width: `${rect.width}px`,
+            height: `${rect.height}px`,
+        });
     }
 
     clearSelection() {
-        if (this.selectedElement) {
-            this.selectedElement.classList.remove('element-picker-selected');
-            this.selectedElement = null;
+        this.selectedElement = null;
+        if (this.selectionBox) {
+            this.selectionBox.style.display = 'none';
         }
     }
 
@@ -186,13 +491,37 @@ export class ElementPicker {
                 selector = `#${current.id}`;
                 path.unshift(selector);
                 break;
-            } else if (current.parentElement) {
-                const siblings = Array.from(
-                    current.parentElement.children,
-                ).filter((c) => c.tagName === current!.tagName);
-                if (siblings.length > 1) {
-                    const index = siblings.indexOf(current) + 1;
-                    selector += `:nth-of-type(${index})`;
+            } else {
+                let uniqueByClass = false;
+                const parent = current.parentElement;
+
+                // Try to use classes if they exist and allow getting a unique match among siblings
+                if (parent && current.className && typeof current.className === 'string' && current.className.trim().length > 0) {
+                    const classes = Array.from(current.classList);
+                    if (classes.length > 0) {
+                        // Use CSS.escape to handle weird characters in class names safely
+                        const escapedClasses = classes.map(c => CSS.escape(c));
+                        const classSelector = '.' + escapedClasses.join('.');
+                        const candidate = selector + classSelector;
+
+                        // Check if this candidate is unique among siblings
+                        const siblings = Array.from(parent.children);
+                        const matches = siblings.filter(s => s.matches && s.matches(candidate));
+
+                        if (matches.length === 1) {
+                            selector = candidate;
+                            uniqueByClass = true;
+                        }
+                    }
+                }
+
+                // Fallback to nth-of-type if classes aren't unique enough
+                if (!uniqueByClass && parent) {
+                    const siblings = Array.from(parent.children).filter((c) => c.tagName === current!.tagName);
+                    if (siblings.length > 1) {
+                        const index = siblings.indexOf(current) + 1;
+                        selector += `:nth-of-type(${index})`;
+                    }
                 }
             }
 

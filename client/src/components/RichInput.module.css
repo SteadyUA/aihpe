@@ -1,0 +1,129 @@
+.richInputContainer {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    /* Assuming spacing needed like textarea wrapper or generic input */
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--secondary);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    overflow: hidden;
+    /* To clip scrollbar corners if needed */
+}
+
+.richInputContainer:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
+}
+
+.richInputContainer.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+    background: var(--panel-bg);
+    /* Optional: match disabled input logic */
+}
+
+/* Ensure no hover/focus states when disabled - largely handled by pointer-events: none but good to be explicit for keyboard focus styling if needed */
+.richInputContainer.disabled:focus-within {
+    border-color: var(--border-color);
+    box-shadow: none;
+}
+
+.richInputEditor {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    /* Rough height of rows=1 + padding */
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    outline: none;
+    line-height: 1.5;
+    position: relative;
+}
+
+/* Placeholder */
+.richInputEditor.empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-secondary);
+    pointer-events: none;
+    display: block;
+    position: absolute;
+    /* Ensure it takes up space/shows up */
+}
+
+/* Inner formatting */
+.richInputEditor p {
+    margin: 0;
+}
+
+/* Add spacing between paragraphs if they exist, but normally simple text is p. 
+   If user presses enter, new p or div is created. margin-bottom for paragraphs? */
+.richInputEditor p+p {
+    margin-top: 0.5em;
+}
+
+.richInputEditor strong,
+.richInputEditor b {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.richInputEditor em,
+.richInputEditor i {
+    font-style: italic;
+}
+
+.richInputEditor ul,
+.richInputEditor ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+
+.richInputEditor code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-color);
+    /* Fallback */
+    background: rgba(127, 127, 127, 0.15);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+}
+
+.richInputEditor pre {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: rgba(127, 127, 127, 0.15);
+    padding: 0.5em;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+}
+
+.richInputEditor pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    color: inherit;
+}
+
+.richInputEditor blockquote {
+    border-left: 3px solid var(--border-color);
+    margin: 0.5em 0;
+    padding-left: 0.75em;
+    color: var(--text-secondary);
+}
+
+.richInputEditor h1,
+.richInputEditor h2,
+.richInputEditor h3,
+.richInputEditor h4,
+.richInputEditor h5,
+.richInputEditor h6 {
+    font-weight: 600;
+    margin: 0.5em 0;
+    line-height: 1.25;
+}

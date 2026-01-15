@@ -4,6 +4,10 @@
     margin-bottom: 0.5rem;
 }
 
+.modal {
+    max-width: 450px;
+}
+
 .label {
     font-size: 0.875rem;
     font-weight: 500;

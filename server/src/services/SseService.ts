@@ -79,6 +79,25 @@ export class SseService {
         this.broadcast('session-created', enriched);
     }
 
+
+    emitServerStop(): void {
+        this.broadcast('server-stop', { timestamp: new Date().toISOString() });
+    }
+
+    emitFileChange(payload: { sessionId: string; version: number; filename: string; turn: number }): void {
+        this.broadcast('file-change', {
+            ...payload,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
+    emitSessionUpdate(payload: { sessionId: string; subject?: string }): void {
+        this.broadcast('session-update', {
+            ...payload,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
         for (const client of this.clients.values()) {
@@ -106,7 +125,6 @@ export class SseService {
         if (!client) {
             return;
         }
-
         clearInterval(client.heartbeat);
         try {
             client.response.end();

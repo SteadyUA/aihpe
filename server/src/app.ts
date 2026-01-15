@@ -5,6 +5,7 @@ import cors from 'cors';
 import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'typedi';
 import { ChatController } from './controllers/ChatController';
+import { AccountController } from './controllers/AccountController';
 
 useContainer(Container);
 
@@ -31,7 +32,7 @@ export function createApp(): express.Express {
     app.use(express.static(publicDir));
 
     useExpressServer(app, {
-        controllers: [ChatController],
+        controllers: [ChatController, AccountController],
         validation: {
             whitelist: true,
             forbidNonWhitelisted: true,

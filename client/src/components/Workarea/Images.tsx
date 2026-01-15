@@ -6,6 +6,7 @@ import { UiModal } from '../UiModal';
 import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
+import { apiAuth } from '../../utils/api';
 import styles from './Images.module.css';
 
 interface ImageMetadata {
@@ -20,7 +21,7 @@ interface ImageMetadata {
 
 interface ImagesProps {
     sessionId: string | null;
-    turn: number;
+    version: number;
     active: boolean;
 }
 
@@ -88,8 +89,8 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             this.fetchImages();
         }
 
-        // If turn changed, refill
-        if (prevProps.turn !== this.props.turn || prevProps.sessionId !== this.props.sessionId) {
+        // If version changed, refill
+        if (prevProps.version !== this.props.version || prevProps.sessionId !== this.props.sessionId) {
             this.setState({ images: [] }, () => {
                 if (this.props.active) {
                     this.fetchImages();
@@ -99,15 +100,15 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
     }
 
     fetchImages = async () => {
-        const { sessionId, turn } = this.props;
+        const { sessionId } = this.props;
         if (!sessionId) return;
         if (this.state.loading) return;
 
         this.setState({ loading: true });
 
         try {
-            const res = await fetch(
-                `/api/sessions/${sessionId}/turns/${turn}/images`,
+            const res = await apiAuth.fetch(
+                `/api/sessions/${sessionId}/${this.props.version}/images`,
             );
             if (!res.ok) throw new Error('Failed to fetch images');
             const images = await res.json();
@@ -195,7 +196,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     handleUpload = async () => {
         const { filesToUpload } = this.state;
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
 
         if (filesToUpload.length === 0 || !sessionId) return;
 
@@ -211,7 +212,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             }
             formData.append('file', file);
             try {
-                await fetch(`/api/sessions/${sessionId}/turns/${turn}/images`, {
+                await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/images`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -249,15 +250,15 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     handleSaveDescription = async () => {
         const { editingImage, editDescriptionValue } = this.state;
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
 
         if (!editingImage || !sessionId) return;
 
         this.setState({ isSavingDescription: true });
 
         try {
-            const res = await fetch(
-                `/api/sessions/${sessionId}/turns/${turn}/images/${editingImage.filename}`,
+            const res = await apiAuth.fetch(
+                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/description`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -286,7 +287,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     handleGenerateDescription = async () => {
         const { editingImage } = this.state;
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
 
         if (!editingImage || !sessionId) return;
 
@@ -297,9 +298,9 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         }, 1000);
 
         try {
-            const res = await fetch(
-                `/api/sessions/${sessionId}/turns/${turn}/images/${editingImage.filename}/describe`,
-                { method: 'POST' }
+            const res = await apiAuth.fetch(
+                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/describe`,
+                { method: 'GET' }
             );
 
             if (!res.ok) {
@@ -332,15 +333,15 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     handleDeleteConfirm = async () => {
         const { editingImage } = this.state;
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
 
         if (!editingImage || !sessionId) return;
 
         this.setState({ isDeleting: true });
 
         try {
-            const res = await fetch(
-                `/api/sessions/${sessionId}/turns/${turn}/images/${editingImage.filename}`,
+            const res = await apiAuth.fetch(
+                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}`,
                 {
                     method: 'DELETE',
                 }
@@ -451,7 +452,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     renderEditModal() {
         const { editingImage, editDescriptionValue, isSavingDescription, isGeneratingDescription, generationTimer } = this.state;
-        const { sessionId, turn } = this.props;
+        const { sessionId, version } = this.props;
 
         if (!editingImage) return null;
 
@@ -490,7 +491,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                 <div className={styles.editModalContent}>
                     <div className={styles.editImageContainer}>
                         <img
-                            src={`/api/sessions/${sessionId}/turns/${turn}/static/${editingImage.filename}`}
+                            src={`/api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
                             alt={editingImage.filename}
                             className={styles.editImagePreview}
                         />
@@ -529,7 +530,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
     }
 
     render() {
-        const { sessionId, turn, active } = this.props;
+        const { sessionId, version, active } = this.props;
         const { loading, images, showUnusedOnly } = this.state;
 
         const visibleImages = showUnusedOnly
@@ -588,7 +589,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                                 >
                                     <div className={styles.imageThumbContainer}>
                                         <img
-                                            src={`/api/sessions/${sessionId}/turns/${turn}/static/${img.filename}`}
+                                            src={`/api/sessions/${sessionId}/${version}/files/${img.filename}`}
                                             alt={img.description}
                                             className={styles.imageThumb}
                                         />

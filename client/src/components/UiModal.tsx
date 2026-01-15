@@ -11,13 +11,31 @@ interface UiModalProps {
 }
 
 export class UiModal extends Component<UiModalProps> {
+    private mouseDownTarget: EventTarget | null = null;
+
+    private handleMouseDown = (e: React.MouseEvent) => {
+        this.mouseDownTarget = e.target;
+    };
+
+    private handleOverlayClick = (e: React.MouseEvent) => {
+        // Only close if the mousedown also happened on the overlay, not a child
+        if (this.mouseDownTarget === e.currentTarget) {
+            this.props.onClose();
+        }
+        this.mouseDownTarget = null;
+    };
+
     render() {
-        const { isOpen, title, children, actions, onClose, className } = this.props;
+        const { isOpen, title, children, actions, className } = this.props;
 
         if (!isOpen) return null;
 
         return (
-            <div className={styles.overlay} onClick={onClose}>
+            <div
+                className={styles.overlay}
+                onMouseDown={this.handleMouseDown}
+                onClick={this.handleOverlayClick}
+            >
                 <div
                     className={`${styles.modal} ${className || ''}`}
                     onClick={(e) => e.stopPropagation()}
