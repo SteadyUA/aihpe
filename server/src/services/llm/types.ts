@@ -1,4 +1,4 @@
-import { ChatAttachment, SessionFiles, ChatMessage } from '../../types/chat';
+import { ChatAttachment, SessionFiles, ChatMessage, TokenUsage } from '../../types/chat';
 
 export interface GeneratePageRequest {
     sessionId: string;
@@ -25,6 +25,7 @@ export interface GeneratePageResult {
     files: SessionFiles;
     newMessages?: ChatMessage[];
     targetVersion?: number;
+    usage?: TokenUsage;
 }
 
 export interface LlmClient {

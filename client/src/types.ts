@@ -73,4 +73,13 @@ export interface Session {
     unsent?: UnsentData;
 
     group: number;
+    tokenUsage?: TokenUsage;
+}
+
+export interface TokenUsage {
+    prompt: number;
+    completion: number;
+    total: number;
+    reasoning?: number;
+    cached?: number;
 }

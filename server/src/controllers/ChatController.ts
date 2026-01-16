@@ -611,6 +611,7 @@ export class ChatController {
             errorMessage: snapshot.errorMessage,
             projectId: snapshot.projectId,
             subject: snapshot.subject,
+            tokenUsage: snapshot.tokenUsage,
         };
     }
 

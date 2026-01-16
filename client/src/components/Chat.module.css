@@ -9,16 +9,77 @@
 }
 
 .sessionHeader {
+    display: flex;
+    /* Ensure it is flex container */
+    align-items: center;
+    /* Center items vertically */
+    justify-content: space-between;
+    /* Space out title and token usage */
     font-weight: 500;
     color: var(--text-secondary);
     font-size: 0.95rem;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* overflow: hidden; <-- Removed to allow tooltip overflow */
+    /* text-overflow: ellipsis; remove this as it applies to container, not child */
     background: var(--bg-color);
     flex-shrink: 0;
     height: 30px;
     padding: 0.25rem 1rem;
+    position: relative;
+    /* Ensure stacking context if needed */
+    z-index: 10;
+    /* Raise header slightly */
+}
+
+.sessionTitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tokenUsage {
+    font-size: 0.8rem;
+    color: var(--text-tertiary, #9ca3af);
+    margin-left: auto;
+    font-family: var(--font-mono);
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.tokenTooltip {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    z-index: 1000;
+    /* High z-index */
+    min-width: 150px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    user-select: text;
+    /* Explicitly allow selection */
+    cursor: auto;
+}
+
+/* Invisible bridge to prevent tooltip from closing when moving cursor over the gap */
+.tokenTooltip::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: 0;
+    right: 0;
+    height: 10px;
+}
+
+.tokenUsage:hover .tokenTooltip {
+    display: block;
 }
 
 .messages {

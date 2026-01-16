@@ -455,7 +455,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 ref={this.iframeRef}
                                 src={previewUrl}
                                 title="Preview"
-                                sandbox="allow-scripts allow-same-origin allow-modals"
+                                sandbox="allow-scripts allow-same-origin allow-modals allow-forms"
                                 onLoad={this.handleIframeLoad}
                                 style={{
                                     width: '100%',

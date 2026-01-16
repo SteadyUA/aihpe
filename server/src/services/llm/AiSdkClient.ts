@@ -327,6 +327,18 @@ export class AiSdkClient implements LlmClient {
             const collectedNewMessages: ModelMessage[] = [];
             let stop = false;
 
+            const totalUsage: {
+                prompt: number;
+                completion: number;
+                total: number;
+                reasoning?: number;
+                cached?: number;
+            } = {
+                prompt: 0,
+                completion: 0,
+                total: 0,
+            };
+
             while (steps < maxSteps && !stop) {
                 steps++;
 
@@ -398,13 +410,30 @@ export class AiSdkClient implements LlmClient {
                 console.log(`Input Tokens:      ${usage.inputTokens}`);
                 console.log(`Output Tokens:     ${usage.outputTokens}`);
 
+                totalUsage.prompt += usage.inputTokens || 0;
+                totalUsage.completion += usage.outputTokens || 0;
+                totalUsage.total += usage.totalTokens || 0;
+
                 // Check for cached tokens
                 // @ts-ignore: Accessing potential cache properties
                 const cachedTokens =
                     (usage as any).cachedInputTokens ??
                     (usage as any).promptTokensDetails?.cachedTokens;
+
+                // Check for reasoning tokens
+                // @ts-ignore: Accessing potential reasoning properties
+                const reasoningTokens =
+                    (usage as any).reasoningTokens ??
+                    (usage as any).completionTokensDetails?.reasoningTokens;
+
                 if (cachedTokens !== undefined) {
                     console.log(`📦 CACHED TOKENS:  ${cachedTokens}`);
+                    totalUsage.cached = (totalUsage.cached || 0) + cachedTokens;
+                }
+
+                if (reasoningTokens !== undefined) {
+                    console.log(`🧠 REASONING TOKENS: ${reasoningTokens}`);
+                    totalUsage.reasoning = (totalUsage.reasoning || 0) + reasoningTokens;
                 }
 
                 const usedTokens = usage.totalTokens || 0;
@@ -541,6 +570,7 @@ export class AiSdkClient implements LlmClient {
                 files: currentFiles,
                 newMessages,
                 targetVersion: this.targetVersion ?? request.currentVersion,
+                usage: totalUsage,
             };
         } catch (error) {
             console.error(

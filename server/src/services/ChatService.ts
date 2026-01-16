@@ -1,5 +1,5 @@
 import { Inject, Service } from 'typedi';
-import { ChatAttachment, ChatMessage, LlmProvider, SessionData, SessionStatus } from '../types/chat';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionData, SessionStatus, Turn } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
 import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
@@ -39,6 +39,7 @@ export class ChatService {
             message: string;
             attachment?: ChatAttachment;
             selection?: { selector: string };
+            createdAt?: Date;
         };
         skipped: boolean;
     }> {
@@ -78,10 +79,7 @@ export class ChatService {
         );
         const now = new Date();
         // Determine turn: User message starts a new turn
-        // Determine turn: User message starts a new turn
         const currentTurn = currentSessionData.lastTurn ?? 0;
-
-
 
         const newTurn = currentTurn + 1;
 
@@ -121,6 +119,7 @@ export class ChatService {
                 message: trimmed,
                 attachment: normalizedAttachment,
                 selection,
+                createdAt: now,
             },
             skipped: false,
         };
@@ -132,6 +131,7 @@ export class ChatService {
             message: string;
             attachment?: ChatAttachment;
             selection?: { selector: string };
+            createdAt?: Date;
         },
         turn: number,
         allowVariants: boolean = true,
@@ -166,13 +166,8 @@ export class ChatService {
         // But our stored history now DOES NOT have dataUrl.
         // We probably need to hydrate the ENTIRE conversation history that has images?
         // Or at least the current message's attachments.
-
         // For now, let's just hydrate the current request attachments.
         // If we want history images to work, we'd need to hydrate conversation too.
-        // Given the request, "messages.json must not save dataUrl",
-        // implies we should re-hydrate on read/send using PUBLIC_HOST if/when needed.
-        // Current implementation passes 'conversation' to generatePage which builds messages.
-        // We should map the conversation and hydrate images there!
 
         // Let's hydrate the current attachment first (for the prompt 'user' message)
         const hydratedCurrentAttachment = await this.hydrateAttachment(sessionId, promptData.attachment);
@@ -207,7 +202,7 @@ export class ChatService {
             effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
 
-        const project = this.projectService.getProject(currentSessionData.projectId);
+        const project = await this.projectService.getProject(currentSessionData.projectId);
         const rulesAndGoal = project?.rulesAndGoal;
         const imageGenerationPref = project?.imageGenerationPref;
         const modelRole = project?.modelRole;
@@ -292,14 +287,6 @@ export class ChatService {
                         projectId: session.projectId,
                     });
 
-                    // Recursively call addUserMessage for the new session?
-                    // Wait, generate_variant tool triggers generation for the new session.
-                    // We need to simulate a user message reception there?
-                    // Or just trigger generation?
-                    // handleUserMessage was calling itself recursively.
-                    // Now we should probably call addUserMessage + generateResponse?
-                    // Actually, `instruction` is the user message for the new session.
-
                     this.addUserMessage(
                         newSession.id,
                         instruction,
@@ -355,6 +342,28 @@ export class ChatService {
                 // Ensure artifact is saved for this turn even if no files changed
                 const session = this.sessionStore.getOrCreate(sessionId);
                 this.sessionStore.savePlanArtifact(sessionId, session.lastTurn ?? 0);
+            }
+
+            // Update token usage
+            let newUsage: {
+                prompt: number;
+                completion: number;
+                total: number;
+                reasoning: number;
+                cached: number;
+            } | undefined;
+
+            if (generation.usage) {
+                const session = this.sessionStore.getOrCreate(sessionId);
+                const currentUsage = session.tokenUsage || { prompt: 0, completion: 0, total: 0 };
+                newUsage = {
+                    prompt: currentUsage.prompt + generation.usage.prompt,
+                    completion: currentUsage.completion + generation.usage.completion,
+                    total: currentUsage.total + generation.usage.total,
+                    reasoning: (currentUsage.reasoning || 0) + (generation.usage.reasoning || 0),
+                    cached: (currentUsage.cached || 0) + (generation.usage.cached || 0),
+                };
+                this.sessionStore.upsert(sessionId, { tokenUsage: newUsage });
             }
 
             // Re-fetch strict session state
@@ -436,12 +445,34 @@ export class ChatService {
                 turn: updated.lastTurn ?? 0,
             };
 
+            const finalSession = this.sessionStore.getOrCreate(sessionId);
+
+            // Use promptData directly for Turn record, avoiding history lookup
+            const turnRecord: Turn = {
+                turn: updated.lastTurn ?? 0,
+                beginTime: promptData.createdAt || new Date(), // Use passed createdAt or fallback
+                endTime: new Date(),
+                request: promptData.message, // Use promptData directly
+                response: generation.summary || '',
+                provider: finalSession.provider || 'openai',
+                fastMode: finalSession.fastMode || false,
+                tokenUsage: newUsage || finalSession.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+                selection: promptData.selection,
+                attachment: promptData.attachment,
+                version: updated.currentVersion,
+            };
+
+            this.sessionStore.upsert(sessionId, {
+                turns: [...finalSession.turns, turnRecord]
+            });
+
             this.notifyStatus(
                 sessionId,
                 'completed',
                 'Request completed.',
                 {
-                    message: assistantMessage
+                    message: assistantMessage,
+                    tokenUsage: newUsage, // Pass usage to SSE
                 },
             );
 
@@ -464,7 +495,7 @@ export class ChatService {
         sessionId: string,
         status: ChatStatus,
         message?: string,
-        details?: unknown,
+        details?: any,
     ): void {
         this.sseService.emitChatStatus({
             sessionId,
@@ -515,6 +546,20 @@ export class ChatService {
                 }
 
                 return message;
+            }
+
+            // Handle plain objects that look like errors
+            if (current && typeof current === 'object') {
+                // Case 1: Nested error object (e.g. OpenAI error structure)
+                // { error: { message: ... } }
+                if ('error' in current && (current as any).error && typeof (current as any).error === 'object' && 'message' in (current as any).error) {
+                    return (current as any).error.message;
+                }
+
+                // Case 2: Direct message property
+                if ('message' in current && typeof (current as any).message === 'string') {
+                    return (current as any).message;
+                }
             }
             break;
         }

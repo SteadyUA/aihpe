@@ -562,19 +562,26 @@ class App extends React.Component<AppProps, AppState> {
                         updatedSession.activeTab = 'preview';
                     }
 
-                    // Append assistant message if provided in details
-                    if (data.details && data.details.message) {
-                        const assistantMsg = data.details.message;
-                        // Avoid duplicates if for some reason it's already there (unlikely with this flow)
-                        updatedSession.messages = [...updatedSession.messages, assistantMsg];
-                        // Update currentTurn if provided in message
-                        if (typeof assistantMsg.turn === 'number') {
-                            updatedSession.currentTurn = assistantMsg.turn;
+                    if (data.details) {
+                        if (data.details.message) {
+                            const assistantMsg = data.details.message;
+                            // Avoid duplicates if for some reason it's already there (unlikely with this flow)
+                            updatedSession.messages = [...updatedSession.messages, assistantMsg];
+                            // Update currentTurn if provided in message
+                            if (typeof assistantMsg.turn === 'number') {
+                                updatedSession.currentTurn = assistantMsg.turn;
+                            }
+                            if (typeof assistantMsg.version === 'number') {
+                                updatedSession.currentVersion = assistantMsg.version;
+                            }
                         }
-                        if (typeof assistantMsg.version === 'number') {
-                            updatedSession.currentVersion = assistantMsg.version;
+
+                        if (data.details.tokenUsage) {
+                            updatedSession.tokenUsage = data.details.tokenUsage;
                         }
-                    } else {
+                    }
+
+                    if (!data.details?.message) {
                         // Fallback: Trigger fetch if no message in payload (legacy or error case)
                         setTimeout(() => this.fetchSession(sessionId, true), 0);
                     }
@@ -798,6 +805,7 @@ class App extends React.Component<AppProps, AppState> {
 
                             // Restore unsent state if present and currently empty/default
                             selection: (data.unsent?.selection) ?? (session ? session.selection : null),
+                            tokenUsage: data.tokenUsage ?? (session ? session.tokenUsage : undefined),
                             attachment: (data.unsent?.attachment) ?? (session ? session.attachment : undefined),
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',

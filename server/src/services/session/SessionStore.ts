@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus } from '../../types/chat';
-import { sanitizeHistoryForUi } from '../../utils/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus, TokenUsage, Turn } from '../../types/chat';
+import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'tokenUsage' | 'turns'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -26,6 +26,7 @@ type PersistedSession = {
     status?: SessionStatus;
     errorMessage?: string;
     subject?: string;
+    tokenUsage?: TokenUsage;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -269,7 +270,20 @@ export class SessionStore {
             status: 'idle',
             subject: source.subject,
             fastMode: source.fastMode,
+            turns: source.turns
+                .filter(t => t.turn <= normalizedTurn)
+                .map(t => ({ ...t })),
         };
+
+        // Restore token usage if available from the last copied turn
+        if (newSession.turns.length > 0) {
+            // Find turn with max turn number (assuming sorted, but safe to check)
+            // Actually turns are usually ordered.
+            const lastTurn = newSession.turns[newSession.turns.length - 1];
+            if (lastTurn && lastTurn.tokenUsage) {
+                newSession.tokenUsage = { ...lastTurn.tokenUsage };
+            }
+        }
 
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
@@ -427,6 +441,7 @@ export class SessionStore {
             unsent: {},
             status: 'idle',
             subject: '...',
+            turns: [],
         };
     }
 
@@ -731,6 +746,7 @@ export class SessionStore {
             provider: update.provider ?? session.provider,
             fastMode: update.fastMode ?? session.fastMode,
             status: update.status ?? session.status,
+            tokenUsage: update.tokenUsage ?? session.tokenUsage,
         };
 
         this.sessions.set(sessionId, merged);
@@ -793,19 +809,26 @@ export class SessionStore {
                 status: parsed.status ?? 'idle',
                 errorMessage: parsed.errorMessage,
                 subject: parsed.subject,
+                tokenUsage: parsed.tokenUsage,
+                turns: [],
             };
 
-            // Attempt to load messages.json and context.json from session root
-            const messagesPath = path.join(sessionDir, 'messages.json');
+            // Attempt to load context.json from session root
             const contextPath = path.join(sessionDir, 'context.json');
+            const turnsPath = path.join(sessionDir, 'turns.json');
 
-            if (fs.existsSync(messagesPath)) {
+            if (fs.existsSync(turnsPath)) {
                 try {
-                    const rawMessages = fs.readFileSync(messagesPath, 'utf-8');
-                    const rawHistory = JSON.parse(rawMessages);
-                    session.history = sanitizeHistoryForUi(rawHistory);
+                    const rawTurns = fs.readFileSync(turnsPath, 'utf-8');
+                    session.turns = JSON.parse(rawTurns).map((t: any) => ({
+                        ...t,
+                        beginTime: new Date(t.beginTime),
+                        endTime: new Date(t.endTime),
+                    }));
+                    // Reconstruct history from turns
+                    session.history = this.reconstructHistoryFromTurns(session.turns);
                 } catch (e) {
-                    console.error(`Failed to parse messages.json for ${sessionId}`, e);
+                    console.error(`Failed to parse turns.json for ${sessionId}`, e);
                 }
             }
 
@@ -891,17 +914,20 @@ export class SessionStore {
 
 
             // Write to session root
-            fs.writeFileSync(
-                path.join(sessionDir, 'messages.json'),
-                JSON.stringify(session.history, null, 2),
-                'utf-8'
-            );
+
 
             fs.writeFileSync(
                 path.join(sessionDir, 'context.json'),
                 JSON.stringify(session.context, null, 2),
                 'utf-8'
             );
+
+            fs.writeFileSync(
+                path.join(sessionDir, 'turns.json'),
+                JSON.stringify(session.turns, null, 2),
+                'utf-8'
+            );
+
             const payload: PersistedSession = {
                 id: session.id,
                 projectId: session.projectId,
@@ -915,6 +941,7 @@ export class SessionStore {
                 subject: session.subject,
                 fastMode: session.fastMode,
                 errorMessage: session.errorMessage,
+                tokenUsage: session.tokenUsage,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -952,6 +979,36 @@ export class SessionStore {
                 error,
             );
         }
+    }
+    private reconstructHistoryFromTurns(turns: Turn[]): ChatMessage[] {
+        const history: ChatMessage[] = [];
+
+        for (const turn of turns) {
+            // 1. User Message
+            if (turn.request || turn.attachment || turn.selection) {
+                history.push({
+                    role: 'user',
+                    content: formatContentForUi(turn.request),
+                    createdAt: turn.beginTime,
+                    selection: turn.selection,
+                    attachment: turn.attachment,
+                    version: turn.version,
+                    turn: turn.turn,
+                });
+            }
+
+            // 2. Assistant Message
+            if (turn.response) {
+                history.push({
+                    role: 'assistant',
+                    content: formatContentForUi(turn.response),
+                    createdAt: turn.endTime,
+                    version: turn.version,
+                    turn: turn.turn,
+                });
+            }
+        }
+        return history;
     }
 }
 
@@ -1184,5 +1241,7 @@ function cloneSession(session: SessionData): SessionData {
         errorMessage: session.errorMessage,
         subject: session.subject,
         fastMode: session.fastMode,
+        tokenUsage: session.tokenUsage ? { ...session.tokenUsage } : undefined,
+        turns: session.turns.map(t => ({ ...t })),
     };
 }

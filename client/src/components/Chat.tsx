@@ -9,7 +9,7 @@ import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-import { MessageData, LlmProvider, ChatAttachment } from '../types';
+import { MessageData, LlmProvider, ChatAttachment, TokenUsage } from '../types';
 
 
 
@@ -353,6 +353,7 @@ interface ChatProps {
     fastMode?: boolean;
     onFastModeChange?: (value: boolean) => void;
     sessionTitle?: string;
+    tokenUsage?: TokenUsage;
 
 }
 
@@ -663,7 +664,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onSelectChip,
             sessionIds,
             onSwitchSession,
-            sessionTitle
+            sessionTitle,
+            tokenUsage
         } = this.props;
         const { input, isUploading, isLoading } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
@@ -707,7 +709,18 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         return (
             <div className={styles.chatPanel}>
                 <div className={styles.sessionHeader}>
-                    {sessionTitle || '...'}
+                    <span className={styles.sessionTitle}>{sessionTitle || '...'}</span>
+                    {tokenUsage && (
+                        <div className={styles.tokenUsage}>
+                            <span>{tokenUsage.total.toLocaleString()} tokens</span>
+                            <div className={styles.tokenTooltip}>
+                                <div>Prompt: {tokenUsage.prompt.toLocaleString()}</div>
+                                <div>Completion: {tokenUsage.completion.toLocaleString()}</div>
+                                {tokenUsage.reasoning !== undefined && <div>Reasoning: {tokenUsage.reasoning.toLocaleString()}</div>}
+                                {tokenUsage.cached !== undefined && <div>Cached: {tokenUsage.cached.toLocaleString()}</div>}
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <div className={styles.messages} id="messages">
                     {messages.map((m, i) => {
