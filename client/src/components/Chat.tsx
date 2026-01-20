@@ -9,7 +9,7 @@ import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-import { MessageData, LlmProvider, ChatAttachment, TokenUsage } from '../types';
+import { MessageData, LlmProvider, ChatAttachment, TokenUsage, ContextUsage } from '../types';
 
 
 
@@ -354,7 +354,7 @@ interface ChatProps {
     onFastModeChange?: (value: boolean) => void;
     sessionTitle?: string;
     tokenUsage?: TokenUsage;
-
+    contextUsage?: ContextUsage;
 }
 
 interface ChatState {
@@ -665,7 +665,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             sessionIds,
             onSwitchSession,
             sessionTitle,
-            tokenUsage
+            tokenUsage,
+            contextUsage
         } = this.props;
         const { input, isUploading, isLoading } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
@@ -710,14 +711,31 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             <div className={styles.chatPanel}>
                 <div className={styles.sessionHeader}>
                     <span className={styles.sessionTitle}>{sessionTitle || '...'}</span>
-                    {tokenUsage && (
+                    {(tokenUsage || contextUsage) && (
                         <div className={styles.tokenUsage}>
-                            <span>{tokenUsage.total.toLocaleString()} tokens</span>
+                            {contextUsage ? (
+                                <span>Context: {((contextUsage.total / contextUsage.capacity) * 100).toFixed(1)}%</span>
+                            ) : (
+                                <span>Context: 0%</span>
+                            )}
+
                             <div className={styles.tokenTooltip}>
-                                <div>Prompt: {tokenUsage.prompt.toLocaleString()}</div>
-                                <div>Completion: {tokenUsage.completion.toLocaleString()}</div>
-                                {tokenUsage.reasoning !== undefined && <div>Reasoning: {tokenUsage.reasoning.toLocaleString()}</div>}
-                                {tokenUsage.cached !== undefined && <div>Cached: {tokenUsage.cached.toLocaleString()}</div>}
+                                {contextUsage && (
+                                    <>
+                                        <div>Context: {contextUsage.total.toLocaleString()}</div>
+                                        {tokenUsage && <hr style={{ margin: '4px 0', borderColor: 'rgba(255,255,255,0.1)' }} />}
+                                    </>
+                                )}
+                                {tokenUsage && (
+                                    <>
+                                        <div>Prompt: {tokenUsage.prompt.toLocaleString()}</div>
+                                        <div>Completion: {tokenUsage.completion.toLocaleString()}</div>
+                                        {tokenUsage.reasoning !== undefined && <div>Reasoning: {tokenUsage.reasoning.toLocaleString()}</div>}
+                                        {tokenUsage.cached !== undefined && <div>Cached: {tokenUsage.cached.toLocaleString()}</div>}
+                                        <hr style={{ margin: '4px 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                                        <div>Total: {tokenUsage.total.toLocaleString()}</div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     )}

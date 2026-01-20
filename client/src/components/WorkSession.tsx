@@ -306,6 +306,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
                     sessionTitle={session.subject}
                     tokenUsage={session.tokenUsage}
+                    contextUsage={session.contextUsage}
                 />
 
                 {this.props.onResizeStart && (

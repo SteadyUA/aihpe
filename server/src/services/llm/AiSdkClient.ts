@@ -339,6 +339,7 @@ export class AiSdkClient implements LlmClient {
                 total: 0,
             };
 
+            let usage;
             while (steps < maxSteps && !stop) {
                 steps++;
 
@@ -403,8 +404,7 @@ export class AiSdkClient implements LlmClient {
                 }
                 fullText += stepText;
 
-                const usage = await result.usage;
-                console.log(usage);
+                usage = await result.usage;
                 console.log(`\n🔍 --- Step ${steps} Token Usage ---`);
                 console.log(`Total Tokens:      ${usage.totalTokens}`);
                 console.log(`Input Tokens:      ${usage.inputTokens}`);
@@ -478,65 +478,17 @@ export class AiSdkClient implements LlmClient {
                         });
                     }
                 }
-                // ---------------------------------------------------------------------------------
 
                 // Add step messages to current history and collection
                 for (const m of stepMessages) {
                     currentMessages.push(m);
                     collectedNewMessages.push(m);
-
-                    // Notify about content found in response (tool calls and reasoning)
-                    // Notify about content found in response (tool calls and reasoning)
-                    if (
-                        m.role === 'assistant' &&
-                        Array.isArray(m.content) &&
-                        request.onProgress
-                    ) {
-                        // We already handled streaming tool calls.
-                        // We might want to handle non-streamed ones if any?
-                        // Generally stream loop covers it.
-                        // Let's keep it minimal or remove if duplicate.
-                        // If we are strictly streaming, we don't need this.
-                    }
                 }
 
                 if (!stepText && request.onProgress) {
                     // Debug: Log if no text was streamed but messages were received
                     console.log('No text streamed in this step.');
                 }
-
-                // Check for tool calls in the last message
-                const toolCalls = await result.toolCalls;
-
-                // if (toolCalls && toolCalls.length > 0) {
-                //     // Identify tool calls that were ALREADY executed by the provider/SDK in this step
-                //     // by checking if there are 'tool' messages with matching toolCallId in stepMessages
-                //     const executedToolCallIds = new Set(
-                //         stepMessages
-                //             .filter((m) => m.role === 'tool')
-                //             .flatMap((m) =>
-                //                 Array.isArray(m.content)
-                //                     ? m.content.map((c: any) => c.toolCallId)
-                //                     : [],
-                //             ),
-                //     );
-
-                //     // if (toolCalls.length > 0) {
-                //     //     // All tools were executed by provider (or we processed results in stepMessages above).
-                //     //     // Check if we should stop loop based on executed tools.
-                //     //     // Stop if variants were generated
-                //     //     const variantsExecuted = toolCalls.some(
-                //     //         (tc) => tc.toolName === 'generate_variant',
-                //     //     );
-
-                //     //     if (variantsExecuted) {
-                //     //         break;
-                //     //     }
-                //     // }
-                // } else {
-                //     // No tool calls, model is done
-                //     break;
-                // }
             }
 
             if (this.modelId) {
@@ -571,6 +523,10 @@ export class AiSdkClient implements LlmClient {
                 newMessages,
                 targetVersion: this.targetVersion ?? request.currentVersion,
                 usage: totalUsage,
+                contextUsage: {
+                    total: usage?.totalTokens || 0,
+                    capacity: this.maxContextTokens,
+                }
             };
         } catch (error) {
             console.error(

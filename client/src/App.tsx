@@ -579,6 +579,9 @@ class App extends React.Component<AppProps, AppState> {
                         if (data.details.tokenUsage) {
                             updatedSession.tokenUsage = data.details.tokenUsage;
                         }
+                        if (data.details.contextUsage) {
+                            updatedSession.contextUsage = data.details.contextUsage;
+                        }
                     }
 
                     if (!data.details?.message) {

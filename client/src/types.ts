@@ -74,6 +74,7 @@ export interface Session {
 
     group: number;
     tokenUsage?: TokenUsage;
+    contextUsage?: ContextUsage;
 }
 
 export interface TokenUsage {
@@ -82,4 +83,9 @@ export interface TokenUsage {
     total: number;
     reasoning?: number;
     cached?: number;
+}
+
+export interface ContextUsage {
+    total: number;
+    capacity: number;
 }

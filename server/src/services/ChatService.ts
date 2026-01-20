@@ -456,7 +456,7 @@ export class ChatService {
                 response: generation.summary || '',
                 provider: finalSession.provider || 'openai',
                 fastMode: finalSession.fastMode || false,
-                tokenUsage: newUsage || finalSession.tokenUsage || { prompt: 0, completion: 0, total: 0 },
+                tokenUsage: generation.usage || { prompt: 0, completion: 0, total: 0 }, // Store per-turn usage
                 selection: promptData.selection,
                 attachment: promptData.attachment,
                 version: updated.currentVersion,
@@ -473,6 +473,7 @@ export class ChatService {
                 {
                     message: assistantMessage,
                     tokenUsage: newUsage, // Pass usage to SSE
+                    contextUsage: generation.contextUsage,
                 },
             );
 

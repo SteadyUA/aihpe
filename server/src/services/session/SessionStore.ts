@@ -169,6 +169,7 @@ export class SessionStore {
             provider: source.provider,
             projectId: source.projectId,
             status: 'idle', // Clone starts idle? Or copy? Usually idle as it's a new session.
+            tokenUsage: { prompt: 0, completion: 0, total: 0 },
         };
 
         clearPersistedSessionData(targetId);
@@ -273,17 +274,10 @@ export class SessionStore {
             turns: source.turns
                 .filter(t => t.turn <= normalizedTurn)
                 .map(t => ({ ...t })),
+            tokenUsage: { prompt: 0, completion: 0, total: 0 },
         };
 
-        // Restore token usage if available from the last copied turn
-        if (newSession.turns.length > 0) {
-            // Find turn with max turn number (assuming sorted, but safe to check)
-            // Actually turns are usually ordered.
-            const lastTurn = newSession.turns[newSession.turns.length - 1];
-            if (lastTurn && lastTurn.tokenUsage) {
-                newSession.tokenUsage = { ...lastTurn.tokenUsage };
-            }
-        }
+
 
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
@@ -399,6 +393,7 @@ export class SessionStore {
                 attachment: userMessage?.attachment,
             },
             status: 'idle', // Reset status to idle to clear error state
+            turns: session.turns.filter(t => t.turn < currentTurn),
         };
 
         this.sessions.set(sessionId, updated);

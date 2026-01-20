@@ -62,6 +62,11 @@ export interface TokenUsage {
     cached?: number;
 }
 
+export interface ContextUsage {
+    total: number;
+    capacity: number;
+}
+
 export interface Turn {
     turn: number;
     beginTime: Date;

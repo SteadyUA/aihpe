@@ -4,8 +4,6 @@ import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Account } from '../entities/Account';
 
-// Use env secret or fallback dev secret
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-12345';
 const ACCESS_TOKEN_EXPIRATION = '1h'; // 1 hour
 const REFRESH_TOKEN_EXPIRATION = '7d'; // 7 days
 
@@ -35,6 +33,7 @@ export class AccountService {
         const account = new Account();
         account.login = login;
         account.passwordHash = passwordHash;
+        account.tokenSecret = crypto.randomBytes(32).toString('hex');
 
         const saved = await this.accountRepository.save(account);
         return saved.id;
@@ -60,13 +59,8 @@ export class AccountService {
 
         const newHash = this.hashPassword(newPass);
         account.passwordHash = newHash;
-
-        // Revoke tokens on password change
-        account.accessToken = undefined; // actually we might need to nullify them or just refresh token?
-        // Service logic previously deleted `tokens` object.
-        // Entity has nullable columns.
-        account.refreshToken = undefined;
-        account.accessToken = undefined; // Optional cleanup
+        // Rotate secret to invalidate all existing tokens
+        account.tokenSecret = crypto.randomBytes(32).toString('hex');
 
         await this.accountRepository.save(account);
     }
@@ -83,28 +77,17 @@ export class AccountService {
         }
 
         // Generate tokens
-        const accessToken = jwt.sign({ accountId: account.id, login: account.login }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRATION });
-        const refreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRATION });
-
-        // Save tokens to account
-        account.accessToken = accessToken;
-        account.refreshToken = refreshToken;
-
-        await this.accountRepository.save(account);
+        const accessToken = jwt.sign({ accountId: account.id, login: account.login }, account.tokenSecret, { expiresIn: ACCESS_TOKEN_EXPIRATION });
+        const refreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, account.tokenSecret, { expiresIn: REFRESH_TOKEN_EXPIRATION });
 
         return { accessToken, refreshToken };
     }
 
     async refresh(incomingRefreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
-        // Validate token structure first
-        let payload: any;
-        try {
-            payload = jwt.verify(incomingRefreshToken, JWT_SECRET);
-        } catch (e) {
-            throw new Error('Invalid refresh token');
-        }
+        // Decode without verifying to get accountId
+        const payload = jwt.decode(incomingRefreshToken) as any;
 
-        if (payload.type !== 'refresh' || !payload.accountId) {
+        if (!payload || payload.type !== 'refresh' || !payload.accountId) {
             throw new Error('Invalid token type');
         }
 
@@ -113,21 +96,16 @@ export class AccountService {
             throw new Error('Account not found');
         }
 
-        // Verify stored token matches (basic rotation/reuse check)
-        if (account.refreshToken !== incomingRefreshToken) {
-            // In a strict system, this might indicate token theft and we should revoke all.
-            // For now, just deny.
+        // Verify with account-specific secret
+        try {
+            jwt.verify(incomingRefreshToken, account.tokenSecret);
+        } catch (e) {
             throw new Error('Invalid or expired refresh token');
         }
 
         // Rotate tokens
-        const newAccessToken = jwt.sign({ accountId: account.id, login: account.login }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRATION });
-        const newRefreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRATION });
-
-        account.accessToken = newAccessToken;
-        account.refreshToken = newRefreshToken;
-
-        await this.accountRepository.save(account);
+        const newAccessToken = jwt.sign({ accountId: account.id, login: account.login }, account.tokenSecret, { expiresIn: ACCESS_TOKEN_EXPIRATION });
+        const newRefreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, account.tokenSecret, { expiresIn: REFRESH_TOKEN_EXPIRATION });
 
         return { accessToken: newAccessToken, refreshToken: newRefreshToken };
     }

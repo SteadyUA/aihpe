@@ -12,9 +12,6 @@ export class Account {
     @Column()
     passwordHash!: string;
 
-    @Column({ nullable: true })
-    accessToken?: string;
-
-    @Column({ nullable: true })
-    refreshToken?: string;
+    @Column()
+    tokenSecret!: string;
 }

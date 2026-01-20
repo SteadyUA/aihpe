@@ -1,10 +1,28 @@
-/* Session Bar */
 .sessionBar {
     display: flex;
     align-items: center;
     gap: 0.25rem;
     padding: 0.5rem;
-    overflow-x: auto;
+    /* overflow-x handled in sessionTabs */
+    margin-bottom: -6px;
+}
+
+.projectContext {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding-bottom: 6px;
+}
+
+.projectName {
+    margin-right: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .connectionStatus {
@@ -24,7 +42,27 @@
     display: flex;
     gap: 0.25rem;
     flex: 1;
-    overflow-x: auto;
+    overflow-x: scroll;
+    padding-bottom: 2px;
+    /* Prevent scrollbar from overlapping content slightly */
+}
+
+.sessionTabs::-webkit-scrollbar {
+    height: 4px;
+    /* Thin scrollbar */
+}
+
+.sessionTabs::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sessionTabs::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.sessionTabs::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
 }
 
 .sessionTab {
