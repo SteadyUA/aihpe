@@ -1,0 +1,159 @@
+import { Service } from 'typedi';
+import { ImageService } from './ImageService';
+
+@Service()
+export class GoogleImageService extends ImageService {
+    protected async generateRaw(prompt: string): Promise<string> {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY not configured');
+        }
+
+        console.log(`Generating image via Google for description: ${prompt}`);
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+        const body = {
+            contents: [{
+                parts: [{ text: prompt }]
+            }]
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        let base64Data: string | undefined;
+
+        if (data.candidates?.[0]?.content?.parts) {
+            const parts = data.candidates[0].content.parts;
+            const imagePart = parts.find((p: any) => p.inlineData);
+            if (imagePart) {
+                base64Data = imagePart.inlineData.data;
+            }
+        }
+
+        if (!base64Data) {
+            throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
+        }
+
+        return base64Data;
+    }
+
+    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string): Promise<{ base64: string; description?: string }> {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY not configured');
+        }
+
+        console.log(`Editing image via Google with prompt: ${prompt}`);
+
+        const base64Data = imageBuffer.toString('base64');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+
+        // Augment prompt to ask for description
+        const augmentedPrompt = `${prompt}\n\nAlso describe it in a single sentence so that I can use this description for alt-text or generating a similar image.`;
+
+        const body = {
+            contents: [{
+                parts: [
+                    { text: augmentedPrompt },
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Data
+                        }
+                    }
+                ]
+            }],
+            generationConfig: {
+                responseModalities: ["TEXT", "IMAGE"]
+            }
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        let newBase64Data: string | undefined;
+        let newDescription: string | undefined;
+
+        if (data.candidates?.[0]?.content?.parts) {
+            const parts = data.candidates[0].content.parts;
+
+            const imagePart = parts.find((p: any) => p.inlineData);
+            if (imagePart) {
+                newBase64Data = imagePart.inlineData.data;
+            }
+
+            const textPart = parts.find((p: any) => p.text);
+            if (textPart) {
+                newDescription = textPart.text;
+            }
+        }
+
+        if (!newBase64Data) {
+            throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
+        }
+
+        return { base64: newBase64Data, description: newDescription };
+    }
+
+    protected async describeRaw(imageBuffer: Buffer, mimeType: string): Promise<string> {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY not configured');
+        }
+
+        const base64Image = imageBuffer.toString('base64');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+
+        const body = {
+            contents: [{
+                parts: [
+                    { text: 'Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image.' },
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Image
+                        }
+                    }
+                ]
+            }]
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        throw new Error('No description text found in response');
+    }
+}

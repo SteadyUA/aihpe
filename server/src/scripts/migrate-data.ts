@@ -1,5 +1,6 @@
 
 import 'reflect-metadata';
+import crypto from 'node:crypto';
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
@@ -43,8 +44,11 @@ async function migrateData() {
                     newAccount.login = acc.login;
                     newAccount.passwordHash = acc.passwordHash;
                     if (acc.tokens) {
-                        newAccount.accessToken = acc.tokens.accessToken;
-                        newAccount.refreshToken = acc.tokens.refreshToken;
+                        // Old tokens are no longer compatible.
+                        // We generate a new secret for the account.
+                        newAccount.tokenSecret = crypto.randomBytes(32).toString('hex');
+                    } else {
+                        newAccount.tokenSecret = crypto.randomBytes(32).toString('hex');
                     }
 
                     await accountRepo.save(newAccount);

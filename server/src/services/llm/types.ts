@@ -1,5 +1,7 @@
 import { ChatAttachment, SessionFiles, ChatMessage, TokenUsage, ContextUsage } from '../../types/chat';
 
+export { ChatAttachment, SessionFiles, ChatMessage, TokenUsage, ContextUsage };
+
 export interface GeneratePageRequest {
     sessionId: string;
     instructions: string;
