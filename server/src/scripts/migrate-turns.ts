@@ -3,7 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { ChatMessage, Turn } from '../types/chat';
 
-const SESSION_ROOT = path.resolve(process.cwd(), 'data', 'sessions');
+import { getSessionsDir } from '../utils/pathUtils';
+
+const SESSION_ROOT = getSessionsDir();
 
 function migrateSessions() {
     if (!fs.existsSync(SESSION_ROOT)) {

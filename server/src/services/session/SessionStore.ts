@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
 import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus, TokenUsage, Turn } from '../../types/chat';
 import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
+import { getSessionsDir } from '../../utils/pathUtils';
 
 type SessionUpdate = Partial<
     Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'tokenUsage' | 'turns'>
@@ -68,7 +69,6 @@ const EMPTY_FILES: SessionFiles = {
     'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
     'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
     'script.js': DEFAULT_SESSION_SCRIPT,
-    'implementation_plan.md': 'No plan created yet.',
 };
 
 const SESSION_ROOT = resolveSessionRoot();
@@ -174,7 +174,6 @@ export class SessionStore {
 
         clearPersistedSessionData(targetId);
         copyVersionHistory(sourceId, targetId);
-        this.copyArtifacts(sourceId, targetId);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -282,7 +281,6 @@ export class SessionStore {
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
         copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
-        this.copyArtifacts(sourceId, targetId, normalizedTurn);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -357,25 +355,7 @@ export class SessionStore {
                 ? { ...EMPTY_FILES }
                 : readVersionFiles(sessionId, targetVersion) || { ...EMPTY_FILES };
 
-        // 6.5 Restore implementation_plan.md from artifact
-        const previousTurn = currentTurn - 1;
-        const previousPlanArtifact = path.join(
-            resolveSessionDir(sessionId),
-            'artifacts',
-            `implementation_plan.md.${previousTurn}`
-        );
 
-        if (fs.existsSync(previousPlanArtifact)) {
-            try {
-                const planContent = fs.readFileSync(previousPlanArtifact, 'utf-8');
-                snapshot['implementation_plan.md'] = planContent;
-            } catch (e) {
-                console.error(`Failed to restore plan artifact for turn ${previousTurn}`, e);
-            }
-        } else if (previousTurn === 0) {
-            // Turn 0 implies empty or initial plan
-            snapshot['implementation_plan.md'] = EMPTY_FILES['implementation_plan.md'];
-        }
 
         // 7. Update Session
         const updated: SessionData = {
@@ -652,51 +632,7 @@ export class SessionStore {
         return undefined;
     }
 
-    savePlanArtifact(sessionId: string, turn: number): void {
-        const session = this.getOrCreate(sessionId);
-        // Save the plan state at the END of the current turn.
 
-        const sessionDir = resolveSessionDir(sessionId);
-        const artifactsDir = path.join(sessionDir, 'artifacts');
-
-        ensureDirectory(artifactsDir);
-
-        const planContent = session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'];
-        const artifactPath = path.join(artifactsDir, `implementation_plan.md.${turn}`);
-
-        try {
-            fs.writeFileSync(artifactPath, planContent, 'utf-8');
-        } catch (error) {
-            console.error(`Failed to save plan artifact for session ${sessionId} turn ${turn}`, error);
-        }
-    }
-
-
-    getArtifact(sessionId: string, turn: number, filename: string): string | undefined {
-        const sessionDir = resolveSessionDir(sessionId);
-        const artifactsDir = path.join(sessionDir, 'artifacts');
-        const artifactPath = path.join(artifactsDir, `${filename}.${turn}`);
-
-        if (fs.existsSync(artifactPath)) {
-            try {
-                return fs.readFileSync(artifactPath, 'utf-8');
-            } catch (error) {
-                console.error(`Failed to read artifact ${filename}.${turn} for session ${sessionId}`, error);
-            }
-        } else if (filename === 'implementation_plan.md') {
-            const legacyPath = path.join(artifactsDir, `plan.md.${turn}`);
-            if (fs.existsSync(legacyPath)) {
-                try {
-                    return fs.readFileSync(legacyPath, 'utf-8');
-                } catch (error) {
-                    console.error(`Failed to read legacy artifact plan.md.${turn} for session ${sessionId}`, error);
-                }
-            }
-        }
-
-        // Return default if missing
-        return EMPTY_FILES[filename as keyof SessionFiles];
-    }
 
     getAllHistory(sessionId: string): ChatMessage[] | undefined {
         const session = this.getOrCreate(sessionId);
@@ -780,10 +716,6 @@ export class SessionStore {
                     path.join(versionDir, 'script.js'),
                     EMPTY_FILES['script.js'],
                 ),
-                'implementation_plan.md': readFileOrDefault(
-                    path.join(versionDir, 'implementation_plan.md'),
-                    EMPTY_FILES['implementation_plan.md'],
-                ),
             };
 
             const session: SessionData = {
@@ -856,47 +788,7 @@ export class SessionStore {
         }
     }
 
-    private copyArtifacts(sourceId: string, targetId: string, maxTurn?: number): void {
-        const sourceDir = path.join(resolveSessionDir(sourceId), 'artifacts');
-        const targetDir = path.join(resolveSessionDir(targetId), 'artifacts');
 
-        if (!fs.existsSync(sourceDir)) {
-            return;
-        }
-
-        try {
-            ensureDirectory(targetDir);
-            const files = fs.readdirSync(sourceDir);
-
-            for (const file of files) {
-                // Filename format: name.ext.turn
-                // We want to copy if turn <= maxTurn (if maxTurn defined)
-
-                if (maxTurn !== undefined) {
-                    const parts = file.split('.');
-                    // Safe check for turn suffix
-                    const turnStr = parts[parts.length - 1];
-                    const turn = parseInt(turnStr, 10);
-
-                    if (!isNaN(turn)) {
-                        if (turn > maxTurn) {
-                            continue;
-                        }
-                    }
-                }
-
-                fs.copyFileSync(
-                    path.join(sourceDir, file),
-                    path.join(targetDir, file)
-                );
-            }
-        } catch (error) {
-            console.error(
-                `Failed to copy artifacts from ${sourceId} to ${targetId}`,
-                error,
-            );
-        }
-    }
 
     private persistSession(session: SessionData): void {
         const sessionDir = resolveSessionDir(session.id);
@@ -963,11 +855,6 @@ export class SessionStore {
                 session.files['script.js'],
                 'utf-8',
             );
-            fs.writeFileSync(
-                path.join(versionDir, 'implementation_plan.md'),
-                session.files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'],
-                'utf-8',
-            );
         } catch (error: any) {
             console.error(
                 `Failed to persist session ${session.id} to disk`,
@@ -1007,12 +894,10 @@ export class SessionStore {
     }
 }
 
+
+
 function resolveSessionRoot(): string {
-    const customRoot = process.env.SESSION_ROOT?.trim();
-    if (customRoot) {
-        return path.resolve(customRoot);
-    }
-    return path.resolve(process.cwd(), 'data', 'sessions');
+    return getSessionsDir();
 }
 
 function resolveSessionDir(sessionId: string): string {
@@ -1116,7 +1001,6 @@ function persistVersionFiles(
     fs.writeFileSync(path.join(versionDir, 'index.html'), files['index.html'], 'utf-8');
     fs.writeFileSync(path.join(versionDir, 'styles.css'), files['styles.css'], 'utf-8');
     fs.writeFileSync(path.join(versionDir, 'script.js'), files['script.js'], 'utf-8');
-    fs.writeFileSync(path.join(versionDir, 'implementation_plan.md'), files['implementation_plan.md'] || EMPTY_FILES['implementation_plan.md'], 'utf-8');
 }
 
 function ensureVersionSnapshot(
@@ -1176,10 +1060,6 @@ function readVersionFiles(
         'script.js': readFileOrDefault(
             path.join(versionDir, 'script.js'),
             EMPTY_FILES['script.js'],
-        ),
-        'implementation_plan.md': readFileOrDefault(
-            path.join(versionDir, 'implementation_plan.md'),
-            EMPTY_FILES['implementation_plan.md'],
         ),
     };
 }

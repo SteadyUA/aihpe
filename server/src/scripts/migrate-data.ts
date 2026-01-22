@@ -8,7 +8,9 @@ import { AppDataSource } from '../data-source';
 import { Account } from '../entities/Account';
 import { Project } from '../entities/Project';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+import { getDataDir } from '../utils/pathUtils';
+
+const DATA_DIR = getDataDir();
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 

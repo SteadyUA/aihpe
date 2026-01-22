@@ -1,5 +1,6 @@
 import { Service } from 'typedi';
 import path from 'node:path';
+import { getSessionsDir } from '../../utils/pathUtils';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { imageSize } from 'image-size';
@@ -290,8 +291,7 @@ export abstract class ImageService {
     }
 
     protected resolveVersionDir(sessionId: string, version: number): string {
-        const customRoot = process.env.SESSION_ROOT?.trim();
-        const root = customRoot ? path.resolve(customRoot) : path.resolve(process.cwd(), 'data', 'sessions');
+        const root = getSessionsDir();
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
         const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
         return path.join(root, safeId, 'versions', String(safeVersion));

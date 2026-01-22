@@ -31,8 +31,8 @@ It consists of two main workspaces:
     OPENAI_API_KEY=sk-...
     PORT=3000
     # Optional:
-    MODEL=gpt-4o               # Or any compatible model
-    SESSION_ROOT=data/sessions # Path to store session data
+    MODEL=gpt-4o
+    DATA_DIR=data
     ```
 
 ## Development

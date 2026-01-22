@@ -11,7 +11,7 @@ import { TabType } from '../../types';
 import { Preview } from './Preview';
 import { Images } from './Images';
 import { Editor } from './Editor';
-import { Artifact } from './Artifact';
+
 import { apiAuth } from '../../utils/api';
 
 interface WorkareaProps {
@@ -31,11 +31,10 @@ interface WorkareaProps {
 const FILENAME_MAP: Record<AssetType, string> = {
     html: 'index.html',
     css: 'styles.css',
-    js: 'script.js',
-    plan: 'implementation_plan.md'
+    js: 'script.js'
 };
 
-type AssetType = 'html' | 'css' | 'js' | 'plan';
+type AssetType = 'html' | 'css' | 'js';
 
 interface WorkareaState {
     iframeKey: number;
@@ -45,9 +44,7 @@ interface WorkareaState {
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
 
-    hasUnreadPlanChanges: boolean;
-    // Cache per turn for artifacts: turn -> { plan: ... }
-    artifactCache: Record<number, Record<string, string | null>>;
+
 }
 
 export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
@@ -59,12 +56,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.state = {
             iframeKey: 0,
             versionCache: {}, // Initialize empty
-            loading: { html: false, css: false, js: false, plan: false },
-            unsavedContent: { html: null, css: null, js: null, plan: null },
+            loading: { html: false, css: false, js: false },
+            unsavedContent: { html: null, css: null, js: null },
             isSaving: false,
-
-            hasUnreadPlanChanges: false,
-            artifactCache: {},
         };
         this.previewRef = React.createRef();
     }
@@ -92,14 +86,12 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             this.setState(
                 (prev) => {
                     const newState: Partial<WorkareaState> = {
-                        loading: { html: false, css: false, js: false, plan: false },
-                        unsavedContent: { html: null, css: null, js: null, plan: null },
+                        loading: { html: false, css: false, js: false },
+                        unsavedContent: { html: null, css: null, js: null },
                         iframeKey: prev.iframeKey + 1,
                     };
 
-                    if (activeTurnChanged) {
-                        newState.hasUnreadPlanChanges = false;
-                    }
+
 
                     return newState as WorkareaState;
                 },
@@ -134,35 +126,16 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.previewRef.current?.restoreScroll();
     }
 
-    public clearCache = (version: number, filename?: string, turn?: number) => {
+    public clearCache = (version: number, filename?: string) => {
         this.setState(prev => {
             const newCache = { ...prev.versionCache };
-            const newArtifactCache = { ...prev.artifactCache };
-            let hasUnreadPlanChanges = prev.hasUnreadPlanChanges;
 
             if (filename) {
                 // Clear specific file
                 const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
 
                 // Handle Plan (Artifact)
-                if (type === 'plan' && turn !== undefined) {
-                    const isPlanActive = this.props.activeTab === 'plan';
-                    const isCurrentTurn = turn === this.props.displayedTurn;
-
-                    if (!isPlanActive && isCurrentTurn) {
-                        // Don't clear cache, just mark as unread
-                        hasUnreadPlanChanges = true;
-                        // We keep the OLD content in cache so the dot appears (checked via hasPlan in render)
-                    } else {
-                        // Active or other turn -> clear it
-                        if (newArtifactCache[turn]) {
-                            // We must properly delete the key or set to null to force refetch
-                            newArtifactCache[turn] = { ...newArtifactCache[turn], plan: null };
-                        }
-                    }
-                }
-                // Handle Standard Files
-                else if (type && newCache[version]) {
+                if (type && newCache[version]) {
                     newCache[version] = { ...newCache[version], [type]: null };
                 }
 
@@ -176,21 +149,15 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
             return {
                 versionCache: newCache,
-                artifactCache: newArtifactCache,
-                hasUnreadPlanChanges,
                 iframeKey: prev.iframeKey + 1
             };
         }, () => {
             // Re-fetch if current and matching active tab
             const { version: currentVersion, sessionId, activeTab } = this.props;
 
-            // If we are on the plan tab, and we just cleared it (because we were acting on it), fetch again
-            if (activeTab === 'plan' && filename === FILENAME_MAP['plan'] && turn === this.props.displayedTurn) {
-                this.fetchFile('plan');
-                return;
-            }
 
-            if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId && activeTab !== 'plan') {
+
+            if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
                 // Standard file fetch
                 if (filename) {
                     const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
@@ -204,8 +171,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         });
     }
 
-    fetchFile = async (type: AssetType, force: boolean = false) => {
-        const { sessionId, version, displayedTurn } = this.props;
+    fetchFile = async (type: AssetType) => {
+        const { sessionId, version } = this.props;
         if (!sessionId) return;
 
         // Check loading
@@ -216,61 +183,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         const filenameMap: Record<AssetType, string> = FILENAME_MAP;
         const filename = filenameMap[type];
 
-        // SPECIAL HANDLING FOR PLAN (ARTIFACT)
-        if (type === 'plan') {
-            const currentArtifactCache = this.state.artifactCache[displayedTurn];
-            // If we have a value AND force is false, use cache.
-            // Note: We ignored hasUnreadPlanChanges here intentionally - we want cache unless forced.
-            if (!force && currentArtifactCache && currentArtifactCache[type] !== null && currentArtifactCache[type] !== undefined) {
-                return; // Already cached
-            }
 
-            this.setState((prev) => ({
-                loading: { ...prev.loading, [type]: true },
-            }));
-
-            try {
-                const res = await apiAuth.fetch(
-                    `/api/sessions/${sessionId}/artifacts/${displayedTurn}/${filename}`,
-                );
-
-                let text: string;
-                if (!res.ok) {
-                    if (res.status === 404) {
-                        // Should not happen as server returns default, but handle gracefullly
-                        text = '# No plan';
-                    } else {
-                        throw new Error('Failed to fetch artifact');
-                    }
-                } else {
-                    text = await res.text();
-                }
-
-                this.setState((prev) => {
-                    const artifactCache = prev.artifactCache[displayedTurn] || {};
-                    return {
-                        artifactCache: {
-                            ...prev.artifactCache,
-                            [displayedTurn]: { ...artifactCache, [type]: text }
-                        },
-                        loading: { ...prev.loading, [type]: false },
-                    };
-                });
-            } catch (error) {
-                console.error(`Failed to load artifact ${type}`, error);
-                this.setState((prev) => {
-                    const artifactCache = prev.artifactCache[displayedTurn] || {};
-                    return {
-                        artifactCache: {
-                            ...prev.artifactCache,
-                            [displayedTurn]: { ...artifactCache, [type]: 'Error loading content' }
-                        },
-                        loading: { ...prev.loading, [type]: false },
-                    };
-                });
-            }
-            return;
-        }
 
         // STANDARD HANDLING FOR OTHER FILES (VERSION CACHE)
 
@@ -292,7 +205,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             const text = await res.text();
 
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -304,7 +217,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         } catch (error) {
             console.error(`Failed to load ${type}`, error);
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -325,9 +238,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             await this.handleSave(activeTab as AssetType);
         }
 
-        if (tab === 'plan') {
-            this.setState({ hasUnreadPlanChanges: false });
-        }
+
 
         this.props.onTabChange?.(tab);
     };
@@ -384,8 +295,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             }
 
             // Update cache with saved content and clear unsaved state
+            // Update cache with saved content and clear unsaved state
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null, plan: null };
+                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -414,7 +326,6 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             case 'html': return 'html';
             case 'css': return 'css';
             case 'js': return 'javascript';
-            case 'plan': return 'markdown';
             default: return 'plaintext';
         }
     };
@@ -544,22 +455,17 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
     };
 
     render() {
-        const { sessionId, version, activeTab, onLoad, fastMode, displayedTurn } = this.props;
+        const { sessionId, version, activeTab, onLoad } = this.props;
         const {
             versionCache,
             loading,
             unsavedContent,
             iframeKey,
-            hasUnreadPlanChanges,
-            artifactCache,
         } = this.state;
         const isCodeView = activeTab !== 'preview' && activeTab !== 'images';
 
         // Resolve content for current version
-        const currentFiles = versionCache[version] || { html: null, css: null, js: null, plan: null };
-
-        // Resolve artifact for current turn
-        const currentArtifacts = artifactCache[displayedTurn] || { plan: null };
+        const currentFiles = versionCache[version] || { html: null, css: null, js: null };
 
         return (
             <div
@@ -587,17 +493,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     <span className={styles.versionLabel}>
                         v{version}
                     </span>
-                    {/* {!fastMode && (
-                        <button
-                            className={classNames(styles.assetTab, {
-                                [styles.active]: activeTab === 'plan',
-                            })}
-                            onClick={() => this.handleTabChange('plan')}
-                        >
-                            {hasUnreadPlanChanges && <span className={styles.notificationDot}></span>}
-                            Implementation plan
-                        </button>
-                    )} */}
+
                     <div className={styles.assetsSpacer}></div>
                     {(['html', 'css', 'js'] as const).map((type) => (
                         <button
@@ -629,13 +525,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     active={activeTab === 'images'}
                 />
 
-                {/* <Artifact
-                    content={unsavedContent['plan'] ?? currentArtifacts['plan'] ?? currentFiles['plan'] ?? ''}
-                    onProceed={this.handleProceed}
-                    active={activeTab === 'plan'}
-                    busy={this.props.isBusy}
-                    isLatest={this.props.isLatest}
-                /> */}
+
 
                 {
                     (['html', 'css', 'js'] as const).map(type => {

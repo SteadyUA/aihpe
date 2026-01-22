@@ -37,6 +37,7 @@ import { SessionStore } from '../services/session/SessionStore';
 
 import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
+import { getSessionsDir } from '../utils/pathUtils';
 
 class AttachmentRequest {
     @IsString()
@@ -432,9 +433,7 @@ export class ChatController {
         @Req() req: Request,
         @Res() res: Response,
     ) {
-        const sessionRoot =
-            process.env.SESSION_ROOT?.trim() ||
-            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const sessionRoot = getSessionsDir();
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
         const uploadDir = path.join(sessionRoot, safeId, 'uploads');
 
@@ -519,9 +518,7 @@ export class ChatController {
             return response.status(400).send('Invalid filename');
         }
 
-        const sessionRoot =
-            process.env.SESSION_ROOT?.trim() ||
-            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const sessionRoot = getSessionsDir();
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
         const uploadDir = path.join(sessionRoot, safeId, 'uploads');
         const filePath = path.join(uploadDir, filename);
@@ -566,9 +563,7 @@ export class ChatController {
             return response.status(400).send('Invalid filename');
         }
 
-        const sessionRoot =
-            process.env.SESSION_ROOT?.trim() ||
-            path.resolve(__dirname, '..', '..', 'data', 'sessions');
+        const sessionRoot = getSessionsDir();
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
         const filePath = path.join(sessionRoot, safeId, 'uploads', filename);
 
@@ -698,8 +693,7 @@ export class ChatController {
                 // Images also need to be filtered? 
                 // Images are versioned. We used `version`.
                 const images = await this.imageService.listImages(sessionId, version);
-                const cwd = process.cwd();
-                const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                const sessionRoot = getSessionsDir();
                 // We still need to read from filesystem based on VERSION dir
                 const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
 
@@ -742,7 +736,7 @@ export class ChatController {
             return response.status(400).send('Invalid version');
         }
 
-        const validFiles = ['index.html', 'styles.css', 'script.js', 'implementation_plan.md'];
+        const validFiles = ['index.html', 'styles.css', 'script.js'];
         if (validFiles.includes(filename)) {
             const files = this.sessionStore.getFilesByVersion(sessionId, version);
             if (!files) {
@@ -755,7 +749,7 @@ export class ChatController {
             if (filename === 'index.html') contentType = 'text/html';
             else if (filename === 'styles.css') contentType = 'text/css';
             else if (filename === 'script.js') contentType = 'application/javascript';
-            else if (filename === 'implementation_plan.md') contentType = 'text/markdown';
+
 
             if (content === undefined) {
                 // Should not happen if validFiles checked, but safety
@@ -772,8 +766,7 @@ export class ChatController {
         }
 
         // Fallback for other files (images, variants of text files not in cache map?)
-        const cwd = process.cwd();
-        const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+        const sessionRoot = getSessionsDir();
         const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
         const safeVersion = version;
         const filePath = path.join(sessionRoot, safeId, 'versions', String(safeVersion), filename);
@@ -804,39 +797,7 @@ export class ChatController {
 
 
 
-    @Get('/api/sessions/:sessionId/artifacts/:turn/:filename')
-    @UseBefore(AuthMiddleware)
-    getArtifact(
-        @Param('sessionId') sessionId: string,
-        @Param('turn') turnParam: string,
-        @Param('filename') filename: string,
-        @Res() response: Response,
-    ) {
-        const turn = Number.parseInt(turnParam, 10);
-        if (!Number.isFinite(turn) || Number.isNaN(turn) || turn < 0) {
-            return response.status(400).send('Invalid turn');
-        }
 
-        // Security check for filename
-        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
-            return response.status(400).send('Invalid filename');
-        }
-
-        const content = this.sessionStore.getArtifact(sessionId, turn, filename);
-
-        if (content === undefined) {
-            return response.status(404).send('Artifact not found');
-        }
-
-        let contentType = 'text/plain';
-        if (filename.endsWith('.md')) contentType = 'text/markdown';
-        else if (filename.endsWith('.html')) contentType = 'text/html';
-        else if (filename.endsWith('.css')) contentType = 'text/css';
-        else if (filename.endsWith('.js')) contentType = 'application/javascript';
-
-        response.setHeader('Content-Type', contentType);
-        return response.send(content);
-    }
 
     @Post('/api/sessions/:sessionId/undo')
     @UseBefore(AuthMiddleware)

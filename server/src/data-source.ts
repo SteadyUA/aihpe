@@ -2,8 +2,10 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import path from 'path';
+import 'dotenv/config';
+import { getDataDir } from './utils/pathUtils';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const DATABASE_FILE = path.join(DATA_DIR, 'database.sqlite');
 
 export const AppDataSource = new DataSource({

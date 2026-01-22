@@ -8,12 +8,7 @@ import { ImageService } from './image/ImageService';
 import { formatContentForUi } from '../utils/chat';
 import fs from 'fs';
 import path from 'path';
-
-interface ChatResult {
-    message: string;
-    session: SessionData;
-    turn: number;
-}
+import { getSessionsDir } from '../utils/pathUtils';
 
 @Service()
 export class ChatService {
@@ -321,8 +316,7 @@ export class ChatService {
                 );
                 await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
 
-                // Save implementation_plan.md artifact for the current turn (before notifying changes)
-                this.sessionStore.savePlanArtifact(sessionId, updated.lastTurn ?? 0);
+
 
                 // Detect and emit file changes
                 for (const [filename, content] of Object.entries(generation.files)) {
@@ -339,9 +333,7 @@ export class ChatService {
                 }
             } else {
                 // No changes to files/version, just append messages
-                // Ensure artifact is saved for this turn even if no files changed
                 const session = this.sessionStore.getOrCreate(sessionId);
-                this.sessionStore.savePlanArtifact(sessionId, session.lastTurn ?? 0);
             }
 
             // Update token usage
@@ -588,8 +580,7 @@ export class ChatService {
         if (attachment.type === 'image' && attachment.filename) {
             // Verify existence but do NOT read content
             try {
-                const cwd = process.cwd();
-                const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                const sessionRoot = getSessionsDir();
                 const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
                 const uploadDir = path.join(sessionRoot, safeId, 'uploads');
                 const filePath = path.join(uploadDir, attachment.filename);
@@ -632,8 +623,7 @@ export class ChatService {
             } else {
                 // Fallback to Base64
                 try {
-                    const cwd = process.cwd();
-                    const sessionRoot = process.env.SESSION_ROOT?.trim() || path.resolve(cwd, 'data', 'sessions');
+                    const sessionRoot = getSessionsDir();
                     const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
                     const uploadDir = path.join(sessionRoot, safeId, 'uploads');
                     const filePath = path.join(uploadDir, attachment.filename);

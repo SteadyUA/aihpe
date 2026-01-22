@@ -133,10 +133,6 @@ export class OpenaiClient extends BaseLlmClient {
 
                 // FIX: Prioritize tool execution if tool calls exist, even if finishReason is 'stop' (some providers do this)
                 if (toolCalls.length > 0) {
-                    if (request.onProgress) {
-                        request.onProgress('\nExecuting tools...\n');
-                    }
-
                     for (const toolCall of toolCalls) {
                         const name = toolCall.function.name;
                         const argsString = toolCall.function.arguments;
