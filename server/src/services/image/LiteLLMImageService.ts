@@ -3,6 +3,14 @@ import { ImageService } from './ImageService';
 
 @Service()
 export class LiteLLMImageService extends ImageService {
+    constructor() {
+        super();
+        const envModelId = process.env.LITELLM_IMAGE_MODEL;
+        if (envModelId) {
+            this.modelId = envModelId;
+        }
+    }
+
     protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;

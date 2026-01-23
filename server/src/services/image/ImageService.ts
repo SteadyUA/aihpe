@@ -19,7 +19,7 @@ export interface ImageMetadata {
 
 @Service({ factory: [ImageServiceFactory, 'create'] })
 export abstract class ImageService {
-    protected readonly modelId = 'gemini-2.5-flash-image';
+    protected modelId = 'gemini-2.5-flash-image';
 
     protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string>;
     protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string }>;
