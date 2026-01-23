@@ -3,7 +3,7 @@ import { ImageService } from './ImageService';
 
 @Service()
 export class LiteLLMImageService extends ImageService {
-    protected async generateRaw(prompt: string): Promise<string> {
+    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -22,6 +22,7 @@ export class LiteLLMImageService extends ImageService {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${litellmKey}`
             },
+            signal: abortSignal,
             body: JSON.stringify({
                 prompt: prompt,
                 model: this.modelId, // Pass the model ID, proxy should handle mapping if needed
@@ -54,7 +55,7 @@ export class LiteLLMImageService extends ImageService {
         return base64Data;
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string): Promise<{ base64: string; description?: string }> {
+    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string; description?: string }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -80,6 +81,7 @@ export class LiteLLMImageService extends ImageService {
             headers: {
                 'Authorization': `Bearer ${litellmKey}`
             },
+            signal: abortSignal,
             body: formData
         });
 
@@ -120,6 +122,7 @@ The image has been edited according to the instruction. Provide a new, descripti
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${litellmKey}`
                     },
+                    signal: abortSignal,
                     body: JSON.stringify({
                         model: this.modelId, // Use same model if capable, or fallback if needed. gemini-2.5-flash-image supports text too.
                         messages: [{ role: 'user', content: updatePrompt }]
@@ -144,7 +147,7 @@ The image has been edited according to the instruction. Provide a new, descripti
         return { base64: newBase64Data, description: newDescription };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string): Promise<string> {
+    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -175,6 +178,7 @@ The image has been edited according to the instruction. Provide a new, descripti
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${litellmKey}`
             },
+            signal: abortSignal,
             body: JSON.stringify(body)
         });
 

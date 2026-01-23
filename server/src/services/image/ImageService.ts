@@ -21,12 +21,12 @@ export interface ImageMetadata {
 export abstract class ImageService {
     protected readonly modelId = 'gemini-2.5-flash-image';
 
-    protected abstract generateRaw(prompt: string): Promise<string>;
-    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string): Promise<{ base64: string, description?: string }>;
-    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string): Promise<string>;
+    protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string>;
+    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string }>;
+    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string>;
 
-    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string): Promise<string> {
-        const base64Data = await this.generateRaw(description);
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string, abortSignal?: AbortSignal): Promise<string> {
+        const base64Data = await this.generateRaw(description, abortSignal);
 
         const versionDir = this.resolveVersionDir(sessionId, version);
         this.ensureDirectory(versionDir);
@@ -62,7 +62,7 @@ export abstract class ImageService {
         return filename;
     }
 
-    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number): Promise<string> {
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal?: AbortSignal): Promise<string> {
         // Resolve source file: check target version first (in case it was already modified in this turn)
         let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
         let sourcePath = path.join(sourceDir, filename);
@@ -84,7 +84,7 @@ export abstract class ImageService {
         const info = await this.getImageInfo(sessionId, sourceVersion, filename);
         const currentDescription = info?.description;
 
-        const result = await this.editRaw(buffer, mimeType, prompt, currentDescription);
+        const result = await this.editRaw(buffer, mimeType, prompt, currentDescription, abortSignal);
         const newBase64Data = result.base64;
         const newDescription = result.description;
 
@@ -120,7 +120,7 @@ export abstract class ImageService {
         return filename;
     }
 
-    async describeImage(sessionId: string, version: number, filename: string): Promise<string> {
+    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal): Promise<string> {
         const versionDir = this.resolveVersionDir(sessionId, version);
         const filePath = path.join(versionDir, filename);
 
@@ -131,7 +131,7 @@ export abstract class ImageService {
         const buffer = fs.readFileSync(filePath);
         const mimeType = this.getMimeType(filename);
 
-        return this.describeRaw(buffer, mimeType);
+        return this.describeRaw(buffer, mimeType, abortSignal);
     }
 
     async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {

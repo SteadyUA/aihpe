@@ -490,9 +490,14 @@
     user-select: none;
 }
 
-.inputContainer:focus-within {
+.inputContainer:not(.busy):focus-within {
     border-color: var(--accent-primary);
     box-shadow: 0 0 0 2px var(--accent-primary-alpha);
+}
+
+.busy {
+    /* Marker class for focus-within logic */
+    pointer-events: auto;
 }
 
 .headlessInput {
@@ -552,4 +557,8 @@
     margin: 0;
     color: #7f1d1d;
     font-size: 0.9rem;
+}
+
+.stopButton {
+    color: #ef4444 !important;
 }

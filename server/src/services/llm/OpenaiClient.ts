@@ -59,7 +59,7 @@ export class OpenaiClient extends BaseLlmClient {
                     tools: tools,
                     stream: true,
                     stream_options: { include_usage: true }
-                });
+                }, { signal: request.abortSignal });
 
                 let stepText = '';
                 let toolCallsBuffer: Record<number, { id: string; name: string; arguments: string }> = {};

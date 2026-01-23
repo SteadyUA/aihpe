@@ -70,14 +70,23 @@ export class ProjectService {
         return await this.projectRepository.save(project);
     }
 
-    async addSessionToProject(projectId: string, sessionId: string): Promise<void> {
+    async addSessionToProject(projectId: string, sessionId: string, afterSessionId?: string): Promise<void> {
         const project = await this.projectRepository.findOneBy({ id: projectId });
         if (!project) {
             throw new Error(`Project ${projectId} not found`);
         }
 
         if (!project.sessionIds.includes(sessionId)) {
-            project.sessionIds.push(sessionId);
+            if (afterSessionId) {
+                const index = project.sessionIds.indexOf(afterSessionId);
+                if (index !== -1) {
+                    project.sessionIds.splice(index + 1, 0, sessionId);
+                } else {
+                    project.sessionIds.push(sessionId);
+                }
+            } else {
+                project.sessionIds.push(sessionId);
+            }
             // We need to re-assign sessionIds to trigger change detection for simple-array/json sometimes? 
             // TypeOrm simple-json usually detects deep changes if we save object. 
             // But safe bet is:

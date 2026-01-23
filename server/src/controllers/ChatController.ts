@@ -57,9 +57,6 @@ class AttachmentRequest {
     @IsNotEmpty()
     filename!: string;
 
-    @IsString()
-    @IsNotEmpty()
-    url!: string;
 }
 
 class SelectionRequest {
@@ -285,6 +282,8 @@ export class ChatController {
         const sessionIds = await this.projectService.getProjectSessions(projectId);
         for (const sessionId of sessionIds) {
             try {
+                // Ensure active generation is stopped
+                await this.chatService.stopGeneration(sessionId).catch(() => { });
                 this.sessionStore.deleteSession(sessionId);
             } catch (e) {
                 console.error(`Failed to delete session ${sessionId} during project deletion`, e);
@@ -426,6 +425,14 @@ export class ChatController {
         });
     }
 
+    @Post('/api/sessions/:sessionId/stop')
+    @UseBefore(AuthMiddleware)
+    async stopGeneration(
+        @Param('sessionId') sessionId: string,
+    ) {
+        return await this.chatService.stopGeneration(sessionId);
+    }
+
     @Post('/api/sessions/:sessionId/uploads')
     @UseBefore(AuthMiddleware)
     async uploadImage(
@@ -441,32 +448,26 @@ export class ChatController {
             fs.mkdirSync(uploadDir, { recursive: true });
         }
 
-        const storage = multer.diskStorage({
-            destination: (req, file, cb) => {
-                cb(null, uploadDir);
-            },
-            filename: (req, file, cb) => {
-                const ext = path.extname(file.originalname);
-                const uniqueName = crypto.randomUUID() + ext;
-                cb(null, uniqueName);
-            },
-        });
+        const upload = multer({ storage: multer.memoryStorage() }).single('file');
 
-        const upload = multer({ storage: storage }).single('file');
-
-        return new Promise((resolve, reject) => {
-            upload(req, res, (err) => {
+        return new Promise((resolve) => {
+            upload(req, res, async (err) => {
                 if (err) {
                     console.error('File upload failed', err);
                     return resolve(
                         res.status(500).json({ message: 'File upload failed' }),
                     );
                 }
-                if (!req.file) {
+                if (!req.file || !req.file.buffer) {
                     return resolve(
                         res.status(400).json({ message: 'No file provided' }),
                     );
                 }
+
+                const hash = crypto.createHash('md5').update(req.file.buffer).digest('hex');
+                const ext = path.extname(req.file.originalname);
+                const filename = `${hash}${ext}`;
+                const filePath = path.join(uploadDir, filename);
 
                 // Metadata handling
                 const metadataPath = path.join(uploadDir, 'uploads.json');
@@ -480,24 +481,29 @@ export class ChatController {
                     console.error('Failed to read uploads metadata', e);
                 }
 
-                metadata[req.file.filename] = {
-                    originalName: req.file.originalname,
-                    timestamp: Date.now(),
-                    mimeType: req.file.mimetype,
-                    size: req.file.size
-                };
-
                 try {
+                    if (!fs.existsSync(filePath)) {
+                        fs.writeFileSync(filePath, req.file.buffer);
+                    }
+
+                    // Always ensure metadata exists/is updated
+                    metadata[filename] = {
+                        originalName: req.file.originalname,
+                        timestamp: Date.now(),
+                        mimeType: req.file.mimetype,
+                        size: req.file.size
+                    };
                     fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
                 } catch (e) {
-                    console.error('Failed to write uploads metadata', e);
+                    console.error('Failed to save uploaded file or metadata', e);
+                    return resolve(
+                        res.status(500).json({ message: 'Failed to save file' }),
+                    );
                 }
 
-                const fileUrl = `/api/sessions/${sessionId}/uploads/${req.file.filename}`;
                 resolve(
                     res.json({
-                        filename: req.file.filename,
-                        url: fileUrl,
+                        filename: filename,
                         type: 'image',
                         originalName: req.file.originalname,
                     }),
@@ -525,6 +531,15 @@ export class ChatController {
 
         if (fs.existsSync(filePath)) {
             try {
+                // Check if file is used in session history or turns
+                const session = this.sessionStore.getOrCreate(sessionId);
+                const isUsedInTurns = session.turns.some(turn => turn.attachment?.filename === filename);
+
+                if (isUsedInTurns) {
+                    // Do not delete physically, just return success (it was removed from the active input on client)
+                    return response.status(200).json({ message: 'Attachment detached' });
+                }
+
                 fs.unlinkSync(filePath);
 
                 // Update metadata
@@ -622,6 +637,9 @@ export class ChatController {
             if (session.projectId) {
                 await this.projectService.removeSessionFromProject(session.projectId, sessionId);
             }
+
+            // Ensure active generation is stopped
+            await this.chatService.stopGeneration(sessionId).catch(() => { });
 
             // Remove session files
             this.sessionStore.deleteSession(sessionId);
@@ -806,6 +824,9 @@ export class ChatController {
         @Res() response: Response,
     ) {
         try {
+            if (this.chatService.isGenerating(sessionId)) {
+                return response.status(400).json({ message: 'Cannot undo while generation is in progress. Please stop the generation first.' });
+            }
             const result = this.sessionStore.undoLastTurn(sessionId);
             return result;
         } catch (error) {
@@ -843,7 +864,7 @@ export class ChatController {
                     // Add new session to project (using source session's project)
                     const sourceSession = this.sessionStore.getOrCreate(sessionId);
                     if (sourceSession.projectId) {
-                        this.projectService.addSessionToProject(sourceSession.projectId, id);
+                        this.projectService.addSessionToProject(sourceSession.projectId, id, sessionId);
                     }
 
                     this.sseService.emitSessionCreated({

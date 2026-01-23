@@ -185,6 +185,7 @@ export class AiSdkClient extends BaseLlmClient {
                     system: systemPrompt,
                     messages: currentMessages,
                     tools: tools,
+                    abortSignal: request.abortSignal,
                     // Manual loop, so no maxSteps here
                 });
 

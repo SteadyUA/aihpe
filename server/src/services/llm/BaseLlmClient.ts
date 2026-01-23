@@ -246,7 +246,7 @@ Rules:
             generate_image: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
                     return `Failed to generate image: ${error.message}`;
@@ -256,7 +256,7 @@ Rules:
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
                     // Use currentVersion as source, nextVersion as target
-                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion);
+                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal);
                     return `Image edited successfully: ${savedFilename}`;
                 } catch (error: any) {
                     return `Failed to edit image: ${error.message}`;

@@ -1017,6 +1017,7 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
+
     handleUndo = async () => {
         const { activeSessionId } = this.state;
         if (!activeSessionId) return;
@@ -1051,6 +1052,40 @@ class App extends React.Component<AppProps, AppState> {
             }
         } catch (error) {
             console.error('Failed to undo', error);
+        }
+    };
+
+    handleStopGeneration = async () => {
+        const { activeSessionId } = this.state;
+        if (!activeSessionId) return;
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/stop`, {
+                method: 'POST'
+            });
+            if (!res.ok) throw new Error('Stop failed');
+            const data = await res.json();
+
+            if (data.success) {
+                if (data.restoredSelection) {
+                    this.updateSession(activeSessionId, { selection: data.restoredSelection });
+                }
+
+                await this.fetchSession(activeSessionId);
+                this.updateSession(activeSessionId, { activeTurn: null });
+
+                if (data.restoredInput || data.restoredAttachment) {
+                    this.handleSaveUnsent(activeSessionId, {
+                        input: data.restoredInput,
+                        attachment: data.restoredAttachment
+                    });
+                }
+
+                return { restoredInput: data.restoredInput };
+            }
+
+        } catch (e) {
+            console.error('Failed to stop generation', e);
         }
     };
 
@@ -1204,7 +1239,6 @@ class App extends React.Component<AppProps, AppState> {
         return {
             type: 'image',
             filename: data.filename,
-            url: data.url,
             id: data.filename,
             originalName: data.originalName
         };
@@ -1468,6 +1502,7 @@ class App extends React.Component<AppProps, AppState> {
 
                                 onProviderChange={this.handleProviderChange}
                                 onUndo={this.handleUndo}
+                                onStop={this.handleStopGeneration}
                                 onUpload={this.handleUpload}
                                 onDeleteAttachment={this.handleDeleteAttachment}
                                 onAttachmentChange={this.handleAttachmentChange}

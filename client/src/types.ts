@@ -14,7 +14,6 @@ export interface ImageAttachment {
     type: 'image';
     filename: string;
     originalName?: string;
-    url: string;
     id?: string;
 }
 

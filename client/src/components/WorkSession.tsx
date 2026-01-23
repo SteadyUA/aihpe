@@ -15,6 +15,7 @@ interface WorkSessionProps {
 
     onProviderChange: (provider: LlmProvider) => void;
     onUndo?: () => Promise<any>;
+    onStop?: () => Promise<{ restoredInput?: string } | void>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
     onDeleteAttachment?: (attachment: ChatAttachment) => void;
     onAttachmentChange: (attachment?: ChatAttachment) => void;
@@ -113,8 +114,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.props.onUpdateSession({ pendingRefreshTurn: null });
         } else if (this.props.session.pendingFileRefresh) {
             // Granular refresh
-            const { version, filename, turn } = this.props.session.pendingFileRefresh;
-            this.previewRef.current?.clearCache(version, filename, turn);
+            const { version, filename } = this.props.session.pendingFileRefresh;
+            this.previewRef.current?.clearCache(version, filename);
             this.props.onUpdateSession({ pendingFileRefresh: null });
         }
 
@@ -276,6 +277,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             <div style={{ display: isVisible ? 'contents' : 'none' }}>
                 <Chat
                     ref={this.chatRef}
+                    sessionId={session.id}
                     messages={session.messages || []}
                     onSend={onSend}
                     status={session.status || 'idle'}
@@ -294,6 +296,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     provider={session.provider}
                     onProviderChange={onProviderChange}
                     onUndo={onUndo}
+                    onStop={this.props.onStop}
                     onUpload={onUpload}
                     onDeleteAttachment={onDeleteAttachment}
                     attachment={session.attachment}

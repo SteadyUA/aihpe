@@ -29,6 +29,7 @@ interface MessageProps {
     isPending?: boolean;
     statusMessages?: string[];
     startTime?: number;
+    sessionId: string;
 }
 
 const formatTime = (dateString?: string) => {
@@ -226,14 +227,14 @@ class Message extends React.Component<MessageProps> {
                     {msg.attachment && (
                         <div className={styles.messageAttachments}>
                             <img
-                                src={msg.attachment.url}
+                                src={`/api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`}
                                 alt={msg.attachment.originalName || msg.attachment.filename}
                                 className={styles.messageThumbnail}
                                 title={msg.attachment.originalName || msg.attachment.filename}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (msg.attachment) {
-                                        window.open(msg.attachment.url, '_blank');
+                                        window.open(`/api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`, '_blank');
                                     }
                                 }}
                             />
@@ -325,6 +326,7 @@ interface ChatProps {
     messages: MessageData[];
     onSend: (text: string) => void;
     status: string;
+    sessionId: string;
     statusMessages?: string[]; // Renamed from statusMessage, now array
     startTime?: number | null; // For timer
     // New props for toolbar features
@@ -342,6 +344,7 @@ interface ChatProps {
     provider?: LlmProvider;
     onProviderChange?: (provider: LlmProvider) => void;
     onUndo?: () => Promise<{ restoredInput?: string } | void>;
+    onStop?: () => Promise<{ restoredInput?: string } | void>;
     onUpload?: (file: File) => Promise<ChatAttachment>;
     onDeleteAttachment?: (attachment: ChatAttachment) => void;
     attachment?: ChatAttachment;
@@ -432,16 +435,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 this.setState({ input: this.props.unsentInput });
             }
         }
-
-        const justFinishedPicking = prevProps.isPicking && !this.props.isPicking;
-        const justClearedSelection = prevProps.selection && !this.props.selection;
-        const attachmentChanged = prevProps.attachment !== this.props.attachment;
-        const providerChanged = prevProps.provider !== this.props.provider;
-        const fastModeChanged = prevProps.fastMode !== this.props.fastMode;
-
-        if (justFinishedPicking || justClearedSelection || (attachmentChanged && !this.state.isUploading) || providerChanged || fastModeChanged) {
-            this.richInputRef.current?.focus();
-        }
     }
 
     componentWillUnmount() {
@@ -460,6 +453,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 this.setState({ input: result.restoredInput });
             }
         }
+        this.richInputRef.current?.focus(true);
     };
 
     cancelUndo = () => {
@@ -642,6 +636,18 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.richInputRef.current?.focus();
     };
 
+    handleStop = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.props.onStop) {
+            const result = await this.props.onStop();
+            if (result && result.restoredInput) {
+                this.setState({ input: result.restoredInput });
+            }
+        }
+        this.richInputRef.current?.focus(true);
+    };
+
     render() {
         const {
             messages,
@@ -762,12 +768,14 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 }
                                 key={i}
                                 msg={m}
+                                sessionId={this.props.sessionId}
                                 onSelectChip={onSelectChip}
                                 onCloneTurn={onCloneTurn}
                                 onPreviewTurn={this.handlePreviewTurn}
                                 isActiveTurn={isTurnMatch}
                                 isDimmed={shouldDim}
                                 isLastAssistant={i === lastAssistantIndex}
+                                status={status}
                                 onUndo={this.handleUndo}
                                 sessionIds={sessionIds}
                                 onSwitchSession={onSwitchSession}
@@ -787,6 +795,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 turn: latestTurn,
                                 version: 0,
                             }}
+                            sessionId={this.props.sessionId}
                             statusMessages={statusMessages}
                             startTime={this.props.startTime || undefined}
                             isPending={true}
@@ -821,7 +830,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <form className={styles.chatForm} onSubmit={this.handleSubmit}>
 
                         {/* Unified Input Container */}
-                        <div className={styles.inputContainer} onClick={this.handleContainerClick}>
+                        <div className={classNames(styles.inputContainer, { [styles.busy]: status === 'busy' })} onClick={this.handleContainerClick}>
                             <div className={styles.selections}>
                                 {/* Element Picker (Top) */}
                                 {selection && (
@@ -837,7 +846,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     <div className={styles.attachmentList}>
                                         <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
                                             <img
-                                                src={attachment.url}
+                                                src={`/api/sessions/${this.props.sessionId}/uploads/${attachment.filename}`}
                                                 alt={attachment.originalName || attachment.filename}
                                                 className={styles.imagePreview}
                                                 title={attachment.originalName || attachment.filename}
@@ -967,29 +976,53 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 </div>
 
                                 <div className={styles.inputControlsRight}>
-                                    {/* Send Button */}
-                                    <UiButton
-                                        type="submit"
-                                        variant="primary"
-                                        size="icon"
-                                        disabled={isFormDisabled || !input.trim()}
-                                        tabIndex={2}
-                                        onClick={this.handleSubmit}
-                                    >
-                                        <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
+                                    {/* Send / Stop Button */}
+                                    {status === 'busy' ? (
+                                        <UiButton
+                                            type="button"
+                                            variant="secondary" // Or specific red style
+                                            size="icon"
+                                            onClick={this.handleStop}
+                                            title="Stop generation"
+                                            className={styles.stopButton}
                                         >
-                                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                        </svg>
-                                    </UiButton>
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                                stroke="currentColor"
+                                                strokeWidth="0"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+                                            </svg>
+                                        </UiButton>
+                                    ) : (
+                                        <UiButton
+                                            type="submit"
+                                            variant="primary"
+                                            size="icon"
+                                            disabled={isFormDisabled || !input.trim()}
+                                            tabIndex={2}
+                                            onClick={this.handleSubmit}
+                                        >
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                            </svg>
+                                        </UiButton>
+                                    )}
                                 </div>
                             </div>
                         </div>

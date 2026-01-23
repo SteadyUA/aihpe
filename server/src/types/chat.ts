@@ -85,7 +85,6 @@ export interface ImageAttachment {
     type: 'image';
     filename: string;
     originalName?: string;
-    url: string;
     id?: string;
     dataUrl?: string; // Populated by server for LLM
 }

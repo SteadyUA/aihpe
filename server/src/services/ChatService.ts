@@ -20,6 +20,8 @@ export class ChatService {
         private readonly projectService: ProjectService,
     ) { }
 
+    private activeGenerations = new Map<string, AbortController>();
+
     async addUserMessage(
         sessionId: string,
         userMessage: string,
@@ -134,6 +136,17 @@ export class ChatService {
     ): Promise<void> {
         this.notifyStatus(sessionId, 'started', 'Thinking...');
 
+        // Cancel any existing generation for this session (just in case)
+        if (this.activeGenerations.has(sessionId)) {
+            try {
+                this.activeGenerations.get(sessionId)?.abort();
+                this.activeGenerations.delete(sessionId);
+            } catch (e) { }
+        }
+
+        const controller = new AbortController();
+        this.activeGenerations.set(sessionId, controller);
+
         const currentSessionData = this.sessionStore.getOrCreate(sessionId);
 
         // 2. Prepare conversation history for prompt
@@ -220,6 +233,7 @@ export class ChatService {
                 modelRole,
                 fastMode: fastModeOverride ?? currentSessionData.fastMode,
                 subject: currentSessionData.subject,
+                abortSignal: controller.signal,
                 onPatch: (patch) => {
                     this.sseService.emitSessionUpdate({
                         sessionId,
@@ -228,6 +242,8 @@ export class ChatService {
                 },
                 onProgress: (chunk) => {
                     // Logic to handle both streaming thoughts and tool status updates
+                    if (controller.signal.aborted) return;
+
                     if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
                         this.notifyStatus(sessionId, 'generating', chunk);
                     } else {
@@ -471,7 +487,20 @@ export class ChatService {
 
 
 
-        } catch (error) {
+        } catch (error: any) {
+            if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+                // Handled in stopGeneration or just ignored, but we MUST ensure we don't leave it in 'generating' if stopGeneration didn't catch it yet
+                console.log(`Generation aborted for session ${sessionId}`);
+                // If stopGeneration was called, it might have already set it to 'completed' or 'idle'.
+                // But if the abort happened for other reasons (timeout?), we should be safe.
+                // Let's force 'idle' implicitly by cleaning up activeGenerations in finally block.
+                // But we also need to tell the UI if it wasn't a manual stop.
+
+                // If manual stop, stopGeneration handles notification.
+                // If we return here, finally block runs.
+                return;
+            }
+
             const description = this.describeError(error);
             this.notifyStatus(
                 sessionId,
@@ -481,7 +510,58 @@ export class ChatService {
             );
             // We don't throw here as this is a background task now
             console.error('Generation failed:', error);
+        } finally {
+            this.activeGenerations.delete(sessionId);
         }
+    }
+
+    async stopGeneration(sessionId: string): Promise<{
+        success: boolean;
+        restoredInput?: string;
+        restoredSelection?: string;
+        restoredAttachment?: ChatAttachment;
+        previousTurn?: number;
+    }> {
+        // 1. Abort active generation
+        const controller = this.activeGenerations.get(sessionId);
+        if (controller) {
+            controller.abort();
+            this.activeGenerations.delete(sessionId);
+        }
+
+        // 2. Undo last turn (cleanup)
+        // This removes the user message and any partial state if persisted (though generatePage usually doesn't persist until done)
+        const result = this.sessionStore.undoLastTurn(sessionId);
+
+        // 3. Notify status
+        // Since we undid the turn, the frontend will likely reload or rely on result data.
+        // But we should push 'idle' status just in case (undoLastTurn does it, but we can be explicit if needed).
+        // The undoLastTurn sets status to 'idle'.
+
+        // Emitting 'stopped' status might be useful for transient UI states
+        this.notifyStatus(sessionId, 'completed', 'Request stopped.'); // Using 'completed' or 'skipped' to reset state?
+        // Actually undoLastTurn handles the SessionData update.
+        // We might want to send a specific event to client? 
+        // The client will handle the response from this API call.
+
+        return result;
+    }
+
+    async stopAll(): Promise<void> {
+        console.log(`Stopping all active generations (${this.activeGenerations.size})...`);
+        for (const [sessionId, controller] of this.activeGenerations.entries()) {
+            try {
+                controller.abort();
+                console.log(`Aborted generation for session ${sessionId}`);
+            } catch (e) {
+                console.error(`Failed to abort generation for session ${sessionId}`, e);
+            }
+        }
+        this.activeGenerations.clear();
+    }
+
+    isGenerating(sessionId: string): boolean {
+        return this.activeGenerations.has(sessionId);
     }
 
     private notifyStatus(
@@ -590,8 +670,6 @@ export class ChatService {
                     return {
                         type: 'image',
                         filename: attachment.filename,
-                        url: attachment.url || '',
-
                         id: attachment.id?.trim(),
                         originalName: attachment.originalName
                     };

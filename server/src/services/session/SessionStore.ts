@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus, TokenUsage, Turn } from '../../types/chat';
+import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus, TokenUsage, Turn, ChatAttachment } from '../../types/chat';
 import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
 import { getSessionsDir } from '../../utils/pathUtils';
 
@@ -174,6 +174,7 @@ export class SessionStore {
 
         clearPersistedSessionData(targetId);
         copyVersionHistory(sourceId, targetId);
+        copyUploads(sourceId, targetId);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -281,6 +282,7 @@ export class SessionStore {
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
         copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
+        copyUploads(sourceId, targetId);
 
         this.sessions.set(targetId, newSession);
         this.persistSession(newSession);
@@ -291,6 +293,7 @@ export class SessionStore {
         success: boolean;
         restoredInput?: string;
         restoredSelection?: string;
+        restoredAttachment?: ChatAttachment;
         previousTurn?: number;
     } {
         const session = this.getOrCreate(sessionId);
@@ -383,6 +386,7 @@ export class SessionStore {
             success: true,
             restoredInput,
             restoredSelection: restoredSelection?.selector,
+            restoredAttachment: userMessage?.attachment,
             previousTurn: currentTurn - 1
         };
     }
@@ -986,6 +990,33 @@ function copyVersionHistoryUpTo(
     } catch (error) {
         console.error(
             `Failed to copy partial version history from ${sourceId} to ${targetId}`,
+            error,
+        );
+    }
+}
+
+function copyUploads(sourceId: string, targetId: string): void {
+    const sourceDir = path.join(resolveSessionDir(sourceId), 'uploads');
+    const targetDir = path.join(resolveSessionDir(targetId), 'uploads');
+
+    try {
+        if (!fs.existsSync(sourceDir)) {
+            return; // No uploads to copy
+        }
+
+        // Ensure parent dir exists (session dir)
+        ensureDirectory(resolveSessionDir(targetId));
+
+        // Remove existing target uploads if any
+        if (fs.existsSync(targetDir)) {
+            removeDirectory(targetDir);
+        }
+
+        // Copy recursive
+        fs.cpSync(sourceDir, targetDir, { recursive: true });
+    } catch (error) {
+        console.error(
+            `Failed to copy uploads from ${sourceId} to ${targetId}`,
             error,
         );
     }

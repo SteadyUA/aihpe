@@ -18,6 +18,7 @@ export interface GeneratePageRequest {
     subject?: string;
     onPatch?: (patch: { subject?: string }) => void;
     modelRole?: string;
+    abortSignal?: AbortSignal;
 }
 
 

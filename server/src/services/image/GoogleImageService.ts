@@ -3,7 +3,7 @@ import { ImageService } from './ImageService';
 
 @Service()
 export class GoogleImageService extends ImageService {
-    protected async generateRaw(prompt: string): Promise<string> {
+    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -21,6 +21,7 @@ export class GoogleImageService extends ImageService {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: abortSignal,
             body: JSON.stringify(body)
         });
 
@@ -47,7 +48,7 @@ export class GoogleImageService extends ImageService {
         return base64Data;
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string): Promise<{ base64: string; description?: string }> {
+    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string; description?: string }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -81,6 +82,7 @@ export class GoogleImageService extends ImageService {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: abortSignal,
             body: JSON.stringify(body)
         });
 
@@ -114,7 +116,7 @@ export class GoogleImageService extends ImageService {
         return { base64: newBase64Data, description: newDescription };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string): Promise<string> {
+    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -140,6 +142,7 @@ export class GoogleImageService extends ImageService {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: abortSignal,
             body: JSON.stringify(body)
         });
 
