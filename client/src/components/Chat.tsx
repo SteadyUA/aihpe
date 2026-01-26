@@ -370,9 +370,12 @@ interface ChatState {
 
 export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesEndRef: React.RefObject<HTMLDivElement | null>;
+    private messagesContainerRef = React.createRef<HTMLDivElement>();
+    private messagesContentRef = React.createRef<HTMLDivElement>();
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
     private isUserScroll = false;
     private richInputRef = React.createRef<RichInput>();
+    private resizeObserver: ResizeObserver | null = null;
 
     constructor(props: ChatProps) {
         super(props);
@@ -394,6 +397,21 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidMount() {
+        this.resizeObserver = new ResizeObserver(() => {
+            // Only auto-scroll if we are already near the bottom
+            // or if no specific turn is active (initial load)
+            const atBottom = this.isNearBottom();
+            const noActiveTurn = this.props.activeTurn === null || this.props.activeTurn === undefined;
+
+            if (atBottom || noActiveTurn) {
+                this.scrollToBottom();
+            }
+        });
+
+        if (this.messagesContentRef.current) {
+            this.resizeObserver.observe(this.messagesContentRef.current);
+        }
+
         if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
             this.scrollToTurn(this.props.activeTurn);
         } else {
@@ -438,6 +456,18 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentWillUnmount() {
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
+    }
+
+    private isNearBottom = () => {
+        const el = this.messagesContainerRef.current;
+        if (!el) return false;
+        const threshold = 150; // allow some margin
+        const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        return distanceToBottom < threshold;
     }
 
 
@@ -463,6 +493,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     scrollToBottom = () => {
         this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
+
+    public focus(toEnd: boolean = false) {
+        this.richInputRef.current?.focus(toEnd);
+    }
 
     scrollToTurn = (turn: number) => {
         // Use timeout to allow render to complete if necessary
@@ -746,42 +780,44 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         </div>
                     )}
                 </div>
-                <div className={styles.messages} id="messages">
-                    {messages.map((m, i) => {
-                        // Use strict equality for safely finding the match
-                        // Ensure ONLY assistant messages are marked active
-                        const isTurnMatch =
-                            m.role === 'assistant' &&
-                            typeof m.turn === 'number' &&
-                            m.turn === effectiveActiveTurn;
+                <div className={styles.messages} id="messages" ref={this.messagesContainerRef}>
+                    <div ref={this.messagesContentRef}>
+                        {messages.map((m, i) => {
+                            // Use strict equality for safely finding the match
+                            // Ensure ONLY assistant messages are marked active
+                            const isTurnMatch =
+                                m.role === 'assistant' &&
+                                typeof m.turn === 'number' &&
+                                m.turn === effectiveActiveTurn;
 
-                        // Dimming logic
-                        if (isTurnMatch) foundActive = true;
-                        const shouldDim = foundActive && !isTurnMatch;
+                            // Dimming logic
+                            if (isTurnMatch) foundActive = true;
+                            const shouldDim = foundActive && !isTurnMatch;
 
-                        return (
-                            <Message
-                                id={
-                                    m.role === 'assistant' && typeof m.turn === 'number'
-                                        ? `msg-turn-${m.turn}`
-                                        : undefined
-                                }
-                                key={i}
-                                msg={m}
-                                sessionId={this.props.sessionId}
-                                onSelectChip={onSelectChip}
-                                onCloneTurn={onCloneTurn}
-                                onPreviewTurn={this.handlePreviewTurn}
-                                isActiveTurn={isTurnMatch}
-                                isDimmed={shouldDim}
-                                isLastAssistant={i === lastAssistantIndex}
-                                status={status}
-                                onUndo={this.handleUndo}
-                                sessionIds={sessionIds}
-                                onSwitchSession={onSwitchSession}
-                            />
-                        );
-                    })}
+                            return (
+                                <Message
+                                    id={
+                                        m.role === 'assistant' && typeof m.turn === 'number'
+                                            ? `msg-turn-${m.turn}`
+                                            : undefined
+                                    }
+                                    key={i}
+                                    msg={m}
+                                    sessionId={this.props.sessionId}
+                                    onSelectChip={onSelectChip}
+                                    onCloneTurn={onCloneTurn}
+                                    onPreviewTurn={this.handlePreviewTurn}
+                                    isActiveTurn={isTurnMatch}
+                                    isDimmed={shouldDim}
+                                    isLastAssistant={i === lastAssistantIndex}
+                                    status={status}
+                                    onUndo={this.handleUndo}
+                                    sessionIds={sessionIds}
+                                    onSwitchSession={onSwitchSession}
+                                />
+                            );
+                        })}
+                    </div>
                     {status === 'busy' && (
                         <Message
                             id={

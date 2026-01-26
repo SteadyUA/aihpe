@@ -178,8 +178,9 @@
 }
 
 .assistant:hover .messageContent {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+    /* border-color: var(--accent); */
+    /* box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2); */
+    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
 }
 
 .messageContent p,
@@ -228,7 +229,6 @@
 
 .activeTurn .messageContent {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
 }
 
 .messageActions {
@@ -531,6 +531,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Remove focus styles from all elements inside chatForm to avoid "focus in focus" */
+/* We keep .inputContainer's focus-within above */
+.chatForm button:focus,
+.chatForm select:focus,
+.chatForm textarea:focus,
+.chatForm [contenteditable]:focus {
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .errorContainer {

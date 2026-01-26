@@ -41,6 +41,12 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         this.chatRef = React.createRef();
     }
 
+    componentDidMount() {
+        if (this.props.isVisible) {
+            this.chatRef.current?.focus();
+        }
+    }
+
     getVersionForTurn = (turn: number): number => {
         const { session } = this.props;
         // Look backwards from the end of history to find the first message with a version <= turn
@@ -88,6 +94,14 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                 // We interpret visibility change as "show existing iframe", so we try to restore immediately.
                 // If the iframe reloads upon becoming visible, onLoad will also fire, which is fine (redundant but harmless).
                 this.visualizeSelection(this.props.session.selection);
+            }
+            this.chatRef.current?.focus();
+        } else if (this.props.isVisible) {
+            // If already visible, check if it just finished loading
+            const wasLoading = prevProps.session.status === 'pending' || prevProps.session.status === 'unloaded';
+            const isLoaded = this.props.session.status !== 'pending' && this.props.session.status !== 'unloaded';
+            if (wasLoading && isLoaded) {
+                this.chatRef.current?.focus();
             }
         } else if (prevProps.isVisible && this.props.isVisible && this.props.session.selection && !prevProps.session.selection) {
             // Just selection added while visible? (Handled in step 4 usually, but original code had a check here?)

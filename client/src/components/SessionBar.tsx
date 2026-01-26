@@ -23,6 +23,33 @@ export class SessionBar extends React.Component<
     SessionBarProps,
     SessionBarState
 > {
+    private tabsRef = React.createRef<HTMLDivElement>();
+
+    componentDidUpdate(prevProps: SessionBarProps) {
+        if (this.props.activeSessionId !== prevProps.activeSessionId && this.props.activeSessionId) {
+            this.scrollToActiveTab();
+        }
+    }
+
+    private scrollToActiveTab() {
+        if (this.tabsRef.current && this.props.activeSessionId) {
+            const container = this.tabsRef.current;
+            const activeTab = container.querySelector(`.${styles.active}`) as HTMLElement;
+            if (activeTab) {
+                const containerRect = container.getBoundingClientRect();
+                const tabRect = activeTab.getBoundingClientRect();
+                const margin = activeTab.offsetWidth / 2;
+
+                const isComfortablyVisible =
+                    tabRect.left >= containerRect.left + margin &&
+                    tabRect.right <= containerRect.right - margin;
+
+                if (!isComfortablyVisible) {
+                    activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+            }
+        }
+    }
     render() {
         const {
             sessions,
@@ -66,6 +93,7 @@ export class SessionBar extends React.Component<
                     </button>
                 </div>
                 <div
+                    ref={this.tabsRef}
                     className={styles.sessionTabs}
                     onWheel={(e) => {
                         if (e.deltaY !== 0) {
