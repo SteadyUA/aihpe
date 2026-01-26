@@ -27,3 +27,10 @@ export function sanitizeHistoryForUi(history: any[]): ChatMessage[] {
             return typeof entry.content === 'string' && entry.content.trim().length > 0;
         });
 }
+export function calculateContextStartTurn(turn: number): number {
+    if (turn < 15) {
+        return 1;
+    }
+    const shifts = Math.floor((turn - 15) / 5) + 1;
+    return 5 * shifts;
+}

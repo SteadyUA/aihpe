@@ -21,6 +21,14 @@ export interface GeneratePageRequest {
     abortSignal?: AbortSignal;
 }
 
+export interface SummarizeHistoryRequest {
+    sessionId: string;
+    conversation: ChatMessage[];
+    rulesAndGoal?: string;
+    modelRole?: string;
+    abortSignal?: AbortSignal;
+}
+
 
 
 export interface GeneratePageResult {
@@ -34,4 +42,5 @@ export interface GeneratePageResult {
 
 export interface LlmClient {
     generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
+    summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
 }

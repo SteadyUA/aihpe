@@ -1,6 +1,6 @@
 import { ImageService } from '../image/ImageService';
 import { SessionStore } from '../session/SessionStore';
-import { GeneratePageRequest, GeneratePageResult, LlmClient, SessionFiles } from './types';
+import { GeneratePageRequest, GeneratePageResult, LlmClient, SessionFiles, SummarizeHistoryRequest } from './types';
 import { ChatMessage } from '../../types/chat';
 
 export const FALLBACK_RESPONSE: GeneratePageResult = {
@@ -23,6 +23,7 @@ export abstract class BaseLlmClient implements LlmClient {
     ) { }
 
     abstract generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
+    abstract summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
 
     protected ensureNextVersion(sessionId: string): number {
         if (this.targetVersion === undefined) {
@@ -111,6 +112,14 @@ Rules:
             );
         }
         return 'unknown error';
+    }
+
+    protected getHistorySummaryPrompt(): string {
+        return `You are a helpful assistant. Summarize the progress of the conversation and the reasoning behind the changes made so far. 
+Focus on WHAT was done and why, and what is currently being discussed. 
+Keep the summary concise but informative (max 2-3 paragraphs). 
+The summary will be used as a context for future steps. 
+Respond ONLY with the summary text.`;
     }
 
     // Helper to create tool implementations since they need access to member functions and request context

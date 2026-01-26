@@ -5,6 +5,7 @@ import {
     LanguageModel,
     ImagePart,
     TextPart,
+    generateText,
 } from 'ai';
 import { z } from 'zod';
 import { ChatMessage } from '../../types/chat';
@@ -12,6 +13,7 @@ import {
     GeneratePageRequest,
     GeneratePageResult,
     LlmClient,
+    SummarizeHistoryRequest,
 } from './types';
 import { ImageService } from '../image/ImageService';
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
@@ -379,5 +381,31 @@ export class AiSdkClient extends BaseLlmClient {
         });
 
         return messages;
+    }
+
+    async summarizeHistory(request: SummarizeHistoryRequest): Promise<string> {
+        if (!this.model) {
+            throw new Error('No LanguageModel provided to AiSdkClient for summarization');
+        }
+
+        const historyMessages: ModelMessage[] = request.conversation.map(msg => {
+            if (msg.role === 'user') {
+                return { role: 'user', content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) } as ModelMessage;
+            } else if (msg.role === 'assistant') {
+                return { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) } as ModelMessage;
+            }
+            return null;
+        }).filter(m => m !== null) as ModelMessage[];
+
+        const summaryPrompt = this.getHistorySummaryPrompt();
+
+        const result = await generateText({
+            model: this.model,
+            system: summaryPrompt,
+            messages: historyMessages,
+            abortSignal: request.abortSignal,
+        });
+
+        return result.text || 'Summary failed.';
     }
 }

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
-import { GeneratePageRequest, GeneratePageResult, SessionFiles, LlmClient } from './types';
+import { GeneratePageRequest, GeneratePageResult, SessionFiles, LlmClient, SummarizeHistoryRequest } from './types';
 import { ImageService } from '../image/ImageService';
 import { SessionStore } from '../session/SessionStore';
 import { ChatMessage } from '../../types/chat';
@@ -321,6 +321,30 @@ export class OpenaiClient extends BaseLlmClient {
 
         messages.push({ role: 'user', content: userContent });
         return messages;
+    }
+
+    async summarizeHistory(request: SummarizeHistoryRequest): Promise<string> {
+        const historyMessages = request.conversation.map(msg => {
+            if (msg.role === 'user') {
+                return { role: 'user' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
+            } else if (msg.role === 'assistant') {
+                return { role: 'assistant' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
+            }
+            return null;
+        }).filter(m => m !== null) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+
+        const summaryPrompt = this.getHistorySummaryPrompt();
+
+        const response = await this.client.chat.completions.create({
+            model: this.modelId,
+            messages: [
+                { role: 'system', content: summaryPrompt },
+                ...historyMessages
+            ],
+            stream: false
+        }, { signal: request.abortSignal });
+
+        return response.choices[0].message.content || 'Summary failed.';
     }
 
     private getOpenAiTools(request: GeneratePageRequest): OpenAI.Chat.Completions.ChatCompletionTool[] {

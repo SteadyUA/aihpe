@@ -5,7 +5,7 @@ import { SessionStore } from './session/SessionStore';
 import { LlmFactory } from './llm/LlmFactory';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
-import { formatContentForUi } from '../utils/chat';
+import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
 import fs from 'fs';
 import path from 'path';
 import { getSessionsDir } from '../utils/pathUtils';
@@ -154,12 +154,7 @@ export class ChatService {
         const currentContext = currentSessionData.context;
 
         // Apply Step-based Window logic
-        // Shift window every 5 turns (first shift at 15)
-        let startTurn = 1;
-        if (turn >= 15) {
-            const shifts = Math.floor((turn - 15) / 5) + 1;
-            startTurn = 5 * shifts;
-        }
+        const startTurn = calculateContextStartTurn(turn);
 
         // We assume the last message in context is the one we just added (the user instruction)
         // Check if context has message for current turn?
@@ -474,6 +469,10 @@ export class ChatService {
                 turns: [...finalSession.turns, turnRecord]
             });
 
+            if (turn > 0 && turn % 5 === 0) {
+                await this.generateHistorySummary(sessionId, turn);
+            }
+
             this.notifyStatus(
                 sessionId,
                 'completed',
@@ -779,6 +778,52 @@ export class ChatService {
             return `[Selected element: ${selection.selector}] ${content}`;
         }
         return content;
+    }
+
+    private async generateHistorySummary(sessionId: string, turn: number): Promise<void> {
+        this.notifyStatus(sessionId, 'generating', `summarization...`);
+
+        const session = this.sessionStore.getOrCreate(sessionId);
+        const client = this.llmFactory.getClient(session.provider);
+
+        // Apply Step-based Window logic (sync with generateResponse)
+        const startTurn = calculateContextStartTurn(turn);
+
+        // Use context for summarization to include previous summaries/reasoning
+        const conversation = session.context.filter((msg) => (msg.turn ?? 0) >= startTurn);
+
+        const project = await this.projectService.getProject(session.projectId);
+        const rulesAndGoal = project?.rulesAndGoal;
+        const modelRole = project?.modelRole;
+
+        try {
+            const summary = await client.summarizeHistory({
+                sessionId,
+                conversation,
+                rulesAndGoal,
+                modelRole,
+                abortSignal: this.activeGenerations.get(sessionId)?.signal,
+            });
+
+            const summaryMessage: ChatMessage = {
+                role: 'system',
+                content: `History Summary (Turns ${startTurn}-${turn}):\n${summary}`,
+                createdAt: new Date(),
+                version: session.currentVersion,
+                turn: turn,
+            };
+
+            // Store summary ONLY in context
+            this.sessionStore.upsert(sessionId, {
+                context: [...session.context, summaryMessage],
+            });
+
+            console.log(`Generated history summary for session ${sessionId} at turn ${turn}`);
+        } catch (error) {
+            console.error(`Failed to generate history summary for session ${sessionId}:`, error);
+            // We don't want to fail the main request if summarization fails, 
+            // but we already notified user about "summarization...", so maybe stay silent?
+        }
     }
 
     getSession(sessionId: string): SessionData {
