@@ -10,7 +10,7 @@ export const FALLBACK_RESPONSE: GeneratePageResult = {
         'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
         'styles.css': '',
         'script.js': '',
-    },
+    }
 };
 
 export abstract class BaseLlmClient implements LlmClient {
@@ -24,6 +24,10 @@ export abstract class BaseLlmClient implements LlmClient {
 
     abstract generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
     abstract summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
+
+    getCapacity(): number {
+        return this.maxContextTokens;
+    }
 
     protected ensureNextVersion(sessionId: string): number {
         if (this.targetVersion === undefined) {
@@ -79,6 +83,8 @@ Strategy:
 - Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
 
 Rules:
+- **NO PREAMBLE**: When using tools to apply changes, **DO NOT** output accompanying text like "I will now..." or "Applying changes...". JUST USE THE TOOL.
+- **TEXT AFTER ACTION**: Only provide a text summary/response AFTER the tool usage is complete.
 - **SESSION TITLE**:
     -   **MANDATORY**: Always check the session subject. If it is "..." or generic, **YOU MUST** use 'update_subject' to set a concise title (3-5 words) reflecting the user's request. Do this early.
 - Preserve valid HTML/CSS/JS syntax.
@@ -212,7 +218,7 @@ Respond ONLY with the summary text.`;
                 }
                 return `Session subject updated to: "${subject}"`;
             },
-            read_subject: async () => {
+            read_subject: async ({ summary }: { summary?: string }) => {
                 const currentSubject = request.subject || '...';
                 return `Current Session Subject: "${currentSubject}"`;
             },
@@ -255,7 +261,7 @@ Respond ONLY with the summary text.`;
             generate_image: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal, request.trackImageTokenUsage);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
                     return `Failed to generate image: ${error.message}`;
@@ -265,7 +271,7 @@ Respond ONLY with the summary text.`;
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
                     // Use currentVersion as source, nextVersion as target
-                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal);
+                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal, request.trackImageTokenUsage);
                     return `Image edited successfully: ${savedFilename}`;
                 } catch (error: any) {
                     return `Failed to edit image: ${error.message}`;

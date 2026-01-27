@@ -166,18 +166,6 @@ export class AiSdkClient extends BaseLlmClient {
             const collectedNewMessages: ModelMessage[] = [];
             let stop = false;
 
-            const totalUsage: {
-                prompt: number;
-                completion: number;
-                total: number;
-                reasoning?: number;
-                cached?: number;
-            } = {
-                prompt: 0,
-                completion: 0,
-                total: 0,
-            };
-
             let usage;
             while (steps < maxSteps && !stop) {
                 steps++;
@@ -238,28 +226,14 @@ export class AiSdkClient extends BaseLlmClient {
 
                 usage = await result.usage;
 
-                totalUsage.prompt += usage.inputTokens || 0;
-                totalUsage.completion += usage.outputTokens || 0;
-                totalUsage.total += usage.totalTokens || 0;
 
-                // Check for cached tokens
-                // @ts-ignore: Accessing potential cache properties
-                const cachedTokens =
-                    (usage as any).cachedInputTokens ??
-                    (usage as any).promptTokensDetails?.cachedTokens;
-
-                // Check for reasoning tokens
-                // @ts-ignore: Accessing potential reasoning properties
-                const reasoningTokens =
-                    (usage as any).reasoningTokens ??
-                    (usage as any).completionTokensDetails?.reasoningTokens;
-
-                if (cachedTokens !== undefined) {
-                    totalUsage.cached = (totalUsage.cached || 0) + cachedTokens;
-                }
-
-                if (reasoningTokens !== undefined) {
-                    totalUsage.reasoning = (totalUsage.reasoning || 0) + reasoningTokens;
+                if (request.trackRequestTokenUsage) {
+                    await request.trackRequestTokenUsage({
+                        prompt: usage.inputTokens || 0,
+                        completion: usage.outputTokens || 0,
+                        total: usage.totalTokens || 0,
+                        model: this.modelId || 'unknown',
+                    });
                 }
 
                 const response = await result.response;
@@ -314,11 +288,6 @@ export class AiSdkClient extends BaseLlmClient {
                 files: currentFiles,
                 newMessages,
                 targetVersion: this.targetVersion ?? request.currentVersion,
-                usage: totalUsage,
-                contextUsage: {
-                    total: usage?.totalTokens || 0,
-                    capacity: this.maxContextTokens,
-                }
             };
         } catch (error) {
             console.error(
@@ -408,4 +377,5 @@ export class AiSdkClient extends BaseLlmClient {
 
         return result.text || 'Summary failed.';
     }
+
 }

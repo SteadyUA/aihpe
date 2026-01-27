@@ -37,6 +37,7 @@ interface AppState {
     showProjectSettings: boolean;
     chatWidth: number;
     isResizing: boolean;
+    stableSessionIds: string[]; // Maintains DOM order to prevent iframe reloads
 }
 
 class App extends React.Component<AppProps, AppState> {
@@ -61,6 +62,7 @@ class App extends React.Component<AppProps, AppState> {
             showProjectSettings: false,
             chatWidth: parseInt(localStorage.getItem('chatWidth') || '400', 10),
             isResizing: false,
+            stableSessionIds: [],
         };
 
     }
@@ -176,9 +178,35 @@ class App extends React.Component<AppProps, AppState> {
                     }
                 });
 
+                // Stabilize session IDs for rendering
+                // We want to keep existing stable IDs in their order, add new ones at the end.
+                // We also filter out any IDs that are no longer in the fetched sessions.
+                const fetchedIds = new Set(data.sessions.map(s => s.sessionId));
+                let newStable = [...prevState.stableSessionIds];
+
+                // 1. Remove deleted sessions
+                newStable = newStable.filter(id => fetchedIds.has(id));
+
+                // 2. Add new sessions (append)
+                data.sessions.forEach(s => {
+                    if (!newStable.includes(s.sessionId)) {
+                        newStable.push(s.sessionId);
+                    }
+                });
+
+                // Should match sessionOrder if it was empty (first load)
+                if (prevState.stableSessionIds.length === 0) {
+                    // For first load, maybe we just use sessionOrder?
+                    // Actually, the loop above essentially does that if newStable starts empty.
+                    // But strictly speaking, the loop above appends in order of data.sessions.
+                    // data.sessions order is likely the display order.
+                    // That's fine for initial load.
+                }
+
                 return {
                     sessions: sessionsMap,
                     sessionOrder,
+                    stableSessionIds: newStable,
                     projectId,
                     projectName: data.name || 'Untitled',
                     projectRulesAndGoal: data.rulesAndGoal || '',
@@ -451,6 +479,25 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
+    handleSessionReorder = async (newOrder: string[]) => {
+        // Optimistic update
+        this.setState({ sessionOrder: newOrder });
+
+        const { projectId } = this.state;
+        if (!projectId) return;
+
+        try {
+            await apiAuth.fetch(`/api/projects/${projectId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionIds: newOrder })
+            });
+        } catch (e) {
+            console.error('Failed to save session order', e);
+            // Could revert state here if needed, but optimistic is usually fine for UI reordering
+        }
+    };
+
     toggleProjectSettings = () => {
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
     };
@@ -555,6 +602,7 @@ class App extends React.Component<AppProps, AppState> {
                     }
                 } else if (data.status === 'completed') {
                     updatedSession.status = 'idle';
+                    updatedSession.statusMessages = [];
                     updatedSession.requestStartTime = null;
 
                     // Auto-switch to preview if we are in plan view (user expectation: seeing the result)
@@ -579,9 +627,6 @@ class App extends React.Component<AppProps, AppState> {
                         if (data.details.tokenUsage) {
                             updatedSession.tokenUsage = data.details.tokenUsage;
                         }
-                        if (data.details.contextUsage) {
-                            updatedSession.contextUsage = data.details.contextUsage;
-                        }
                     }
 
                     if (!data.details?.message) {
@@ -603,28 +648,7 @@ class App extends React.Component<AppProps, AppState> {
             });
         });
 
-        this.evtSource.addEventListener('file-change', (e) => {
-            const data = JSON.parse(e.data);
-            const { sessionId, version, filename, turn } = data;
 
-            this.setState(prevState => {
-                const session = prevState.sessions[sessionId];
-                if (!session) return null;
-
-                // Force WorkSession to clear cache for this file
-                return {
-                    sessions: {
-                        ...prevState.sessions,
-                        [sessionId]: {
-                            ...session,
-                            pendingFileRefresh: { version, filename, turn }
-                        }
-                    }
-                };
-            }, () => {
-                this.fetchSession(sessionId);
-            });
-        });
 
         this.evtSource.addEventListener('session-created', (e) => {
             const data = JSON.parse(e.data);
@@ -639,7 +663,8 @@ class App extends React.Component<AppProps, AppState> {
                                 ...prevState.sessions,
                                 ...{ [data.newSessionId]: { ...s, status: 'idle', group: data.group ?? 0 } }
                             },
-                            sessionOrder: prevState.sessionOrder
+                            sessionOrder: prevState.sessionOrder,
+                            stableSessionIds: prevState.stableSessionIds
                         };
                     }
                     return null;
@@ -684,10 +709,17 @@ class App extends React.Component<AppProps, AppState> {
                     newOrder.push(data.newSessionId);
                 }
 
+                // Update stable IDs
+                const newStable = [...prevState.stableSessionIds];
+                if (!newStable.includes(data.newSessionId)) {
+                    newStable.push(data.newSessionId);
+                }
+
                 return {
                     sessions: { ...prevState.sessions, [data.newSessionId]: newSession },
-                    sessionOrder: newOrder
-                } as Pick<AppState, 'sessions' | 'sessionOrder'>;
+                    sessionOrder: newOrder,
+                    stableSessionIds: newStable
+                } as Pick<AppState, 'sessions' | 'sessionOrder' | 'stableSessionIds'>;
             }, () => {
                 // Fetch the new session history after state update
                 this.fetchSession(data.newSessionId);
@@ -809,6 +841,7 @@ class App extends React.Component<AppProps, AppState> {
                             // Restore unsent state if present and currently empty/default
                             selection: (data.unsent?.selection) ?? (session ? session.selection : null),
                             tokenUsage: data.tokenUsage ?? (session ? session.tokenUsage : undefined),
+
                             attachment: (data.unsent?.attachment) ?? (session ? session.attachment : undefined),
                             // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
@@ -909,9 +942,16 @@ class App extends React.Component<AppProps, AppState> {
                 newOrder.push(sessionData.id);
             }
 
+            // Update stable IDs
+            const newStable = [...prevState.stableSessionIds];
+            if (!newStable.includes(sessionData.id)) {
+                newStable.push(sessionData.id);
+            }
+
             return {
                 sessions: { ...prevState.sessions, [sessionData.id]: newSession },
                 sessionOrder: newOrder,
+                stableSessionIds: newStable,
                 activeSessionId: sessionData.id,
             };
         });
@@ -1358,6 +1398,7 @@ class App extends React.Component<AppProps, AppState> {
             projectId,
             sessions: {},
             sessionOrder: [],
+            stableSessionIds: [],
             activeSessionId: null
         }, () => {
             this.fetchProject(projectId);
@@ -1471,6 +1512,7 @@ class App extends React.Component<AppProps, AppState> {
                                 pendingSessions={pendingSessions}
                                 onProjectSettings={this.toggleProjectSettings}
                                 projectName={this.state.projectName}
+                                onReorder={this.handleSessionReorder}
                             />
                         )}
                     </AppHeader>
@@ -1485,7 +1527,8 @@ class App extends React.Component<AppProps, AppState> {
                 ) : isSettingsPage ? (
                     <Settings />
                 ) : (
-                    sessionOrder.map(sessionId => {
+                    // Use stableSessionIds for rendering to prevent DOM reordering (which reloads iframes)
+                    this.state.stableSessionIds.map(sessionId => {
                         const session = sessions[sessionId];
                         if (!session) return null;
                         const isVisible = sessionId === activeSessionId;

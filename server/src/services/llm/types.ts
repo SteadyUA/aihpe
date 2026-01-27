@@ -1,6 +1,6 @@
-import { ChatAttachment, SessionFiles, ChatMessage, TokenUsage, ContextUsage } from '../../types/chat';
+import { ChatAttachment, SessionFiles, ChatMessage, TokenUsage } from '../../types/chat';
 
-export { ChatAttachment, SessionFiles, ChatMessage, TokenUsage, ContextUsage };
+export { ChatAttachment, SessionFiles, ChatMessage, TokenUsage };
 
 export interface GeneratePageRequest {
     sessionId: string;
@@ -19,6 +19,8 @@ export interface GeneratePageRequest {
     onPatch?: (patch: { subject?: string }) => void;
     modelRole?: string;
     abortSignal?: AbortSignal;
+    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string }) => Promise<void>;
+    trackImageTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string }) => Promise<void>;
 }
 
 export interface SummarizeHistoryRequest {
@@ -36,11 +38,10 @@ export interface GeneratePageResult {
     files: SessionFiles;
     newMessages?: ChatMessage[];
     targetVersion?: number;
-    usage?: TokenUsage;
-    contextUsage?: ContextUsage;
 }
 
 export interface LlmClient {
     generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
     summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
+    getCapacity(): number;
 }

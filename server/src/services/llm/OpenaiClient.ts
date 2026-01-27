@@ -41,17 +41,15 @@ export class OpenaiClient extends BaseLlmClient {
         const collectedNewMessages: any[] = [];
         let stop = false;
 
-        const totalUsage = {
-            prompt: 0,
-            completion: 0,
-            total: 0,
-            cached: 0,
-            reasoning: 0
-        };
-
         try {
             while (steps < maxSteps && !stop) {
+                if (request.abortSignal?.aborted) {
+                    console.log('OpenaiClient: Generation aborted by signal');
+                    break;
+                }
+
                 steps++;
+                console.log(`OpenaiClient: Step ${steps}/${maxSteps} started.`);
 
                 const stream = await this.client.chat.completions.create({
                     model: this.modelId,
@@ -65,6 +63,7 @@ export class OpenaiClient extends BaseLlmClient {
                 let toolCallsBuffer: Record<number, { id: string; name: string; arguments: string }> = {};
                 let finishReason: string | null = null;
                 let usageSent = false;
+                let currentStepUsage = { prompt: 0, completion: 0, total: 0 };
 
                 for await (const chunk of stream) {
                     if (chunk.choices && chunk.choices.length > 0) {
@@ -96,15 +95,20 @@ export class OpenaiClient extends BaseLlmClient {
                     }
 
                     if (chunk.usage) {
-                        totalUsage.total = chunk.usage.total_tokens;
-                        totalUsage.prompt = chunk.usage.prompt_tokens;
-                        totalUsage.completion = chunk.usage.completion_tokens;
-                        // @ts-ignore
-                        if (chunk.usage.prompt_tokens_details?.cached_tokens) totalUsage.cached = chunk.usage.prompt_tokens_details.cached_tokens;
-                        // @ts-ignore
-                        if (chunk.usage.completion_tokens_details?.reasoning_tokens) totalUsage.reasoning = chunk.usage.completion_tokens_details.reasoning_tokens;
+                        currentStepUsage = {
+                            prompt: chunk.usage.prompt_tokens,
+                            completion: chunk.usage.completion_tokens,
+                            total: chunk.usage.total_tokens
+                        };
                         usageSent = true;
                     }
+                }
+
+                if (usageSent && request.trackRequestTokenUsage) {
+                    await request.trackRequestTokenUsage({
+                        ...currentStepUsage,
+                        model: this.modelId
+                    });
                 }
 
                 fullText += stepText;
@@ -124,16 +128,21 @@ export class OpenaiClient extends BaseLlmClient {
                     }
                 }));
 
-                if (toolCalls.length > 0) {
-                    assistantMessage.tool_calls = toolCalls;
+                // FIX: Filter out invalid tool calls (missing name) which can cause infinite loops
+                const validToolCalls = toolCalls.filter(tc => tc.function.name && tc.function.name.trim() !== '');
+
+                if (validToolCalls.length > 0) {
+                    assistantMessage.tool_calls = validToolCalls;
                 }
 
                 currentMessages.push(assistantMessage);
                 collectedNewMessages.push(assistantMessage);
 
-                // FIX: Prioritize tool execution if tool calls exist, even if finishReason is 'stop' (some providers do this)
-                if (toolCalls.length > 0) {
-                    for (const toolCall of toolCalls) {
+                console.log(`OpenaiClient: Step finished. FinishReason: ${finishReason}, ValidToolCalls: ${validToolCalls.length}`);
+
+                // FIX: Only prioritize tool execution if valid tool calls exist
+                if (validToolCalls.length > 0) {
+                    for (const toolCall of validToolCalls) {
                         const name = toolCall.function.name;
                         const argsString = toolCall.function.arguments;
                         let args;
@@ -220,17 +229,7 @@ export class OpenaiClient extends BaseLlmClient {
                 summary: fullText || 'Changes applied.',
                 files: currentFiles,
                 newMessages,
-                targetVersion: this.targetVersion ?? request.currentVersion,
-                usage: {
-                    prompt: totalUsage.prompt,
-                    completion: totalUsage.completion,
-                    total: totalUsage.total,
-                },
-                // @ts-ignore
-                contextUsage: {
-                    total: totalUsage.total,
-                    capacity: this.maxContextTokens,
-                }
+                targetVersion: this.targetVersion ?? request.currentVersion
             };
 
         } catch (error) {
@@ -248,7 +247,11 @@ export class OpenaiClient extends BaseLlmClient {
         // ChatMessage: { role: 'user'|'assistant'|'system'|'tool', content: string|parts }
 
         for (const entry of request.conversation) {
-            if (entry.role === 'system') continue; // We already added system prompt
+            if (entry.role === 'system') {
+                messages.push({ role: 'system', content: entry.content as string });
+                continue;
+            }
+
 
             // Simple mapping:
             if (entry.role === 'user') {
@@ -329,6 +332,8 @@ export class OpenaiClient extends BaseLlmClient {
                 return { role: 'user' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
             } else if (msg.role === 'assistant') {
                 return { role: 'assistant' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
+            } else if (msg.role === 'system') {
+                return { role: 'system' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
             }
             return null;
         }).filter(m => m !== null) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
@@ -339,12 +344,16 @@ export class OpenaiClient extends BaseLlmClient {
             model: this.modelId,
             messages: [
                 { role: 'system', content: summaryPrompt },
-                ...historyMessages
+                ...historyMessages,
+                { role: 'user', content: "Summarize the review conversation above. Focus on the changes made to the files and the user's feedback." }
             ],
             stream: false
         }, { signal: request.abortSignal });
 
-        return response.choices[0].message.content || 'Summary failed.';
+        if (response.choices && response.choices.length > 0 && response.choices[0].message) {
+            return response.choices[0].message.content || 'Summary failed.';
+        }
+        return 'Summary unavailable.';
     }
 
     private getOpenAiTools(request: GeneratePageRequest): OpenAI.Chat.Completions.ChatCompletionTool[] {
@@ -402,8 +411,10 @@ export class OpenaiClient extends BaseLlmClient {
                     description: 'Read the current subject/topic of the session.',
                     parameters: {
                         type: 'object',
-                        properties: {},
-                        required: []
+                        properties: {
+                            summary: { type: 'string', description: 'Explain why you are checking the subject/topic.' }
+                        },
+                        required: ['summary']
                     }
                 }
             },
@@ -488,4 +499,5 @@ export class OpenaiClient extends BaseLlmClient {
 
         return tools;
     }
+
 }

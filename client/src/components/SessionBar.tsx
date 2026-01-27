@@ -15,15 +15,25 @@ interface SessionBarProps {
 
     onProjectSettings: () => void;
     projectName?: string;
+    onReorder: (newOrder: string[]) => void;
 }
 
-interface SessionBarState { }
+interface SessionBarState {
+    dropTargetIndex: number | null;
+}
 
 export class SessionBar extends React.Component<
     SessionBarProps,
     SessionBarState
 > {
     private tabsRef = React.createRef<HTMLDivElement>();
+
+    constructor(props: SessionBarProps) {
+        super(props);
+        this.state = {
+            dropTargetIndex: null,
+        };
+    }
 
     componentDidUpdate(prevProps: SessionBarProps) {
         if (this.props.activeSessionId !== prevProps.activeSessionId && this.props.activeSessionId) {
@@ -63,6 +73,8 @@ export class SessionBar extends React.Component<
             projectName,
         } = this.props;
 
+        const { dropTargetIndex } = this.state;
+
         return (
             <div className={styles.sessionBar}>
 
@@ -100,8 +112,38 @@ export class SessionBar extends React.Component<
                             e.currentTarget.scrollLeft += e.deltaY;
                         }
                     }}
+                    onDragLeave={(e) => {
+                        const container = this.tabsRef.current;
+                        if (container && !container.contains(e.relatedTarget as Node)) {
+                            this.setState({ dropTargetIndex: null });
+                        }
+                    }}
+
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        const { dropTargetIndex } = this.state;
+                        // If dropTargetIndex is null, we don't know where to drop.
+                        if (dropTargetIndex === null) return;
+
+                        this.setState({ dropTargetIndex: null });
+                        const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                        if (isNaN(sourceIndex)) return;
+
+                        const { sessions, onReorder } = this.props;
+                        const newOrder = [...sessions];
+                        // If sourceIndex is the same as the target insertion index (logically), we might not need to move?
+                        // But let's run the logic.
+
+                        const [moved] = newOrder.splice(sourceIndex, 1);
+                        let targetIndex = dropTargetIndex;
+                        if (sourceIndex < targetIndex) {
+                            targetIndex -= 1;
+                        }
+                        newOrder.splice(targetIndex, 0, moved);
+                        onReorder(newOrder);
+                    }}
                 >
-                    {sessions.map((id) => {
+                    {sessions.map((id, index) => {
                         const isActive = id === activeSessionId;
                         const status = statusMap?.[id] || 'idle';
                         const isPending = pendingSessions.includes(id);
@@ -113,78 +155,122 @@ export class SessionBar extends React.Component<
                                 ? styles[`sessionGroup${groupId % 12}`]
                                 : undefined;
 
+                        const isDropTarget = dropTargetIndex === index;
+
                         return (
-                            <div
-                                key={id}
-                                className={classNames(
-                                    styles.sessionTab,
-                                    {
-                                        [styles.active]: isActive,
-                                        [styles.pending]: isPending,
-                                    },
-                                    groupClass,
-                                )}
-                                onClick={() => onSwitch(id)}
-                            // style={isPending ? { cursor: 'not-allowed', opacity: 0.7 } : undefined} // Removed restriction
-                            >
-                                <span
-                                    className={classNames(
-                                        styles.sessionTabStatus,
-                                        {
-                                            [styles.busy]: isBusy,
-                                        },
-                                    )}
-                                >
-                                    {status === 'error' && (
-                                        <svg
-                                            width="12"
-                                            height="12"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="#ef4444"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <circle cx="12" cy="12" r="10"></circle>
-                                            <line x1="12" y1="8" x2="12" y2="12"></line>
-                                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                        </svg>
-                                    )}
-                                    {!isBusy && status !== 'error' && (
-                                        <svg
-                                            width="12"
-                                            height="12"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                        </svg>
-                                    )}
-                                </span>
-                                <span className={styles.sessionTitle} title={id}>
-                                    {this.props.subjects[id] || id.slice(0, 8)}
-                                </span>
-                                <span
-                                    className={styles.sessionTabClose}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onRemove(id);
+                            <React.Fragment key={id}>
+                                {isDropTarget && <div className={styles.dropIndicator} />}
+                                <div
+                                    draggable
+                                    onDragStart={(e) => {
+                                        e.dataTransfer.setData('text/plain', index.toString());
+                                        e.dataTransfer.effectAllowed = 'move';
                                     }}
+                                    onDragOver={(e) => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+
+                                        // Set drop target to current index (insert before this item)
+                                        if (this.state.dropTargetIndex !== index) {
+                                            this.setState({ dropTargetIndex: index });
+                                        }
+                                    }}
+
+                                    className={classNames(
+                                        styles.sessionTab,
+                                        {
+                                            [styles.active]: isActive,
+                                            [styles.pending]: isPending,
+                                        },
+                                        groupClass,
+                                    )}
+                                    onClick={() => onSwitch(id)}
+                                // style={isPending ? { cursor: 'not-allowed', opacity: 0.7 } : undefined} // Removed restriction
                                 >
-                                    ×
-                                </span>
-                            </div>
+                                    <span
+                                        className={classNames(
+                                            styles.sessionTabStatus,
+                                            {
+                                                [styles.busy]: isBusy,
+                                            },
+                                        )}
+                                    >
+                                        {status === 'error' && (
+                                            <svg
+                                                width="12"
+                                                height="12"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="#ef4444"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                            </svg>
+                                        )}
+                                        {!isBusy && status !== 'error' && (
+                                            <svg
+                                                width="12"
+                                                height="12"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                            </svg>
+                                        )}
+                                    </span>
+                                    <span className={styles.sessionTitle} title={id}>
+                                        {this.props.subjects[id] || id.slice(0, 8)}
+                                    </span>
+                                    <span
+                                        className={styles.sessionTabClose}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onRemove(id);
+                                        }}
+                                    >
+                                        ×
+                                    </span>
+                                </div>
+                            </React.Fragment>
                         );
                     })}
+                    {/* Add one last drop target for appending to end? */}
+                    {dropTargetIndex === sessions.length && <div className={styles.dropIndicator} />}
+                    {/* We need a transparent filler to catch "append" drags if we want to drag to empty space?
+                        Or just handle onDragOver on the container?
+                    */}
                     <button
                         className={styles.sessionTabNew}
                         onClick={onCreate}
                         title="New Chat"
+                        onDragOver={(e) => {
+                            e.preventDefault();
+                            if (this.state.dropTargetIndex !== sessions.length) {
+                                this.setState({ dropTargetIndex: sessions.length });
+                            }
+                        }}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            this.setState({ dropTargetIndex: null });
+                            const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                            if (isNaN(sourceIndex)) return;
+
+                            // Append to end
+                            const newOrder = [...sessions];
+                            const [moved] = newOrder.splice(sourceIndex, 1);
+                            newOrder.push(moved);
+
+                            this.props.onReorder(newOrder);
+                        }}
                     >
                         <svg
                             width="16"
@@ -201,7 +287,7 @@ export class SessionBar extends React.Component<
                         </svg>
                     </button>
                 </div>
-            </div>
+            </div >
         );
     }
 }

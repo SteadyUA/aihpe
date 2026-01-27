@@ -61,7 +61,7 @@ export interface Session {
     provider?: LlmProvider;
     fastMode?: boolean;
     pendingRefreshTurn: number | null;
-    pendingFileRefresh?: { version: number; filename: string; turn?: number } | null;
+
 
     // UI selections per session
     selection: string | null;
@@ -73,18 +73,12 @@ export interface Session {
 
     group: number;
     tokenUsage?: TokenUsage;
-    contextUsage?: ContextUsage;
 }
 
 export interface TokenUsage {
     prompt: number;
     completion: number;
     total: number;
-    reasoning?: number;
-    cached?: number;
-}
-
-export interface ContextUsage {
-    total: number;
-    capacity: number;
+    request?: number;
+    capacity?: number;
 }

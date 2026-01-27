@@ -126,11 +126,6 @@ export class WorkSession extends React.Component<WorkSessionProps> {
             this.previewRef.current?.clearCache(turnToRefresh);
             // Acknowledge event by clearing the flag in session state
             this.props.onUpdateSession({ pendingRefreshTurn: null });
-        } else if (this.props.session.pendingFileRefresh) {
-            // Granular refresh
-            const { version, filename } = this.props.session.pendingFileRefresh;
-            this.previewRef.current?.clearCache(version, filename);
-            this.props.onUpdateSession({ pendingFileRefresh: null });
         }
 
         // 4. Handle Selection Restoration (e.g. after Undo or Picking)
@@ -323,7 +318,6 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
                     sessionTitle={session.subject}
                     tokenUsage={session.tokenUsage}
-                    contextUsage={session.contextUsage}
                 />
 
                 {this.props.onResizeStart && (

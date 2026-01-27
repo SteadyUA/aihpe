@@ -9,6 +9,7 @@ import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
 import fs from 'fs';
 import path from 'path';
 import { getSessionsDir } from '../utils/pathUtils';
+import { TokenUsageService } from './TokenUsageService';
 
 @Service()
 export class ChatService {
@@ -18,6 +19,7 @@ export class ChatService {
         private readonly llmFactory: LlmFactory,
         private readonly imageService: ImageService,
         private readonly projectService: ProjectService,
+        private readonly tokenUsageService: TokenUsageService,
     ) { }
 
     private activeGenerations = new Map<string, AbortController>();
@@ -229,6 +231,34 @@ export class ChatService {
                 fastMode: fastModeOverride ?? currentSessionData.fastMode,
                 subject: currentSessionData.subject,
                 abortSignal: controller.signal,
+                trackRequestTokenUsage: async (u) => {
+                    if (controller.signal.aborted) return;
+                    const session = this.sessionStore.getOrCreate(sessionId);
+                    await this.tokenUsageService.saveUsage({
+                        projectId: session.projectId,
+                        sessionId: sessionId,
+                        agent: 'chat',
+                        turn: turn,
+                        model: u.model,
+                        prompt: u.prompt,
+                        completion: u.completion,
+                        total: u.total,
+                    });
+                },
+                trackImageTokenUsage: async (u) => {
+                    if (controller.signal.aborted) return;
+                    const session = this.sessionStore.getOrCreate(sessionId);
+                    await this.tokenUsageService.saveUsage({
+                        projectId: session.projectId,
+                        sessionId: sessionId,
+                        agent: 'image',
+                        turn: turn,
+                        model: u.model,
+                        prompt: u.prompt,
+                        completion: u.completion,
+                        total: u.total,
+                    });
+                },
                 onPatch: (patch) => {
                     this.sseService.emitSessionUpdate({
                         sessionId,
@@ -330,44 +360,20 @@ export class ChatService {
 
 
                 // Detect and emit file changes
-                for (const [filename, content] of Object.entries(generation.files)) {
-                    const oldContent = currentSessionData.files[filename as keyof typeof currentSessionData.files];
-                    // Compare content. Note: files might be undefined in old session if new.
-                    if (content !== oldContent) {
-                        this.sseService.emitFileChange({
-                            sessionId,
-                            version: generation.targetVersion,
-                            filename,
-                            turn: updated.lastTurn ?? 0,
-                        });
-                    }
-                }
+                // Detect and emit file changes
+                // REMOVED file-change event emission
             } else {
                 // No changes to files/version, just append messages
                 const session = this.sessionStore.getOrCreate(sessionId);
             }
 
-            // Update token usage
-            let newUsage: {
-                prompt: number;
-                completion: number;
-                total: number;
-                reasoning: number;
-                cached: number;
-            } | undefined;
+            // Token usage is now tracked per-request via trackRequestTokenUsage callback
 
-            if (generation.usage) {
-                const session = this.sessionStore.getOrCreate(sessionId);
-                const currentUsage = session.tokenUsage || { prompt: 0, completion: 0, total: 0 };
-                newUsage = {
-                    prompt: currentUsage.prompt + generation.usage.prompt,
-                    completion: currentUsage.completion + generation.usage.completion,
-                    total: currentUsage.total + generation.usage.total,
-                    reasoning: (currentUsage.reasoning || 0) + (generation.usage.reasoning || 0),
-                    cached: (currentUsage.cached || 0) + (generation.usage.cached || 0),
-                };
-                this.sessionStore.upsert(sessionId, { tokenUsage: newUsage });
-            }
+            const usageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
+            const currentUsageSummary = {
+                ...usageSummary,
+                capacity: client.getCapacity()
+            };
 
             // Re-fetch strict session state
             const updated = this.sessionStore.getOrCreate(sessionId);
@@ -459,7 +465,6 @@ export class ChatService {
                 response: generation.summary || '',
                 provider: finalSession.provider || 'openai',
                 fastMode: finalSession.fastMode || false,
-                tokenUsage: generation.usage || { prompt: 0, completion: 0, total: 0 }, // Store per-turn usage
                 selection: promptData.selection,
                 attachment: promptData.attachment,
                 version: updated.currentVersion,
@@ -479,8 +484,7 @@ export class ChatService {
                 'Request completed.',
                 {
                     message: assistantMessage,
-                    tokenUsage: newUsage, // Pass usage to SSE
-                    contextUsage: generation.contextUsage,
+                    tokenUsage: currentUsageSummary, // Pass usage to SSE
                 },
             );
 

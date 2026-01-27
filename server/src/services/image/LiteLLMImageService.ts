@@ -1,5 +1,5 @@
 import { Service } from 'typedi';
-import { ImageService } from './ImageService';
+import { ImageService, TokenUsageData } from './ImageService';
 
 @Service()
 export class LiteLLMImageService extends ImageService {
@@ -11,7 +11,7 @@ export class LiteLLMImageService extends ImageService {
         }
     }
 
-    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string> {
+    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -60,10 +60,20 @@ export class LiteLLMImageService extends ImageService {
             throw new Error(`No image data found in LiteLLM response.`);
         }
 
-        return base64Data;
+        let usage: TokenUsageData | undefined;
+        if (data.usage) {
+            usage = {
+                prompt: data.usage.prompt_tokens || 0,
+                completion: data.usage.completion_tokens || 0,
+                total: data.usage.total_tokens || 0,
+                model: this.modelId,
+            };
+        }
+
+        return { base64: base64Data, usage };
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string; description?: string }> {
+    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -114,6 +124,19 @@ export class LiteLLMImageService extends ImageService {
         }
 
         let newDescription = currentDescription;
+        let usage: TokenUsageData = {
+            prompt: 0,
+            completion: 0,
+            total: 0,
+            model: this.modelId
+        };
+
+        // Check internal usage from image edit (if available)
+        if (data.usage) {
+            usage.prompt = data.usage.prompt_tokens || 0;
+            usage.completion = data.usage.completion_tokens || 0;
+            usage.total = data.usage.total_tokens || 0;
+        }
 
         // If we have a current description, try to update it using LLM
         if (currentDescription) {
@@ -143,6 +166,11 @@ The image has been edited according to the instruction. Provide a new, descripti
                     if (content) {
                         newDescription = content.trim();
                         console.log(`Updated image description: ${newDescription}`);
+                        if (chatData.usage) {
+                            usage.prompt += chatData.usage.prompt_tokens || 0;
+                            usage.completion += chatData.usage.completion_tokens || 0;
+                            usage.total += chatData.usage.total_tokens || 0;
+                        }
                     }
                 } else {
                     console.warn(`Failed to update image description via LLM: status ${chatResponse.status}`);
@@ -152,10 +180,10 @@ The image has been edited according to the instruction. Provide a new, descripti
             }
         }
 
-        return { base64: newBase64Data, description: newDescription };
+        return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string> {
+    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -199,7 +227,16 @@ The image has been edited according to the instruction. Provide a new, descripti
         const content = data.choices?.[0]?.message?.content;
 
         if (content) {
-            return content;
+            let usage: TokenUsageData | undefined;
+            if (data.usage) {
+                usage = {
+                    prompt: data.usage.prompt_tokens || 0,
+                    completion: data.usage.completion_tokens || 0,
+                    total: data.usage.total_tokens || 0,
+                    model: this.modelId,
+                };
+            }
+            return { description: content, usage };
         }
         throw new Error('No description found in LiteLLM response');
     }

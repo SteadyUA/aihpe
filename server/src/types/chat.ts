@@ -50,7 +50,6 @@ export interface SessionData {
     status: SessionStatus;
     errorMessage?: string; // Persisted error message
     subject?: string;
-    tokenUsage?: TokenUsage;
     turns: Turn[];
 }
 
@@ -58,14 +57,10 @@ export interface TokenUsage {
     prompt: number;
     completion: number;
     total: number;
-    reasoning?: number;
-    cached?: number;
-}
-
-export interface ContextUsage {
-    total: number;
+    request: number;
     capacity: number;
 }
+
 
 export interface Turn {
     turn: number;
@@ -75,7 +70,6 @@ export interface Turn {
     response: string;
     provider: LlmProvider;
     fastMode: boolean;
-    tokenUsage: TokenUsage;
     selection?: { selector: string };
     attachment?: ChatAttachment;
     version: number;

@@ -1,9 +1,9 @@
 import { Service } from 'typedi';
-import { ImageService } from './ImageService';
+import { ImageService, TokenUsageData } from './ImageService';
 
 @Service()
 export class GoogleImageService extends ImageService {
-    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string> {
+    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -45,10 +45,20 @@ export class GoogleImageService extends ImageService {
             throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
         }
 
-        return base64Data;
+        let usage: TokenUsageData | undefined;
+        if (data.usageMetadata) {
+            usage = {
+                prompt: data.usageMetadata.promptTokenCount || 0,
+                completion: data.usageMetadata.candidatesTokenCount || 0,
+                total: data.usageMetadata.totalTokenCount || 0,
+                model: this.modelId,
+            };
+        }
+
+        return { base64: base64Data, usage };
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string; description?: string }> {
+    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -113,10 +123,24 @@ export class GoogleImageService extends ImageService {
             throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
         }
 
-        return { base64: newBase64Data, description: newDescription };
+        if (!newBase64Data) {
+            throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
+        }
+
+        let usage: TokenUsageData | undefined;
+        if (data.usageMetadata) {
+            usage = {
+                prompt: data.usageMetadata.promptTokenCount || 0,
+                completion: data.usageMetadata.candidatesTokenCount || 0,
+                total: data.usageMetadata.totalTokenCount || 0,
+                model: this.modelId,
+            };
+        }
+
+        return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string> {
+    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -154,7 +178,16 @@ export class GoogleImageService extends ImageService {
         const data = await response.json();
 
         if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            return data.candidates[0].content.parts[0].text;
+            let usage: TokenUsageData | undefined;
+            if (data.usageMetadata) {
+                usage = {
+                    prompt: data.usageMetadata.promptTokenCount || 0,
+                    completion: data.usageMetadata.candidatesTokenCount || 0,
+                    total: data.usageMetadata.totalTokenCount || 0,
+                    model: this.modelId,
+                };
+            }
+            return { description: data.candidates[0].content.parts[0].text, usage };
         }
 
         throw new Error('No description text found in response');

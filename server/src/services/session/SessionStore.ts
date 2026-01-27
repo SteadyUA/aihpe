@@ -7,7 +7,7 @@ import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
 import { getSessionsDir } from '../../utils/pathUtils';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'tokenUsage' | 'turns'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'turns'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -27,7 +27,6 @@ type PersistedSession = {
     status?: SessionStatus;
     errorMessage?: string;
     subject?: string;
-    tokenUsage?: TokenUsage;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -78,7 +77,7 @@ const VERSION_DIRNAME = 'versions';
 @Service()
 export class SessionStore {
     private readonly sessions = new Map<string, SessionData>();
-    private nextGroupIndex = Math.floor(Math.random() * 12);
+    private nextGroupIndex = Math.floor(Math.random() * 10);
 
     constructor() {
         ensureDirectory(SESSION_ROOT);
@@ -86,7 +85,7 @@ export class SessionStore {
 
     private getNextGroup(): number {
         const group = this.nextGroupIndex;
-        this.nextGroupIndex = (this.nextGroupIndex + 1) % 12;
+        this.nextGroupIndex = (this.nextGroupIndex + 1) % 10;
         return group;
     }
 
@@ -169,7 +168,6 @@ export class SessionStore {
             provider: source.provider,
             projectId: source.projectId,
             status: 'idle', // Clone starts idle? Or copy? Usually idle as it's a new session.
-            tokenUsage: { prompt: 0, completion: 0, total: 0 },
         };
 
         clearPersistedSessionData(targetId);
@@ -274,7 +272,6 @@ export class SessionStore {
             turns: source.turns
                 .filter(t => t.turn <= normalizedTurn)
                 .map(t => ({ ...t })),
-            tokenUsage: { prompt: 0, completion: 0, total: 0 },
         };
 
 
@@ -681,7 +678,6 @@ export class SessionStore {
             provider: update.provider ?? session.provider,
             fastMode: update.fastMode ?? session.fastMode,
             status: update.status ?? session.status,
-            tokenUsage: update.tokenUsage ?? session.tokenUsage,
         };
 
         this.sessions.set(sessionId, merged);
@@ -740,7 +736,6 @@ export class SessionStore {
                 status: parsed.status ?? 'idle',
                 errorMessage: parsed.errorMessage,
                 subject: parsed.subject,
-                tokenUsage: parsed.tokenUsage,
                 turns: [],
             };
 
@@ -832,7 +827,6 @@ export class SessionStore {
                 subject: session.subject,
                 fastMode: session.fastMode,
                 errorMessage: session.errorMessage,
-                tokenUsage: session.tokenUsage,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1147,7 +1141,6 @@ function cloneSession(session: SessionData): SessionData {
         errorMessage: session.errorMessage,
         subject: session.subject,
         fastMode: session.fastMode,
-        tokenUsage: session.tokenUsage ? { ...session.tokenUsage } : undefined,
         turns: session.turns.map(t => ({ ...t })),
     };
 }

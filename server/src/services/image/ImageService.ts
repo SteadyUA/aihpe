@@ -17,16 +17,28 @@ export interface ImageMetadata {
     isUsed?: boolean;
 }
 
+export interface TokenUsageData {
+    prompt: number;
+    completion: number;
+    total: number;
+    model: string;
+}
+
 @Service({ factory: [ImageServiceFactory, 'create'] })
 export abstract class ImageService {
     protected modelId = 'gemini-2.5-flash-image';
 
-    protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<string>;
-    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string }>;
-    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<string>;
+    protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
+    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;
+    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }>;
 
-    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string, abortSignal?: AbortSignal): Promise<string> {
-        const base64Data = await this.generateRaw(description, abortSignal);
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
+        const result = await this.generateRaw(description, abortSignal);
+        const base64Data = result.base64;
+
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
+        }
 
         const versionDir = this.resolveVersionDir(sessionId, version);
         this.ensureDirectory(versionDir);
@@ -62,7 +74,7 @@ export abstract class ImageService {
         return filename;
     }
 
-    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal?: AbortSignal): Promise<string> {
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
         // Resolve source file: check target version first (in case it was already modified in this turn)
         let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
         let sourcePath = path.join(sourceDir, filename);
@@ -87,6 +99,10 @@ export abstract class ImageService {
         const result = await this.editRaw(buffer, mimeType, prompt, currentDescription, abortSignal);
         const newBase64Data = result.base64;
         const newDescription = result.description;
+
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
+        }
 
         const versionDir = this.resolveVersionDir(sessionId, targetVersion);
         this.ensureDirectory(versionDir);
@@ -120,7 +136,7 @@ export abstract class ImageService {
         return filename;
     }
 
-    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal): Promise<string> {
+    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
         const versionDir = this.resolveVersionDir(sessionId, version);
         const filePath = path.join(versionDir, filename);
 
@@ -131,7 +147,13 @@ export abstract class ImageService {
         const buffer = fs.readFileSync(filePath);
         const mimeType = this.getMimeType(filename);
 
-        return this.describeRaw(buffer, mimeType, abortSignal);
+        const result = await this.describeRaw(buffer, mimeType, abortSignal);
+
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
+        }
+
+        return result.description;
     }
 
     async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {

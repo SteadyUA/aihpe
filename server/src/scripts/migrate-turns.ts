@@ -82,7 +82,6 @@ function migrateSessions() {
                         response: assistantMsg ? (typeof assistantMsg.content === 'string' ? assistantMsg.content : JSON.stringify(assistantMsg.content)) : '',
                         provider: sessionData.provider || 'openai',
                         fastMode: sessionData.fastMode || false,
-                        tokenUsage: { prompt: 0, completion: 0, total: 0 }, // No historical data
                         selection: userMsg?.selection,
                         attachment: userMsg?.attachment,
                         version: userMsg?.version || assistantMsg?.version || 0

@@ -49,7 +49,7 @@ export class ProjectService {
         return await this.projectRepository.findBy({ accountId });
     }
 
-    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole'>>, currentUserId?: number): Promise<Project> {
+    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole' | 'sessionIds'>>, currentUserId?: number): Promise<Project> {
         // Use getProject to handle access checks
         const project = await this.getProject(id, currentUserId);
         if (!project) {
@@ -63,6 +63,7 @@ export class ProjectService {
         if (updates.name !== undefined) project.name = updates.name;
         if (updates.activeSessionId !== undefined) project.activeSessionId = updates.activeSessionId;
         if (updates.modelRole !== undefined) project.modelRole = updates.modelRole;
+        if (updates.sessionIds !== undefined) project.sessionIds = updates.sessionIds;
 
         project.updatedAt = new Date(); // Explicit update or let UpdateDateColumn handle it? 
         // UpdateDateColumn updates on save, but setting it explicitly is fine too.

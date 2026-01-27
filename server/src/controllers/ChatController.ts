@@ -34,6 +34,8 @@ import { ChatService } from '../services/ChatService';
 import { ProjectService } from '../services/ProjectService';
 import { SseService } from '../services/SseService';
 import { SessionStore } from '../services/session/SessionStore';
+import { TokenUsageService } from '../services/TokenUsageService';
+import { LlmFactory } from '../services/llm/LlmFactory';
 
 import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
@@ -160,6 +162,11 @@ class UpdateProjectRequest {
     @IsOptional()
     @IsString()
     modelRole?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    sessionIds?: string[];
 }
 
 @Service()
@@ -171,6 +178,8 @@ export class ChatController {
         private readonly projectService: ProjectService,
         private readonly sseService: SseService,
         private readonly imageService: ImageService,
+        private readonly tokenUsageService: TokenUsageService,
+        private readonly llmFactory: LlmFactory,
     ) {
         console.log('ChatController initialized');
     }
@@ -250,6 +259,7 @@ export class ChatController {
         if (body.name !== undefined) updateData.name = body.name;
         if (body.activeSessionId !== undefined) updateData.activeSessionId = body.activeSessionId;
         if (body.modelRole !== undefined) updateData.modelRole = body.modelRole;
+        if (body.sessionIds !== undefined) updateData.sessionIds = body.sessionIds;
 
         // Since projectService.updateProject expects specific args or a partial object?
         // Let's check how it's called. 
@@ -600,12 +610,18 @@ export class ChatController {
 
     @Get('/api/sessions/:sessionId')
     @UseBefore(AuthMiddleware)
-    getSession(@Param('sessionId') sessionId: string) {
+    async getSession(@Param('sessionId') sessionId: string) {
         const snapshot =
             this.sessionStore.snapshot(sessionId) ??
             this.sessionStore.getOrCreate(sessionId);
 
         const history = this.sessionStore.getAllHistory(sessionId) || [];
+        const usageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
+        const client = this.llmFactory.getClient(snapshot.provider || 'openai');
+        const tokenUsage = {
+            ...usageSummary,
+            capacity: client.getCapacity()
+        };
 
         return {
             id: snapshot.id,
@@ -621,7 +637,7 @@ export class ChatController {
             errorMessage: snapshot.errorMessage,
             projectId: snapshot.projectId,
             subject: snapshot.subject,
-            tokenUsage: snapshot.tokenUsage,
+            tokenUsage,
         };
     }
 
@@ -991,7 +1007,8 @@ export class ChatController {
                     const generateDescription = req.body.generateDescription === 'true';
                     if (generateDescription) {
                         try {
-                            const description = await this.imageService.describeImage(sessionId, version, metadata.filename);
+                            const tracker = await this.createTokenTracker(sessionId);
+                            const description = await this.imageService.describeImage(sessionId, version, metadata.filename, undefined, tracker);
                             await this.imageService.updateImageDescription(sessionId, version, metadata.filename, description);
                             // Optionally update metadata object for response, though frontend refetches
                             metadata.description = description;
@@ -1080,7 +1097,8 @@ export class ChatController {
         }
 
         try {
-            const description = await this.imageService.describeImage(sessionId, version, filename);
+            const tracker = await this.createTokenTracker(sessionId);
+            const description = await this.imageService.describeImage(sessionId, version, filename, undefined, tracker);
             return res.status(200).json({ description });
         } catch (error: any) {
             console.error('Failed to generate image description', error);
@@ -1105,4 +1123,27 @@ export class ChatController {
         return this.imageService.listImages(sessionId, version);
     }
 
+    private async createTokenTracker(sessionId: string) {
+        // Fetch session to getKey info
+        const session = this.sessionStore.getOrCreate(sessionId);
+
+        return async (usage: { prompt: number, completion: number, total: number, model: string }) => {
+            const currentTurn = session.lastTurn || 0;
+            // Maybe increment turn? Or attach to current turn? 
+            // In ChatService we attached to the turn being generated. 
+            // Here we are outside of a chat turn generation flow (it's a manual upload or manual describe trigger).
+            // Attaching to currentTurn is probably safest.
+
+            await this.tokenUsageService.saveUsage({
+                projectId: session.projectId,
+                sessionId: sessionId,
+                agent: 'image',
+                turn: currentTurn,
+                model: usage.model,
+                prompt: usage.prompt,
+                completion: usage.completion,
+                total: usage.total,
+            });
+        };
+    }
 }
