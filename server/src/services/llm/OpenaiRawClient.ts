@@ -1,31 +1,40 @@
-import OpenAI from 'openai';
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
-import { GeneratePageRequest, GeneratePageResult, SessionFiles, LlmClient, SummarizeHistoryRequest } from './types';
+import { GeneratePageRequest, GeneratePageResult, SessionFiles, SummarizeHistoryRequest } from './types';
 import { ImageService } from '../image/ImageService';
 import { SessionStore } from '../session/SessionStore';
 import { ChatMessage } from '../../types/chat';
 
-export class OpenaiClient extends BaseLlmClient {
+export class OpenaiRawClient extends BaseLlmClient {
+    private baseUrl: string;
+    private apiKey: string;
+
     constructor(
         imageService: ImageService,
         sessionStore: SessionStore,
-        private readonly client: OpenAI,
+        url: string,
+        apiKey: string,
         private readonly modelId: string,
         maxContextTokens: number = 128000,
     ) {
         super(imageService, sessionStore, maxContextTokens);
+        // Ensure url doesn't end with slash if we append it, but usually standard is base url
+        // If the url is just the base (e.g. http://localhost:4000), we might need to append /chat/completions later
+        // But usually LITELLM_API_URL might be the full base. Standard openai is https://api.openai.com/v1
+        this.baseUrl = url.replace(/\/$/, '');
+        this.apiKey = apiKey;
     }
 
     async generatePage(request: GeneratePageRequest): Promise<GeneratePageResult> {
-        if (!this.client) {
-            console.warn('No OpenAI Client provided to OpenaiClient');
+        if (!this.baseUrl || !this.apiKey) {
+            console.warn('No OpenAI URL or API Key provided to OpenaiRawClient');
             return FALLBACK_RESPONSE;
         }
 
         const systemPrompt = this.buildSystemPrompt(
             request.rulesAndGoal,
             request.imageGenerationPref,
-            request.modelRole
+            request.modelRole,
+            request.summary
         );
 
         const initialMessages = this.buildMessages(request, systemPrompt);
@@ -44,20 +53,46 @@ export class OpenaiClient extends BaseLlmClient {
         try {
             while (steps < maxSteps && !stop) {
                 if (request.abortSignal?.aborted) {
-                    console.log('OpenaiClient: Generation aborted by signal');
+                    console.log('OpenaiRawClient: Generation aborted by signal');
                     break;
                 }
 
                 steps++;
-                console.log(`OpenaiClient: Step ${steps}/${maxSteps} started.`);
+                console.log(`OpenaiRawClient: Step ${steps}/${maxSteps} started.`);
 
-                const stream = await this.client.chat.completions.create({
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.apiKey}`
+                };
+
+                const body = {
                     model: this.modelId,
                     messages: currentMessages,
                     tools: tools,
                     stream: true,
                     stream_options: { include_usage: true }
-                }, { signal: request.abortSignal });
+                };
+
+                const response = await fetch(`${this.baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(body),
+                    signal: request.abortSignal
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+                }
+
+                if (!response.body) {
+                    throw new Error('No response body');
+                }
+
+                // Streaming handling
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
 
                 let stepText = '';
                 let toolCallsBuffer: Record<number, { id: string; name: string; arguments: string }> = {};
@@ -65,56 +100,84 @@ export class OpenaiClient extends BaseLlmClient {
                 let usageSent = false;
                 let currentStepUsage = { prompt: 0, completion: 0, total: 0 };
 
-                for await (const chunk of stream) {
-                    if (chunk.choices && chunk.choices.length > 0) {
-                        const delta = chunk.choices[0].delta;
-                        const finish = chunk.choices[0].finish_reason;
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
 
-                        if (delta.content) {
-                            stepText += delta.content;
-                            if (request.onProgress) {
-                                request.onProgress(delta.content);
-                            }
-                        }
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
 
-                        if (delta.tool_calls) {
-                            for (const toolCall of delta.tool_calls) {
-                                const index = toolCall.index;
-                                if (!toolCallsBuffer[index]) {
-                                    toolCallsBuffer[index] = { id: '', name: '', arguments: '' };
+                        // Keep the last partial line in the buffer
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            const trimmedLine = line.trim();
+                            if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;
+
+                            if (trimmedLine.startsWith('data: ')) {
+                                try {
+                                    const jsonStr = trimmedLine.slice(6);
+                                    const chunk = JSON.parse(jsonStr);
+
+                                    if (chunk.choices && chunk.choices.length > 0) {
+                                        const delta = chunk.choices[0].delta;
+                                        const finish = chunk.choices[0].finish_reason;
+
+                                        if (delta.content) {
+                                            stepText += delta.content;
+                                            if (request.onProgress) {
+                                                request.onProgress(delta.content);
+                                            }
+                                        }
+
+                                        if (delta.tool_calls) {
+                                            for (const toolCall of delta.tool_calls) {
+                                                const index = toolCall.index;
+                                                if (!toolCallsBuffer[index]) {
+                                                    toolCallsBuffer[index] = { id: '', name: '', arguments: '' };
+                                                }
+                                                if (toolCall.id) toolCallsBuffer[index].id = toolCall.id;
+                                                if (toolCall.function?.name) toolCallsBuffer[index].name = toolCall.function.name;
+                                                if (toolCall.function?.arguments) toolCallsBuffer[index].arguments += toolCall.function.arguments;
+                                            }
+                                        }
+
+                                        if (finish) {
+                                            finishReason = finish;
+                                        }
+                                    }
+
+                                    if (chunk.usage) {
+                                        currentStepUsage = {
+                                            prompt: chunk.usage.prompt_tokens,
+                                            completion: chunk.usage.completion_tokens,
+                                            total: chunk.usage.total_tokens
+                                        };
+                                        usageSent = true;
+                                    }
+                                } catch (e) {
+                                    console.warn('Error parsing stream line:', trimmedLine, e);
                                 }
-                                if (toolCall.id) toolCallsBuffer[index].id = toolCall.id;
-                                if (toolCall.function?.name) toolCallsBuffer[index].name = toolCall.function.name;
-                                if (toolCall.function?.arguments) toolCallsBuffer[index].arguments += toolCall.function.arguments;
                             }
                         }
-
-                        if (finish) {
-                            finishReason = finish;
-                        }
                     }
-
-                    if (chunk.usage) {
-                        currentStepUsage = {
-                            prompt: chunk.usage.prompt_tokens,
-                            completion: chunk.usage.completion_tokens,
-                            total: chunk.usage.total_tokens
-                        };
-                        usageSent = true;
-                    }
+                } finally {
+                    reader.releaseLock();
                 }
 
                 if (usageSent && request.trackRequestTokenUsage) {
                     await request.trackRequestTokenUsage({
                         ...currentStepUsage,
-                        model: this.modelId
+                        model: this.modelId,
+                        agent: this.agentName,
                     });
                 }
 
                 fullText += stepText;
 
                 // Construct Assistant Message
-                const assistantMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
+                const assistantMessage: any = {
                     role: 'assistant',
                     content: stepText || null,
                 };
@@ -128,7 +191,7 @@ export class OpenaiClient extends BaseLlmClient {
                     }
                 }));
 
-                // FIX: Filter out invalid tool calls (missing name) which can cause infinite loops
+                // Filter out invalid tool calls
                 const validToolCalls = toolCalls.filter(tc => tc.function.name && tc.function.name.trim() !== '');
 
                 if (validToolCalls.length > 0) {
@@ -138,10 +201,15 @@ export class OpenaiClient extends BaseLlmClient {
                 currentMessages.push(assistantMessage);
                 collectedNewMessages.push(assistantMessage);
 
-                console.log(`OpenaiClient: Step finished. FinishReason: ${finishReason}, ValidToolCalls: ${validToolCalls.length}`);
+                // litellm with gemini can call tools even if there is text in the response
+                // so we need to check if there is text in the response
+                if (stepText && stepText.trim().length > 0) {
+                    stop = true;
+                }
 
-                // FIX: Only prioritize tool execution if valid tool calls exist
-                if (validToolCalls.length > 0) {
+                console.log(`OpenaiRawClient: Step finished. FinishReason: ${finishReason}, ValidToolCalls: ${validToolCalls.length}`);
+
+                if (!stop && validToolCalls.length > 0) {
                     for (const toolCall of validToolCalls) {
                         const name = toolCall.function.name;
                         const argsString = toolCall.function.arguments;
@@ -171,7 +239,7 @@ export class OpenaiClient extends BaseLlmClient {
                             request.onProgress(`${label}\n`);
                         }
 
-                        const toolMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
+                        const toolMessage = {
                             role: 'tool',
                             tool_call_id: toolCall.id,
                             content: result
@@ -190,7 +258,7 @@ export class OpenaiClient extends BaseLlmClient {
                 let content: any = m.content;
 
                 if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
-                    // Convert to AiSDK-like structure to preserve tool calls in history
+                    // Convert to AiSDK-like structure
                     const parts: any[] = [];
                     if (typeof m.content === 'string' && m.content) {
                         parts.push({ type: 'text', text: m.content });
@@ -233,18 +301,74 @@ export class OpenaiClient extends BaseLlmClient {
             };
 
         } catch (error) {
-            console.error(`OpenaiClient Error:`, error);
+            console.error(`OpenaiRawClient Error:`, error);
             throw error;
         }
     }
 
-    private buildMessages(request: GeneratePageRequest, systemPrompt: string): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    async summarizeHistory(request: SummarizeHistoryRequest): Promise<string> {
+        const historyMessages = request.conversation.map(msg => {
+            if (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system') {
+                return { role: msg.role, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
+            }
+            return null;
+        }).filter(m => m !== null);
+
+        const summaryPrompt = this.getHistorySummaryPrompt(request.previousSummary);
+
+        const body = {
+            model: this.modelId,
+            messages: [
+                { role: 'system', content: summaryPrompt },
+                ...historyMessages,
+                { role: 'user', content: this.getHistorySummaryUserInstruction() }
+            ],
+            stream: false
+        };
+
+        try {
+            const response = await fetch(`${this.baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.apiKey}`
+                },
+                body: JSON.stringify(body),
+                signal: request.abortSignal
+            });
+
+            if (!response.ok) {
+                console.warn(`Summarize history failed with status ${response.status}`);
+                return 'Summary unavailable.';
+            }
+
+            const data = await response.json();
+
+            if (data.usage && request.trackRequestTokenUsage) {
+                await request.trackRequestTokenUsage({
+                    prompt: data.usage.prompt_tokens,
+                    completion: data.usage.completion_tokens,
+                    total: data.usage.total_tokens,
+                    model: this.modelId,
+                    agent: this.agentName,
+                });
+            }
+            if (data.choices && data.choices.length > 0 && data.choices[0].message) {
+                return data.choices[0].message.content || 'Summary failed.';
+            }
+            return 'Summary unavailable.';
+
+        } catch (e) {
+            console.error('Error summarizing history:', e);
+            return 'Summary unavailable.';
+        }
+    }
+
+
+    private buildMessages(request: GeneratePageRequest, systemPrompt: string): any[] {
+        const messages: any[] = [
             { role: 'system', content: systemPrompt }
         ];
-
-        // Convert request.conversation (ChatMessage[]) to OpenAI format
-        // ChatMessage: { role: 'user'|'assistant'|'system'|'tool', content: string|parts }
 
         for (const entry of request.conversation) {
             if (entry.role === 'system') {
@@ -252,13 +376,9 @@ export class OpenaiClient extends BaseLlmClient {
                 continue;
             }
 
-
-            // Simple mapping:
             if (entry.role === 'user') {
-                // Handle images
                 let content: any = entry.content;
                 if (entry.attachment) {
-                    // Add attachment
                     if (typeof content === 'string') {
                         content = [
                             { type: 'text', text: content },
@@ -269,7 +389,7 @@ export class OpenaiClient extends BaseLlmClient {
                 messages.push({ role: 'user', content });
             } else if (entry.role === 'assistant') {
                 if (Array.isArray(entry.content)) {
-                    // Reconstruct tool calls from array content
+                    // Reconstruct tool calls
                     // @ts-ignore
                     const toolCalls = entry.content.filter(c => c.type === 'tool-call').map(c => ({
                         id: c.toolCallId,
@@ -286,14 +406,12 @@ export class OpenaiClient extends BaseLlmClient {
                     messages.push({
                         role: 'assistant',
                         content: content,
-                        // @ts-ignore
                         tool_calls: toolCalls.length > 0 ? toolCalls : undefined
                     });
                 } else {
                     messages.push({ role: 'assistant', content: entry.content as string });
                 }
             } else if (entry.role === 'tool') {
-                // Reconstruct tool message from array content
                 if (Array.isArray(entry.content)) {
                     // @ts-ignore
                     const toolResultPart = entry.content.find(c => c.type === 'tool-result');
@@ -304,16 +422,10 @@ export class OpenaiClient extends BaseLlmClient {
                             content: toolResultPart.result
                         });
                     }
-                } else {
-                    // If it's a simple string, we can't reconstruct tool_call_id.
-                    // This case should ideally not happen if history is properly stored with tool_call_id.
-                    // For now, we'll skip or log a warning.
-                    console.warn('Skipping tool message in history due to missing tool_call_id:', entry);
                 }
             }
         }
 
-        // Add current instruction
         let userContent: any = request.fastMode ? `No plan\n${request.instructions}` : request.instructions;
         if (request.attachment) {
             userContent = [
@@ -326,38 +438,8 @@ export class OpenaiClient extends BaseLlmClient {
         return messages;
     }
 
-    async summarizeHistory(request: SummarizeHistoryRequest): Promise<string> {
-        const historyMessages = request.conversation.map(msg => {
-            if (msg.role === 'user') {
-                return { role: 'user' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
-            } else if (msg.role === 'assistant') {
-                return { role: 'assistant' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
-            } else if (msg.role === 'system') {
-                return { role: 'system' as const, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) };
-            }
-            return null;
-        }).filter(m => m !== null) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-
-        const summaryPrompt = this.getHistorySummaryPrompt();
-
-        const response = await this.client.chat.completions.create({
-            model: this.modelId,
-            messages: [
-                { role: 'system', content: summaryPrompt },
-                ...historyMessages,
-                { role: 'user', content: "Summarize the review conversation above. Focus on the changes made to the files and the user's feedback." }
-            ],
-            stream: false
-        }, { signal: request.abortSignal });
-
-        if (response.choices && response.choices.length > 0 && response.choices[0].message) {
-            return response.choices[0].message.content || 'Summary failed.';
-        }
-        return 'Summary unavailable.';
-    }
-
-    private getOpenAiTools(request: GeneratePageRequest): OpenAI.Chat.Completions.ChatCompletionTool[] {
-        const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+    private getOpenAiTools(request: GeneratePageRequest): any[] {
+        const tools: any[] = [
             {
                 type: 'function',
                 function: {
@@ -499,5 +581,4 @@ export class OpenaiClient extends BaseLlmClient {
 
         return tools;
     }
-
 }

@@ -50,6 +50,11 @@ export interface SessionData {
     status: SessionStatus;
     errorMessage?: string; // Persisted error message
     subject?: string;
+
+    // Conversation Summary Management
+    summary?: string; // Cumulative summary of "dropped" history
+    summaryTurn?: number; // The last turn included in the summary
+
     turns: Turn[];
 }
 

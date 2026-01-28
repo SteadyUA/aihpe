@@ -641,6 +641,16 @@ export class ChatController {
         };
     }
 
+    @Get('/api/sessions/:sessionId/summary')
+    @UseBefore(AuthMiddleware)
+    async getSessionSummary(@Param('sessionId') sessionId: string) {
+        const session = this.sessionStore.getOrCreate(sessionId);
+        return {
+            summary: session.summary,
+            summaryTurn: session.summaryTurn,
+        };
+    }
+
 
 
     @Delete('/api/sessions/:sessionId')

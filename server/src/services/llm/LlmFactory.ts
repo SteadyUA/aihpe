@@ -4,8 +4,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { LanguageModel } from 'ai';
 import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
-import { OpenaiClient } from './OpenaiClient';
-import OpenAI from 'openai';
+import { OpenaiRawClient } from './OpenaiRawClient';
 import { ImageService } from '../image/ImageService';
 import { SessionStore } from '../session/SessionStore';
 import { LlmProvider } from '../../types/chat';
@@ -49,17 +48,11 @@ export class LlmFactory {
         const litellmKey = process.env.LITELLM_API_KEY;
 
         if (litellmUrl && litellmKey) {
-            const openai = new OpenAI({
-                baseURL: litellmUrl,
-                apiKey: litellmKey,
-                defaultHeaders: {
-                    "x-litellm-no-telemetry": "true"
-                }
-            });
-            return new OpenaiClient(
+            return new OpenaiRawClient(
                 this.imageService,
                 this.sessionStore,
-                openai,
+                litellmUrl,
+                litellmKey,
                 modelId,
                 maxTokens
             );

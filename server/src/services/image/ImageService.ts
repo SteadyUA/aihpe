@@ -22,11 +22,13 @@ export interface TokenUsageData {
     completion: number;
     total: number;
     model: string;
+    agent: string;
 }
 
 @Service({ factory: [ImageServiceFactory, 'create'] })
 export abstract class ImageService {
     protected modelId = 'gemini-2.5-flash-image';
+    protected agentName = 'image';
 
     protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
     protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;

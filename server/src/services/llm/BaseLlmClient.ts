@@ -15,6 +15,7 @@ export const FALLBACK_RESPONSE: GeneratePageResult = {
 
 export abstract class BaseLlmClient implements LlmClient {
     protected targetVersion: number | undefined;
+    protected agentName: string = 'chat';
 
     constructor(
         protected readonly imageService: ImageService,
@@ -39,7 +40,8 @@ export abstract class BaseLlmClient implements LlmClient {
     protected buildSystemPrompt(
         rulesAndGoal?: string,
         imageGenerationPref?: string,
-        modelRole?: string
+        modelRole?: string,
+        summary?: string
     ): string {
         const roleDefinition = modelRole || 'You are an expert web developer';
 
@@ -105,6 +107,10 @@ Rules:
         }
 
 
+        if (summary) {
+            prompt += `\n\nCONTEXT - PREVIOUS CONVERSATION SUMMARY:\n"${summary}"\n(This summary covers older messages that are no longer in the context window. Use it to maintain continuity.)`;
+        }
+
         return prompt;
     }
 
@@ -120,12 +126,30 @@ Rules:
         return 'unknown error';
     }
 
-    protected getHistorySummaryPrompt(): string {
+    protected getHistorySummaryPrompt(previousSummary?: string): string {
+        if (previousSummary) {
+            return `You are a helpful assistant. You are provided with a "Previous Summary" of the conversation history and a list of "New Messages" that followed it.
+Your task is to generate a NEW, UPDATED summary that incorporates important information from the Previous Summary and the New Messages.
+Focus on WHAT was done and why, and what is currently being discussed.
+Keep the summary concise but informative (max 3-4 paragraphs).
+The summary will be used as a context for future steps.
+Respond ONLY with the updated summary text.
+
+Previous Summary:
+"""
+${previousSummary}
+"""`;
+        }
+
         return `You are a helpful assistant. Summarize the progress of the conversation and the reasoning behind the changes made so far. 
 Focus on WHAT was done and why, and what is currently being discussed. 
 Keep the summary concise but informative (max 2-3 paragraphs). 
 The summary will be used as a context for future steps. 
 Respond ONLY with the summary text.`;
+    }
+
+    protected getHistorySummaryUserInstruction(): string {
+        return "Summarize the review conversation above. Focus on the changes made to the files and the user's feedback.";
     }
 
     // Helper to create tool implementations since they need access to member functions and request context
@@ -261,7 +285,7 @@ Respond ONLY with the summary text.`;
             generate_image: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal, request.trackImageTokenUsage);
+                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal, request.trackRequestTokenUsage);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
                     return `Failed to generate image: ${error.message}`;
@@ -271,7 +295,7 @@ Respond ONLY with the summary text.`;
                 try {
                     const nextVersion = this.ensureNextVersion(request.sessionId);
                     // Use currentVersion as source, nextVersion as target
-                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal, request.trackImageTokenUsage);
+                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal, request.trackRequestTokenUsage);
                     return `Image edited successfully: ${savedFilename}`;
                 } catch (error: any) {
                     return `Failed to edit image: ${error.message}`;

@@ -7,7 +7,7 @@ import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
 import { getSessionsDir } from '../../utils/pathUtils';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'turns'>
+    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'turns' | 'summary' | 'summaryTurn'>
 >;
 
 type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
@@ -27,6 +27,8 @@ type PersistedSession = {
     status?: SessionStatus;
     errorMessage?: string;
     subject?: string;
+    summary?: string;
+    summaryTurn?: number;
 };
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -272,6 +274,8 @@ export class SessionStore {
             turns: source.turns
                 .filter(t => t.turn <= normalizedTurn)
                 .map(t => ({ ...t })),
+            summary: source.summary,
+            summaryTurn: source.summaryTurn,
         };
 
 
@@ -678,6 +682,8 @@ export class SessionStore {
             provider: update.provider ?? session.provider,
             fastMode: update.fastMode ?? session.fastMode,
             status: update.status ?? session.status,
+            summary: update.summary ?? session.summary,
+            summaryTurn: update.summaryTurn ?? session.summaryTurn,
         };
 
         this.sessions.set(sessionId, merged);
@@ -736,6 +742,8 @@ export class SessionStore {
                 status: parsed.status ?? 'idle',
                 errorMessage: parsed.errorMessage,
                 subject: parsed.subject,
+                summary: parsed.summary,
+                summaryTurn: parsed.summaryTurn,
                 turns: [],
             };
 
@@ -827,6 +835,8 @@ export class SessionStore {
                 subject: session.subject,
                 fastMode: session.fastMode,
                 errorMessage: session.errorMessage,
+                summary: session.summary,
+                summaryTurn: session.summaryTurn,
             };
             fs.writeFileSync(
                 path.join(sessionDir, 'session.json'),
@@ -1141,6 +1151,8 @@ function cloneSession(session: SessionData): SessionData {
         errorMessage: session.errorMessage,
         subject: session.subject,
         fastMode: session.fastMode,
+        summary: session.summary,
+        summaryTurn: session.summaryTurn,
         turns: session.turns.map(t => ({ ...t })),
     };
 }

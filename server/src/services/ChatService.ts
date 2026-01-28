@@ -149,7 +149,15 @@ export class ChatService {
         const controller = new AbortController();
         this.activeGenerations.set(sessionId, controller);
 
-        const currentSessionData = this.sessionStore.getOrCreate(sessionId);
+        let currentSessionData = this.sessionStore.getOrCreate(sessionId);
+
+        // 0. Generate history summary properly BEFORE generation
+        // This ensures the LLM gets the latest summary including the "dropped" messages
+        // We call it every turn, as it internally checks if there is work to do (idempotent).
+        if (await this.generateHistorySummary(sessionId, turn)) {
+            // Refresh session data to get the new summary
+            currentSessionData = this.sessionStore.getOrCreate(sessionId);
+        }
 
         // 2. Prepare conversation history for prompt
         // Use separate context list. Exclude the last message (just added) as it's the instruction.
@@ -231,27 +239,13 @@ export class ChatService {
                 fastMode: fastModeOverride ?? currentSessionData.fastMode,
                 subject: currentSessionData.subject,
                 abortSignal: controller.signal,
+                summary: currentSessionData.summary, // Pass cumulative summary
                 trackRequestTokenUsage: async (u) => {
                     if (controller.signal.aborted) return;
-                    const session = this.sessionStore.getOrCreate(sessionId);
                     await this.tokenUsageService.saveUsage({
-                        projectId: session.projectId,
+                        projectId: currentSessionData.projectId,
                         sessionId: sessionId,
-                        agent: 'chat',
-                        turn: turn,
-                        model: u.model,
-                        prompt: u.prompt,
-                        completion: u.completion,
-                        total: u.total,
-                    });
-                },
-                trackImageTokenUsage: async (u) => {
-                    if (controller.signal.aborted) return;
-                    const session = this.sessionStore.getOrCreate(sessionId);
-                    await this.tokenUsageService.saveUsage({
-                        projectId: session.projectId,
-                        sessionId: sessionId,
-                        agent: 'image',
+                        agent: u.agent,
                         turn: turn,
                         model: u.model,
                         prompt: u.prompt,
@@ -474,9 +468,12 @@ export class ChatService {
                 turns: [...finalSession.turns, turnRecord]
             });
 
+            // Summary generation moved to start of function
+            /* 
             if (turn > 0 && turn % 5 === 0) {
                 await this.generateHistorySummary(sessionId, turn);
             }
+            */
 
             this.notifyStatus(
                 sessionId,
@@ -511,6 +508,26 @@ export class ChatService {
                 description,
                 description,
             );
+
+            // Persist the failed turn
+            const finalSession = this.sessionStore.getOrCreate(sessionId);
+            const turnRecord: Turn = {
+                turn: turn,
+                beginTime: promptData.createdAt || new Date(),
+                endTime: new Date(),
+                request: promptData.message,
+                response: description, // Error as response
+                provider: finalSession.provider || 'openai', // Fallback
+                fastMode: finalSession.fastMode || false,
+                selection: promptData.selection,
+                attachment: promptData.attachment,
+                version: finalSession.currentVersion,
+            };
+
+            this.sessionStore.upsert(sessionId, {
+                turns: [...finalSession.turns, turnRecord]
+            });
+
             // We don't throw here as this is a background task now
             console.error('Generation failed:', error);
         } finally {
@@ -784,50 +801,81 @@ export class ChatService {
         return content;
     }
 
-    private async generateHistorySummary(sessionId: string, turn: number): Promise<void> {
-        this.notifyStatus(sessionId, 'generating', `summarization...`);
+    private async generateHistorySummary(sessionId: string, turn: number): Promise<boolean> {
 
         const session = this.sessionStore.getOrCreate(sessionId);
-        const client = this.llmFactory.getClient(session.provider);
 
         // Apply Step-based Window logic (sync with generateResponse)
-        const startTurn = calculateContextStartTurn(turn);
+        const contextStartTurn = calculateContextStartTurn(turn);
 
-        // Use context for summarization to include previous summaries/reasoning
-        const conversation = session.context.filter((msg) => (msg.turn ?? 0) >= startTurn);
+        // We want to summarize everything that is about to be dropped (or has been dropped) 
+        // and hasn't been summarized yet.
+        // The context window starts at contextStartTurn.
+        // So we summarize up to contextStartTurn - 1.
+        const targetSummaryEnd = contextStartTurn - 1;
+        const previousSummaryTurn = session.summaryTurn ?? 0;
+
+        if (targetSummaryEnd <= previousSummaryTurn) {
+            // console.log(`Skipping summarization for session ${sessionId}: target summary end ${targetSummaryEnd} <= previous summary turn ${previousSummaryTurn}`);
+            return false;
+        }
+
+        // Collect messages to summarize: turns (previousSummaryTurn + 1) to targetSummaryEnd
+        // We use context, but we might need to be careful if messages were already dropped from context?
+        // SessionData.context usually keeps growing? Or do we prune it?
+        // Current implementation: context is NOT pruned in upsert, just appended.
+        // But generateResponse slices it.
+        // So session.context has full history.
+
+        const messagesToSummarize = session.context.filter((msg) =>
+            (msg.turn ?? 0) > previousSummaryTurn && (msg.turn ?? 0) <= targetSummaryEnd
+        );
+
+        if (messagesToSummarize.length === 0 && !session.summary) {
+            console.log(`Skipping summarization for session ${sessionId}: no messages to summarize.`);
+            return false;
+        }
 
         const project = await this.projectService.getProject(session.projectId);
         const rulesAndGoal = project?.rulesAndGoal;
         const modelRole = project?.modelRole;
 
         try {
+            this.notifyStatus(sessionId, 'generating', `summarization...`);
+            const client = this.llmFactory.getClient(session.provider);
             const summary = await client.summarizeHistory({
                 sessionId,
-                conversation,
+                conversation: messagesToSummarize,
                 rulesAndGoal,
                 modelRole,
                 abortSignal: this.activeGenerations.get(sessionId)?.signal,
+                previousSummary: session.summary,
+                trackRequestTokenUsage: async (u) => {
+                    await this.tokenUsageService.saveUsage({
+                        projectId: session.projectId,
+                        sessionId: sessionId,
+                        agent: u.agent,
+                        turn: turn,
+                        model: u.model,
+                        prompt: u.prompt,
+                        completion: u.completion,
+                        total: u.total,
+                    });
+                }
             });
 
-            const summaryMessage: ChatMessage = {
-                role: 'system',
-                content: `History Summary (Turns ${startTurn}-${turn}):\n${summary}`,
-                createdAt: new Date(),
-                version: session.currentVersion,
-                turn: turn,
-            };
-
-            // Store summary ONLY in context
+            // Update session with new summary
             this.sessionStore.upsert(sessionId, {
-                context: [...session.context, summaryMessage],
+                summary: summary,
+                summaryTurn: targetSummaryEnd,
+                // We do NOT add a message to history/context anymore.
             });
 
-            console.log(`Generated history summary for session ${sessionId} at turn ${turn}`);
+            console.log(`Generated history summary for session ${sessionId} covering turns 1-${targetSummaryEnd}`);
         } catch (error) {
             console.error(`Failed to generate history summary for session ${sessionId}:`, error);
-            // We don't want to fail the main request if summarization fails, 
-            // but we already notified user about "summarization...", so maybe stay silent?
         }
+        return true;
     }
 
     getSession(sessionId: string): SessionData {

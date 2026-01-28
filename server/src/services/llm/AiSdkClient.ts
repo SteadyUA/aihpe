@@ -42,7 +42,8 @@ export class AiSdkClient extends BaseLlmClient {
         const systemPrompt = this.buildSystemPrompt(
             request.rulesAndGoal,
             request.imageGenerationPref,
-            request.modelRole
+            request.modelRole,
+            request.summary
         );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
@@ -233,6 +234,7 @@ export class AiSdkClient extends BaseLlmClient {
                         completion: usage.outputTokens || 0,
                         total: usage.totalTokens || 0,
                         model: this.modelId || 'unknown',
+                        agent: this.agentName,
                     });
                 }
 
@@ -366,14 +368,27 @@ export class AiSdkClient extends BaseLlmClient {
             return null;
         }).filter(m => m !== null) as ModelMessage[];
 
-        const summaryPrompt = this.getHistorySummaryPrompt();
+        const summaryPrompt = this.getHistorySummaryPrompt(request.previousSummary);
 
         const result = await generateText({
             model: this.model,
             system: summaryPrompt,
-            messages: historyMessages,
+            messages: [
+                ...historyMessages,
+                { role: 'user', content: this.getHistorySummaryUserInstruction() } as ModelMessage
+            ],
             abortSignal: request.abortSignal,
         });
+
+        if (result.usage && request.trackRequestTokenUsage) {
+            await request.trackRequestTokenUsage({
+                prompt: result.usage.inputTokens || 0,
+                completion: result.usage.outputTokens || 0,
+                total: result.usage.totalTokens || 0,
+                model: this.modelId || 'unknown',
+                agent: this.agentName,
+            });
+        }
 
         return result.text || 'Summary failed.';
     }

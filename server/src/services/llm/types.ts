@@ -19,8 +19,8 @@ export interface GeneratePageRequest {
     onPatch?: (patch: { subject?: string }) => void;
     modelRole?: string;
     abortSignal?: AbortSignal;
-    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string }) => Promise<void>;
-    trackImageTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string }) => Promise<void>;
+    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string, agent: string }) => Promise<void>;
+    summary?: string; // Cumulative summary of previous conversation history (that might be excluded from 'conversation' list)
 }
 
 export interface SummarizeHistoryRequest {
@@ -29,6 +29,8 @@ export interface SummarizeHistoryRequest {
     rulesAndGoal?: string;
     modelRole?: string;
     abortSignal?: AbortSignal;
+    previousSummary?: string; // The existing summary to be updated/extended
+    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string, agent: string }) => Promise<void>;
 }
 
 

@@ -52,6 +52,7 @@ export class GoogleImageService extends ImageService {
                 completion: data.usageMetadata.candidatesTokenCount || 0,
                 total: data.usageMetadata.totalTokenCount || 0,
                 model: this.modelId,
+                agent: this.agentName,
             };
         }
 
@@ -134,6 +135,7 @@ export class GoogleImageService extends ImageService {
                 completion: data.usageMetadata.candidatesTokenCount || 0,
                 total: data.usageMetadata.totalTokenCount || 0,
                 model: this.modelId,
+                agent: this.agentName,
             };
         }
 
@@ -185,6 +187,7 @@ export class GoogleImageService extends ImageService {
                     completion: data.usageMetadata.candidatesTokenCount || 0,
                     total: data.usageMetadata.totalTokenCount || 0,
                     model: this.modelId,
+                    agent: this.agentName,
                 };
             }
             return { description: data.candidates[0].content.parts[0].text, usage };

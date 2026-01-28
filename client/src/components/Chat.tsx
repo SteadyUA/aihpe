@@ -10,6 +10,8 @@ import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
 import { MessageData, LlmProvider, ChatAttachment, TokenUsage } from '../types';
+import { apiAuth } from '../utils/api';
+import { UiModal } from './UiModal';
 
 
 
@@ -365,6 +367,8 @@ interface ChatState {
     input: string;
     showUndoConfirmation: boolean;
     isUploading: boolean;
+    showSummaryModal: boolean;
+    summaryContent: string;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
@@ -384,6 +388,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             input: '',
             isUploading: false,
             showUndoConfirmation: false,
+            showSummaryModal: false,
+            summaryContent: '',
         };
         if (props.unsentInput) {
             this.state = {
@@ -681,6 +687,29 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.richInputRef.current?.focus(true);
     };
 
+    handleSessionTitleClick = async () => {
+        if (!this.props.sessionId) return;
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${this.props.sessionId}/summary`);
+            if (res.ok) {
+                const data = await res.json();
+                this.setState({
+                    summaryContent: data.summary || 'No summary available yet.',
+                    showSummaryModal: true
+                });
+            } else {
+                console.error('Failed to fetch summary');
+            }
+        } catch (e) {
+            console.error('Error fetching summary', e);
+        }
+    };
+
+    closeSummaryModal = () => {
+        this.setState({ showSummaryModal: false });
+    };
+
     render() {
         const {
             messages,
@@ -706,7 +735,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             sessionTitle,
             tokenUsage
         } = this.props;
-        const { input, isUploading, isLoading } = this.state;
+        const { input, isUploading, isLoading, showSummaryModal, summaryContent } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
 
         let effectiveActiveTurn = activeTurn;
@@ -748,7 +777,13 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         return (
             <div className={styles.chatPanel}>
                 <div className={styles.sessionHeader}>
-                    <span className={styles.sessionTitle}>{sessionTitle || '...'}</span>
+                    <span
+                        className={styles.sessionTitle}
+                        onClick={this.handleSessionTitleClick}
+                        title={sessionTitle}
+                    >
+                        {sessionTitle || '...'}
+                    </span>
                     {(tokenUsage && tokenUsage.capacity) && (
                         <div className={styles.tokenUsage}>
                             <span>Context: {(((tokenUsage.request || tokenUsage.total) / tokenUsage.capacity) * 100).toFixed(1)}%</span>
@@ -1048,6 +1083,19 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         </div>
                     </form>
                 )}
+
+                <UiModal
+                    isOpen={showSummaryModal}
+                    title={sessionTitle || 'Session Summary'}
+                    onClose={this.closeSummaryModal}
+                    actions={
+                        <UiButton onClick={this.closeSummaryModal}>Close</UiButton>
+                    }
+                >
+                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                        {summaryContent}
+                    </div>
+                </UiModal>
 
                 <ConfirmationModal
                     isOpen={this.state.showUndoConfirmation}

@@ -67,6 +67,7 @@ export class LiteLLMImageService extends ImageService {
                 completion: data.usage.completion_tokens || 0,
                 total: data.usage.total_tokens || 0,
                 model: this.modelId,
+                agent: this.agentName,
             };
         }
 
@@ -128,7 +129,8 @@ export class LiteLLMImageService extends ImageService {
             prompt: 0,
             completion: 0,
             total: 0,
-            model: this.modelId
+            model: this.modelId,
+            agent: this.agentName,
         };
 
         // Check internal usage from image edit (if available)
@@ -234,6 +236,7 @@ The image has been edited according to the instruction. Provide a new, descripti
                     completion: data.usage.completion_tokens || 0,
                     total: data.usage.total_tokens || 0,
                     model: this.modelId,
+                    agent: this.agentName,
                 };
             }
             return { description: content, usage };
