@@ -25,6 +25,7 @@ interface WorkSessionProps {
     isResizing?: boolean;
     sessionIds: string[];
     onSwitchSession: (id: string) => void;
+    onLoadMore?: (limit?: number, beforeTurn?: number) => Promise<any>;
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -49,15 +50,15 @@ export class WorkSession extends React.Component<WorkSessionProps> {
 
     getVersionForTurn = (turn: number): number => {
         const { session } = this.props;
-        // Look backwards from the end of history to find the first message with a version <= turn
+        // Look backwards from the end of history to find the first turn with a version <= turn
         // Just like the server does
-        const relevantHistory = session.messages.filter(m => m.turn <= turn);
-        if (relevantHistory.length === 0) return 0;
+        const relevantTurns = session.turns.filter(t => t.turn <= turn);
+        if (relevantTurns.length === 0) return 0;
 
-        for (let i = relevantHistory.length - 1; i >= 0; i--) {
-            const msg = relevantHistory[i];
-            if (typeof msg.version === 'number') {
-                return msg.version;
+        for (let i = relevantTurns.length - 1; i >= 0; i--) {
+            const t = relevantTurns[i];
+            if (typeof t.version === 'number') {
+                return t.version;
             }
         }
         return 0;
@@ -287,7 +288,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                 <Chat
                     ref={this.chatRef}
                     sessionId={session.id}
-                    messages={session.messages || []}
+                    turns={session.turns || []}
                     onSend={onSend}
                     status={session.status || 'idle'}
                     statusMessages={session.statusMessages || []}
@@ -318,6 +319,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
                     sessionTitle={session.subject}
                     tokenUsage={session.tokenUsage}
+                    onLoadMore={this.props.onLoadMore}
                 />
 
                 {this.props.onResizeStart && (

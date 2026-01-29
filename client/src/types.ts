@@ -49,7 +49,8 @@ export interface Session {
     projectId: string; // New field
     subject?: string;
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
-    messages: MessageData[];
+    // messages: MessageData[]; // DEPRECATED
+    turns: Turn[];
     statusMessages: string[];
     requestStartTime: number | null;
 
@@ -62,17 +63,28 @@ export interface Session {
     fastMode?: boolean;
     pendingRefreshTurn: number | null;
 
-
     // UI selections per session
     selection: string | null;
     attachment?: ChatAttachment;
     isPicking: boolean;
 
-
     unsent?: UnsentData;
 
     group: number;
     tokenUsage?: TokenUsage;
+}
+
+export interface Turn {
+    turn: number;
+    beginTime: string; // ISO Date
+    endTime?: string; // ISO Date, undefined/null = active/failed?
+    request: string;
+    response: string;
+    provider?: LlmProvider;
+    fastMode?: boolean;
+    selection?: { selector: string };
+    attachment?: ChatAttachment;
+    version?: number;
 }
 
 export interface TokenUsage {

@@ -9,7 +9,7 @@ import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-import { MessageData, LlmProvider, ChatAttachment, TokenUsage } from '../types';
+import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn } from '../types';
 import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
 
@@ -116,6 +116,8 @@ class Message extends React.Component<MessageProps> {
         if (msg.content !== nextMsg.content) return true;
         if (msg.role !== nextMsg.role) return true;
         if (msg.turn !== nextMsg.turn) return true;
+        if (msg.version !== nextMsg.version) return true;
+
         // Attachment check (reference or value if needed, simpler to ref check for now)
         if (msg.attachment !== nextMsg.attachment) return true;
         if (msg.selection?.selector !== nextMsg.selection?.selector) return true;
@@ -215,11 +217,11 @@ class Message extends React.Component<MessageProps> {
                             <span className={styles.blinkingCursor}>▋</span>
                         )
                     ) : (
-                        (msg.content || (!msg.attachment && isUser)) && (
+                        (msg.content || isAssistant || (!msg.attachment && isUser)) && (
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content, this.props.sessionIds)) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
                                 }}
                             />
                         )
@@ -325,7 +327,7 @@ class Message extends React.Component<MessageProps> {
 }
 
 interface ChatProps {
-    messages: MessageData[];
+    turns: Turn[];
     onSend: (text: string) => void;
     status: string;
     sessionId: string;
@@ -359,10 +361,12 @@ interface ChatProps {
     onFastModeChange?: (value: boolean) => void;
     sessionTitle?: string;
     tokenUsage?: TokenUsage;
+    onLoadMore?: (beforeTurn?: number) => Promise<any>;
 }
 
 interface ChatState {
     isLoading: boolean;
+    isLoadingMore: boolean;
     error: string | null;
     input: string;
     showUndoConfirmation: boolean;
@@ -376,7 +380,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     private messagesContainerRef = React.createRef<HTMLDivElement>();
     private messagesContentRef = React.createRef<HTMLDivElement>();
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
-    private isUserScroll = false;
     private richInputRef = React.createRef<RichInput>();
     private resizeObserver: ResizeObserver | null = null;
 
@@ -384,6 +387,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         super(props);
         this.state = {
             isLoading: false,
+            isLoadingMore: false,
             error: null,
             input: '',
             isUploading: false,
@@ -425,32 +429,23 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidUpdate(prevProps: ChatProps) {
-        const lastMsg = this.props.messages[this.props.messages.length - 1];
-        const prevLastMsg = prevProps.messages[prevProps.messages.length - 1];
-        const contentChanged = lastMsg?.content !== prevLastMsg?.content;
-
-        if (
-            prevProps.messages.length !== this.props.messages.length ||
-            prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
-            prevProps.status !== this.props.status ||
-            contentChanged
-        ) {
-            const isAtBottom = this.props.activeTurn === null || this.props.activeTurn === undefined;
-            const isLatestTurnActive = lastMsg && typeof lastMsg.turn === 'number' && this.props.activeTurn === lastMsg.turn;
-
-            if (isAtBottom || isLatestTurnActive) {
-                this.scrollToBottom();
+        // If turn count increased, scroll to bottom
+        if (this.props.turns.length > prevProps.turns.length) {
+            this.scrollToBottom();
+        } else if (this.props.turns.length > 0 && prevProps.turns.length > 0) {
+            // If turn was completed in-place, scroll to bottom
+            const lastTurn = this.props.turns[this.props.turns.length - 1];
+            const prevLastTurn = prevProps.turns[prevProps.turns.length - 1];
+            if (lastTurn && prevLastTurn && lastTurn.turn === prevLastTurn.turn) {
+                if (!prevLastTurn.endTime && lastTurn.endTime) {
+                    this.scrollToBottom();
+                }
             }
         }
 
-        if (prevProps.activeTurn !== this.props.activeTurn) {
-            if (this.isUserScroll) {
-                this.isUserScroll = false;
-            } else if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
-                this.scrollToTurn(this.props.activeTurn);
-            } else {
-                this.scrollToBottom();
-            }
+        // Handle auto-scroll to active turn if it changed
+        if (this.props.activeTurn !== prevProps.activeTurn && this.props.activeTurn != null) {
+            this.scrollToTurn(this.props.activeTurn);
         }
 
         if (prevProps.unsentInput !== this.props.unsentInput && this.props.unsentInput !== undefined) {
@@ -512,6 +507,31 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }, 100);
     };
+
+    handleScroll = async () => {
+        const el = this.messagesContainerRef.current;
+        if (!el || this.state.isLoadingMore || !this.props.onLoadMore) return;
+
+        // Check if scrolled to top (with small threshold)
+        if (el.scrollTop < 20) {
+            const firstTurn = this.props.turns[0];
+            if (!firstTurn) return;
+
+            this.setState({ isLoadingMore: true });
+
+            try {
+                // Load more before the first turn
+                const result = await this.props.onLoadMore(firstTurn.turn);
+
+                if (result && result.count > 0) {
+                    // Scroll restoration would ideally happen here/componentDidUpdate
+                }
+            } finally {
+                this.setState({ isLoadingMore: false });
+            }
+        }
+    };
+
 
     public submit = (text: string) => {
         if (this.props.disabled) return;
@@ -652,7 +672,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     };
 
     handlePreviewTurn = (turn: number) => {
-        this.isUserScroll = true;
         if (this.props.onPreviewTurn) {
             this.props.onPreviewTurn(turn);
         }
@@ -712,7 +731,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     render() {
         const {
-            messages,
+            turns,
             status,
             statusMessages,
             onPickElement,
@@ -738,17 +757,35 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         const { input, isUploading, isLoading, showSummaryModal, summaryContent } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
 
+        // Flatten turns to messages for rendering
+        const messages: MessageData[] = [];
+        turns.forEach(t => {
+            messages.push({
+                role: 'user',
+                content: t.request,
+                turn: t.turn,
+                createdAt: t.beginTime,
+                selection: t.selection,
+                attachment: t.attachment
+            });
+            if (t.response || t.endTime) {
+                messages.push({
+                    role: 'assistant',
+                    content: t.response,
+                    turn: t.turn,
+                    version: t.version
+                });
+            }
+        });
+
         let effectiveActiveTurn = activeTurn;
         if (
             effectiveActiveTurn === null ||
             effectiveActiveTurn === undefined
         ) {
-            // Find last message with a turn
-            for (let i = messages.length - 1; i >= 0; i--) {
-                if (typeof messages[i].turn === 'number') {
-                    effectiveActiveTurn = messages[i].turn;
-                    break;
-                }
+            // Find last turn
+            if (turns.length > 0) {
+                effectiveActiveTurn = turns[turns.length - 1].turn;
             }
         }
 
@@ -764,11 +801,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
 
         let latestTurn = 0;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            if (typeof messages[i].turn === 'number') {
-                latestTurn = messages[i].turn!;
-                break;
-            }
+        if (turns.length > 0) {
+            latestTurn = turns[turns.length - 1].turn;
         }
 
         const isPendingActive = latestTurn === effectiveActiveTurn;

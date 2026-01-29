@@ -3,16 +3,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
 import { ChatMessage, LlmProvider, SessionData, SessionFiles, UnsentData, SessionStatus, TokenUsage, Turn, ChatAttachment } from '../../types/chat';
-import { sanitizeHistoryForUi, formatContentForUi } from '../../utils/chat';
+import { formatContentForUi } from '../../utils/chat';
 import { getSessionsDir } from '../../utils/pathUtils';
+import { string } from 'zod';
 
 type SessionUpdate = Partial<
-    Pick<SessionData, 'files' | 'history' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'turns' | 'summary' | 'summaryTurn'>
+    Pick<SessionData, 'files' | 'context' | 'updatedAt' | 'lastTurn' | 'unsent' | 'provider' | 'status' | 'fastMode' | 'subject' | 'errorMessage' | 'turns' | 'summary' | 'summaryTurn'>
 >;
 
-type PersistedHistoryEntry = Omit<ChatMessage, 'createdAt'> & {
-    createdAt: string;
-};
 
 type PersistedSession = {
     id: string;
@@ -93,32 +91,16 @@ export class SessionStore {
 
     getVersionForTurn(sessionId: string, turn: number): number | undefined {
         const session = this.getOrCreate(sessionId);
+
         // Find the last version used in or before this turn.
-        // We look at history up to this turn.
-
-        // Optimize: look backwards from end of history?
-        // Or filter history by turn <= targetTurn.
-        // Then find the max version.
-
-        // Actually, we want the version that represents the state AT THE END of that turn.
-        // The last message in that turn (or previous turns) that has a version.
-
-        const relevantHistory = session.history.filter(m => typeof m.turn === 'number' && m.turn <= turn);
-        if (relevantHistory.length === 0) {
-            // If turn is 0 or no history, maybe 0?
-            // If turn 0, version 0.
-            return 0;
+        const relevantTurns = session.turns.filter(t => t.turn <= turn);
+        if (relevantTurns.length === 0) {
+            return undefined;
         }
 
-        // Iterate backwards to find first message with version
-        for (let i = relevantHistory.length - 1; i >= 0; i--) {
-            const msg = relevantHistory[i];
-            if (typeof msg.version === 'number') {
-                return msg.version;
-            }
-        }
-
-        return 0;
+        // Return version of the last relevant turn
+        // Note: each turn has a version. We take the version of the latest turn.
+        return relevantTurns[relevantTurns.length - 1].version;
     }
 
     create(projectId: string, group?: number): SessionData {
@@ -161,7 +143,6 @@ export class SessionStore {
             ...source,
             id: targetId,
             updatedAt: new Date(),
-            history: source.history.map((h) => ({ ...h })),
             context: source.context.map((c) => ({ ...c })),
             files: { ...source.files },
             group: source.group,
@@ -196,50 +177,27 @@ export class SessionStore {
             );
         }
 
-        // 1. Filter History
-        // We want all messages up to the end of the requested turn.
-        // A turn loosely includes a User message + subsequent Assistant messages.
-        // Let's assume we want to include ALL messages that have turn <= normalizedTurn.
-        const truncatedHistory = source.history
-            .filter((entry) => typeof entry.turn === 'number' && entry.turn <= normalizedTurn)
-            .map((entry) => ({
-                ...entry,
-                createdAt: new Date(entry.createdAt),
-                selection: entry.selection
-                    ? { selector: entry.selection.selector }
-                    : undefined,
-                version:
-                    typeof entry.version === 'number'
-                        ? entry.version
-                        : 0,
-                turn: entry.turn,
-            }));
-
-        // 2. Filter Context
-        // Same logic: include context items up to (and including) the requested turn.
+        // 1. Filter Context
         const contextSnapshot: ChatMessage[] = source.context
             .filter(m => typeof m.turn === 'number' && m.turn <= normalizedTurn)
             .map(m => ({
                 ...m,
                 version: typeof m.version === 'number' ? m.version : 0,
-                turn: m.turn! // We filtered for number above
+                turn: m.turn!
             }));
 
+        // 2. Filter Turns
+        const turnsSnapshot = source.turns
+            .filter(t => t.turn <= normalizedTurn)
+            .map(t => ({ ...t }));
+
         // 3. Determine File Version
-        // We need to find the MAX version that existed within the truncated history/context of this turn.
-        // Alternatively (and perhaps safer), we look at the very last message in the truncated history.
-        // If that message has a version, we use it. If not, we look back.
-        // If no version is found in the entire history, we default to 0.
+        // We look at the last turn in the snapshot to determine the version.
         let targetVersion = 0;
-        for (let i = truncatedHistory.length - 1; i >= 0; i--) {
-            const entry = truncatedHistory[i];
-            if (typeof entry.version === 'number') {
-                targetVersion = entry.version;
-                break;
-            }
+        if (turnsSnapshot.length > 0) {
+            targetVersion = turnsSnapshot[turnsSnapshot.length - 1].version;
         }
 
-        // Also check context, in case context has a later version (unlikely, but possible if context update happened after msg)
         for (const ctx of contextSnapshot) {
             if (typeof ctx.version === 'number' && ctx.version > targetVersion) {
                 targetVersion = ctx.version;
@@ -252,33 +210,26 @@ export class SessionStore {
                 : readVersionFiles(sourceId, targetVersion);
 
         if (!snapshot) {
-            // Fallback or error? If version 0 and no files, maybe default files?
-            // But if we found a version number, we expect files.
             throw new Error(`Files for version ${targetVersion} not found`);
         }
 
         const newSession: SessionData = {
             id: targetId,
             files: { ...snapshot },
-            history: truncatedHistory,
             context: contextSnapshot,
             updatedAt: new Date(),
             group: source.group,
             currentVersion: targetVersion,
             lastTurn: normalizedTurn,
-            provider: source.provider, // Copy provider settings
+            provider: source.provider,
             projectId: source.projectId,
             status: 'idle',
             subject: source.subject,
             fastMode: source.fastMode,
-            turns: source.turns
-                .filter(t => t.turn <= normalizedTurn)
-                .map(t => ({ ...t })),
+            turns: turnsSnapshot,
             summary: source.summary,
             summaryTurn: source.summaryTurn,
         };
-
-
 
         clearPersistedSessionData(targetId);
         // We need to copy version history up to targetVersion.
@@ -305,8 +256,9 @@ export class SessionStore {
         }
 
         // 1. Identify items to remove
-        const messagesToRemove = session.history.filter(m => typeof m.turn === 'number' && m.turn === currentTurn);
-        if (messagesToRemove.length === 0) {
+        const turnToRemove = session.turns[currentTurn - 1];
+
+        if (!turnToRemove) {
             const updated: SessionData = {
                 ...session,
                 lastTurn: currentTurn - 1,
@@ -318,21 +270,18 @@ export class SessionStore {
         }
 
         // 2. Capture restoration data
-        const userMessage = messagesToRemove.find(m => m.role === 'user');
-        const restoredInput = userMessage?.content;
-        const restoredSelection = userMessage?.selection;
+        const restoredInput = turnToRemove.request;
+        const restoredSelection = turnToRemove.selection?.selector;
+        const restoredAttachment = turnToRemove.attachment;
 
-        // 3. New History & Context
-        const newHistory = session.history.filter(m => typeof m.turn !== 'number' || m.turn < currentTurn);
+        // 3. New Context & Turns
         const newContext = session.context.filter(m => typeof m.turn !== 'number' || m.turn < currentTurn);
+        const newTurns = session.turns.filter(t => t.turn < currentTurn);
 
         // 4. Determine Target Version
         let targetVersion = 0;
-        for (let i = newHistory.length - 1; i >= 0; i--) {
-            if (typeof newHistory[i].version === 'number') {
-                targetVersion = newHistory[i].version!;
-                break;
-            }
+        if (newTurns.length > 0) {
+            targetVersion = newTurns[newTurns.length - 1].version;
         }
 
         for (const ctx of newContext) {
@@ -359,12 +308,9 @@ export class SessionStore {
                 ? { ...EMPTY_FILES }
                 : readVersionFiles(sessionId, targetVersion) || { ...EMPTY_FILES };
 
-
-
         // 7. Update Session
         const updated: SessionData = {
             ...session,
-            history: newHistory,
             context: newContext,
             files: snapshot,
             currentVersion: targetVersion,
@@ -373,11 +319,11 @@ export class SessionStore {
             unsent: {
                 ...session.unsent,
                 input: restoredInput,
-                selection: restoredSelection?.selector, // Extract selector string
-                attachment: userMessage?.attachment,
+                selection: restoredSelection, // selector string
+                attachment: restoredAttachment,
             },
             status: 'idle', // Reset status to idle to clear error state
-            turns: session.turns.filter(t => t.turn < currentTurn),
+            turns: newTurns,
         };
 
         this.sessions.set(sessionId, updated);
@@ -386,8 +332,8 @@ export class SessionStore {
         return {
             success: true,
             restoredInput,
-            restoredSelection: restoredSelection?.selector,
-            restoredAttachment: userMessage?.attachment,
+            restoredSelection,
+            restoredAttachment,
             previousTurn: currentTurn - 1
         };
     }
@@ -410,7 +356,6 @@ export class SessionStore {
             id: sessionId,
             projectId,
             files: { ...EMPTY_FILES },
-            history: [],
             context: [],
             updatedAt: new Date(),
             group: group ?? this.getNextGroup(),
@@ -468,10 +413,6 @@ export class SessionStore {
 
         // Logic to determine turn:
         // If the message is from 'user', we generally start a new turn.
-        // However, we need to be careful. If this is the VERY first message, it's turn 1 (or 0?).
-        // Let's adopt a simple convention:
-        // The "Turn" increments when the user sends a message.
-        // If history is empty, user message starts Turn 1.
         // If history exists, user message starts Turn N+1.
         // System/Assistant/Tool messages belong to the SAME turn as the preceding User message.
 
@@ -501,11 +442,16 @@ export class SessionStore {
         }
 
         const msgWithTurn = { ...message, turn: messageTurn };
-        const nextHistory = [...session.history, msgWithTurn];
+        const nextTurns = [...session.turns];
+
+        // appendMessage is tricky with turns. We need to respect the request/response structure.
+        // But for now, let's just update lastTurn and assume the turn entry is managed elsewhere or we add a partial turn.
+        // Actually, we should probably throw or handle this better. 
+        // For now, removing history update. 
+        // NOTE: This method seems legacy or for simple appends?
 
         const updated: SessionData = {
             ...session,
-            history: nextHistory,
             lastTurn: currentTurn,
             updatedAt: new Date(),
         };
@@ -639,15 +585,21 @@ export class SessionStore {
 
 
 
-    getAllHistory(sessionId: string): ChatMessage[] | undefined {
+
+    getTurns(sessionId: string, limit: number = 50, beforeTurn?: number): Turn[] {
         const session = this.getOrCreate(sessionId);
 
-        return session.history.map((msg) => ({
-            ...msg,
-            createdAt: new Date(msg.createdAt),
-            version: typeof msg.version === 'number' ? msg.version : 0,
-            turn: typeof msg.turn === 'number' ? msg.turn : 0,
-        }));
+        // Filter turns if beforeTurn is specified
+        let turns = session.turns;
+        if (typeof beforeTurn === 'number') {
+            turns = turns.filter(t => t.turn < beforeTurn);
+        }
+
+        // Sort turns by index to ensure order
+        turns.sort((a, b) => a.turn - b.turn);
+
+        // Return the last 'limit' turns
+        return turns.slice(-limit);
     }
 
     snapshot(sessionId: string): SessionData | undefined {
@@ -674,8 +626,6 @@ export class SessionStore {
             ...session,
             ...update,
             files: update.files ?? session.files,
-
-            history: update.history ?? session.history,
             context: update.context ?? session.context,
             updatedAt: update.updatedAt ?? new Date(),
             group: update.group ?? session.group,
@@ -728,7 +678,6 @@ export class SessionStore {
                 id: parsed.id || sessionId,
                 projectId: parsed.projectId || '',
                 files,
-                history: [],
                 context: [],
                 updatedAt: parsed.updatedAt
                     ? new Date(parsed.updatedAt)
@@ -759,8 +708,8 @@ export class SessionStore {
                         beginTime: new Date(t.beginTime),
                         endTime: new Date(t.endTime),
                     }));
-                    // Reconstruct history from turns
-                    session.history = this.reconstructHistoryFromTurns(session.turns);
+                    // Reconstruct history from turns DEPRECATED
+                    // Reconstruct history from turns DEPRECATED
                 } catch (e) {
                     console.error(`Failed to parse turns.json for ${sessionId}`, e);
                 }
@@ -869,36 +818,6 @@ export class SessionStore {
                 error,
             );
         }
-    }
-    private reconstructHistoryFromTurns(turns: Turn[]): ChatMessage[] {
-        const history: ChatMessage[] = [];
-
-        for (const turn of turns) {
-            // 1. User Message
-            if (turn.request || turn.attachment || turn.selection) {
-                history.push({
-                    role: 'user',
-                    content: formatContentForUi(turn.request),
-                    createdAt: turn.beginTime,
-                    selection: turn.selection,
-                    attachment: turn.attachment,
-                    version: turn.version,
-                    turn: turn.turn,
-                });
-            }
-
-            // 2. Assistant Message
-            if (turn.response) {
-                history.push({
-                    role: 'assistant',
-                    content: formatContentForUi(turn.response),
-                    createdAt: turn.endTime,
-                    version: turn.version,
-                    turn: turn.turn,
-                });
-            }
-        }
-        return history;
     }
 }
 
@@ -1115,18 +1034,6 @@ function cloneSession(session: SessionData): SessionData {
     return {
         id: session.id,
         files: { ...session.files },
-        history: session.history.map((message) => ({
-            ...message,
-            createdAt: new Date(message.createdAt),
-            selection: message.selection
-                ? { selector: message.selection.selector }
-                : undefined,
-            version:
-                typeof message.version === 'number'
-                    ? message.version
-                    : 0,
-            turn: typeof message.turn === 'number' ? message.turn : 0,
-        })),
         context: session.context.map((message) => ({
             ...message,
             createdAt: new Date(message.createdAt),

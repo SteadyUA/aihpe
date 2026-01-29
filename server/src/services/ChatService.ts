@@ -102,9 +102,23 @@ export class ChatService {
             turn: newTurn,
         };
 
+        // Create incomplete Turn
+        const newTurnEntry: Turn = {
+            turn: newTurn,
+            beginTime: now,
+            // endTime: undefined, // Incomplete
+            request: userContentForHistory,
+            response: '',
+            provider: provider ?? currentSessionData.provider ?? 'openai',
+            fastMode: fastMode ?? currentSessionData.fastMode ?? false,
+            selection,
+            attachment: normalizedAttachment,
+            version: currentSessionData.currentVersion,
+        };
+
         this.sessionStore.upsert(sessionId, {
-            history: [...currentSessionData.history, userMessageEntry],
             context: [...currentSessionData.context, contextEntry],
+            turns: [...currentSessionData.turns, newTurnEntry],
             lastTurn: newTurn, // Update lastTurn
             updatedAt: now,
             fastMode: fastMode ?? currentSessionData.fastMode, // Persist fastMode if provided
@@ -393,13 +407,8 @@ export class ChatService {
                     const shouldAddToHistory = msg.role === 'user' || uiContent.trim().length > 0;
 
                     // Update lists
-                    let newHistory = sessionParams.history;
-                    if (shouldAddToHistory) {
-                        newHistory = [...newHistory, { ...cleanMsg, content: uiContent }];
-                    }
 
                     this.sessionStore.upsert(sessionId, {
-                        history: newHistory,
                         context: [...sessionParams.context, cleanMsg],
                     });
                 }
@@ -450,22 +459,20 @@ export class ChatService {
 
             const finalSession = this.sessionStore.getOrCreate(sessionId);
 
-            // Use promptData directly for Turn record, avoiding history lookup
-            const turnRecord: Turn = {
-                turn: updated.lastTurn ?? 0,
-                beginTime: promptData.createdAt || new Date(), // Use passed createdAt or fallback
-                endTime: new Date(),
-                request: promptData.message, // Use promptData directly
-                response: generation.summary || '',
-                provider: finalSession.provider || 'openai',
-                fastMode: finalSession.fastMode || false,
-                selection: promptData.selection,
-                attachment: promptData.attachment,
-                version: updated.currentVersion,
-            };
+            // Update the existing turn with response, endTime and version
+            const updatedTurns = [...finalSession.turns];
+            const turnIndexFull = turn - 1; // turn is passed from addUserMessage
+            if (updatedTurns[turnIndexFull]) {
+                updatedTurns[turnIndexFull] = {
+                    ...updatedTurns[turnIndexFull],
+                    endTime: new Date(),
+                    response: generation.summary || '',
+                    version: updated.currentVersion,
+                };
+            }
 
             this.sessionStore.upsert(sessionId, {
-                turns: [...finalSession.turns, turnRecord]
+                turns: updatedTurns
             });
 
             // Summary generation moved to start of function
@@ -509,23 +516,22 @@ export class ChatService {
                 description,
             );
 
-            // Persist the failed turn
-            const finalSession = this.sessionStore.getOrCreate(sessionId);
-            const turnRecord: Turn = {
-                turn: turn,
-                beginTime: promptData.createdAt || new Date(),
-                endTime: new Date(),
-                request: promptData.message,
-                response: description, // Error as response
-                provider: finalSession.provider || 'openai', // Fallback
-                fastMode: finalSession.fastMode || false,
-                selection: promptData.selection,
-                attachment: promptData.attachment,
-                version: finalSession.currentVersion,
-            };
+            // Update the failed turn
+            const finalSessionError = this.sessionStore.getOrCreate(sessionId);
+            const updatedTurnsError = [...finalSessionError.turns];
+            const errorTurnIndex = turn - 1;
+
+            if (updatedTurnsError[errorTurnIndex]) {
+                updatedTurnsError[errorTurnIndex] = {
+                    ...updatedTurnsError[errorTurnIndex],
+                    endTime: new Date(),
+                    response: description,
+                    version: finalSessionError.currentVersion,
+                };
+            }
 
             this.sessionStore.upsert(sessionId, {
-                turns: [...finalSession.turns, turnRecord]
+                turns: updatedTurnsError
             });
 
             // We don't throw here as this is a background task now
@@ -772,11 +778,6 @@ export class ChatService {
         };
 
         // Filter logic for HISTORY (UI)
-        const shouldAddToHistory = uiContent.trim().length > 0;
-        let newHistory = session.history;
-        if (shouldAddToHistory) {
-            newHistory = [...newHistory, { ...assistantMessage, content: uiContent }];
-        }
 
         // Context logic
         let newContext = session.context;
@@ -785,7 +786,6 @@ export class ChatService {
         }
 
         this.sessionStore.upsert(sessionId, {
-            history: newHistory,
             context: newContext,
         });
     }

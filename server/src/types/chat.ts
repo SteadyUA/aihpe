@@ -37,7 +37,6 @@ export interface SessionData {
     id: string;
     projectId: string;
     files: SessionFiles;
-    history: ChatMessage[];
     context: ChatMessage[];
     updatedAt: Date;
     group: number;
@@ -70,7 +69,7 @@ export interface TokenUsage {
 export interface Turn {
     turn: number;
     beginTime: Date;
-    endTime: Date;
+    endTime?: Date;
     request: string;
     response: string;
     provider: LlmProvider;

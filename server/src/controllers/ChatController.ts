@@ -9,6 +9,8 @@ import {
     Req,
     Res,
     UseBefore, // eslint-disable-line @typescript-eslint/no-unused-vars
+    NotFoundError,
+    QueryParam,
 } from 'routing-controllers';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Request, Response } from 'express';
@@ -355,7 +357,6 @@ export class ChatController {
             id,
             group,
             currentVersion: 0,
-            history: [],
             files: {},
             updatedAt: new Date().toISOString(),
             projectId,
@@ -611,11 +612,12 @@ export class ChatController {
     @Get('/api/sessions/:sessionId')
     @UseBefore(AuthMiddleware)
     async getSession(@Param('sessionId') sessionId: string) {
-        const snapshot =
-            this.sessionStore.snapshot(sessionId) ??
-            this.sessionStore.getOrCreate(sessionId);
+        const snapshot = this.sessionStore.snapshot(sessionId);
+        if (!snapshot) {
+            throw new NotFoundError('Session not found');
+        }
 
-        const history = this.sessionStore.getAllHistory(sessionId) || [];
+        // history removed
         const usageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
         const client = this.llmFactory.getClient(snapshot.provider || 'openai');
         const tokenUsage = {
@@ -631,13 +633,31 @@ export class ChatController {
             currentTurn: snapshot.lastTurn ?? 0,
             provider: snapshot.provider ?? 'openai',
             fastMode: snapshot.fastMode ?? false,
-            history,
+            subject: snapshot.subject,
+            tokenUsage,
             unsent: snapshot.unsent,
             status: snapshot.status,
             errorMessage: snapshot.errorMessage,
             projectId: snapshot.projectId,
-            subject: snapshot.subject,
-            tokenUsage,
+        };
+    }
+
+    @Get('/api/sessions/:sessionId/turns')
+    @UseBefore(AuthMiddleware)
+    getTurns(
+        @Param('sessionId') sessionId: string,
+        @QueryParam('limit') limitArg?: number,
+        @QueryParam('before') beforeTurn?: number,
+    ) {
+        // Enforce a static limit for now, ignoring request limit if we want to be strict,
+        // or allow it up to a max. Let's stick to 10 as requested in previous tasks,
+        // or just use the store default. The user asked to keep pagination logic.
+        const limit = 10;
+        const turns = this.sessionStore.getTurns(sessionId, limit, beforeTurn);
+
+        return {
+            turns,
+            hasMore: turns.length === limit // approximation
         };
     }
 

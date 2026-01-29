@@ -38,6 +38,7 @@ interface AppState {
     chatWidth: number;
     isResizing: boolean;
     stableSessionIds: string[]; // Maintains DOM order to prevent iframe reloads
+    notFoundSessionId: string | null;
 }
 
 class App extends React.Component<AppProps, AppState> {
@@ -63,6 +64,7 @@ class App extends React.Component<AppProps, AppState> {
             chatWidth: parseInt(localStorage.getItem('chatWidth') || '400', 10),
             isResizing: false,
             stableSessionIds: [],
+            notFoundSessionId: null,
         };
 
     }
@@ -87,6 +89,8 @@ class App extends React.Component<AppProps, AppState> {
                     this.setState({ projectId: sessionData.projectId }, () => {
                         this.fetchProject(sessionData.projectId);
                     });
+                } else if (sessionData && sessionData.notFound) {
+                    // Session not found, but don't redirect to projects so we can show the error
                 } else {
                     // Failed to load session or no project id. Redirect to projects.
                     router.navigate('/projects');
@@ -161,7 +165,7 @@ class App extends React.Component<AppProps, AppState> {
                             id: sessionId,
                             projectId,
                             status: 'unloaded',
-                            messages: [],
+                            turns: [],
                             statusMessages: [],
                             requestStartTime: null,
                             currentTurn: 0,
@@ -326,6 +330,9 @@ class App extends React.Component<AppProps, AppState> {
                                 // Project is same or we just loaded session, switch to it
                                 this.switchSession(newSessionId);
                             }
+                        } else if (sessionData && sessionData.notFound) {
+                            // If not found, switch to it anyway to clear sidebar selection and trigger Not Found Render
+                            this.setState({ activeSessionId: newSessionId });
                         } else {
                             // Failed to load, maybe redirect?
                             // For now, let's just stay or let user handle it.
@@ -367,6 +374,11 @@ class App extends React.Component<AppProps, AppState> {
                         this.updateUrl(activeSessionId, session.activeTurn, session.activeTab);
                     }
                     this.saveActiveSession(activeSessionId);
+
+                    // Clear not found state if we switched to a valid session
+                    if (this.state.notFoundSessionId) {
+                        this.setState({ notFoundSessionId: null });
+                    }
                 }
             }
         }
@@ -613,9 +625,23 @@ class App extends React.Component<AppProps, AppState> {
                     if (data.details) {
                         if (data.details.message) {
                             const assistantMsg = data.details.message;
-                            // Avoid duplicates if for some reason it's already there (unlikely with this flow)
-                            updatedSession.messages = [...updatedSession.messages, assistantMsg];
-                            // Update currentTurn if provided in message
+
+                            // Update the existing turn
+                            const targetTurnNum = assistantMsg.turn ?? updatedSession.currentTurn;
+                            const turnIndex = updatedSession.turns.findIndex(t => t.turn === targetTurnNum);
+
+                            if (turnIndex !== -1) {
+                                const nextTurns = [...updatedSession.turns];
+                                nextTurns[turnIndex] = {
+                                    ...nextTurns[turnIndex],
+                                    response: assistantMsg.content,
+                                    endTime: new Date().toISOString(), // Mark complete
+                                    version: assistantMsg.version ?? nextTurns[turnIndex].version
+                                };
+                                updatedSession.turns = nextTurns;
+                            }
+
+                            // Update currentTurn/Version
                             if (typeof assistantMsg.turn === 'number') {
                                 updatedSession.currentTurn = assistantMsg.turn;
                             }
@@ -675,7 +701,7 @@ class App extends React.Component<AppProps, AppState> {
                     id: data.newSessionId,
                     projectId: data.projectId ?? this.state.projectId ?? '',
                     status: 'idle',
-                    messages: [],
+                    turns: [],
                     statusMessages: [],
                     requestStartTime: null,
                     currentTurn: 0,
@@ -771,12 +797,18 @@ class App extends React.Component<AppProps, AppState> {
 
     fetchSession = async (id: string, isCompletion: boolean = false) => {
         try {
+
             const res = await apiAuth.fetch(`/api/sessions/${id}`);
+            if (res.status === 404) {
+                this.setState({ notFoundSessionId: id, isConnected: true });
+                return { notFound: true };
+            }
+            if (!res.ok) throw new Error('Failed to fetch session');
+
             const data = await res.json();
 
             // Fetch history is now included in the main session endpoint
             // New API always returns full history, no version needed
-            const history = data.history || [];
             // Use currentTurn directly from API
             const lastTurn = data.currentTurn ?? 0;
 
@@ -787,7 +819,7 @@ class App extends React.Component<AppProps, AppState> {
                     id,
                     projectId: data.projectId,
                     status: 'idle',
-                    messages: [],
+                    turns: [],
                     statusMessages: [],
                     requestStartTime: null,
                     currentTurn: 0,
@@ -810,7 +842,7 @@ class App extends React.Component<AppProps, AppState> {
                         ...prevState.sessions,
                         [id]: {
                             ...baseSession,
-                            messages: history,
+                            // messages: history, // REMOVED: history not in session response
                             currentVersion: data.currentVersion,
                             currentTurn: lastTurn,
                             projectId: data.projectId ?? baseSession.projectId, // Ensure projectId is up to date
@@ -838,23 +870,58 @@ class App extends React.Component<AppProps, AppState> {
                             pendingRefreshTurn: isCompletion ? lastTurn : (session ? session.pendingRefreshTurn : null),
                             unsent: data.unsent || (session ? session.unsent : {}) || {},
 
-                            // Restore unsent state if present and currently empty/default
                             selection: (data.unsent?.selection) ?? (session ? session.selection : null),
                             tokenUsage: data.tokenUsage ?? (session ? session.tokenUsage : undefined),
-
                             attachment: (data.unsent?.attachment) ?? (session ? session.attachment : undefined),
-                            // Use server data as authority. Unsent overrides persisted.
                             provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
                             fastMode: (data.unsent?.fastMode) ?? data.fastMode ?? false,
                             subject: data.subject || '...',
                         }
                     }
                 };
+            }, () => {
+                this.fetchTurns(id);
             });
             return data;
         } catch (error) {
             console.error('Failed to fetch session', error);
             return null;
+        }
+    };
+
+    fetchTurns = async (id: string, beforeTurn?: number) => {
+        try {
+            const url = `/api/sessions/${id}/turns` + (beforeTurn !== undefined ? `?before=${beforeTurn}` : '');
+            const res = await apiAuth.fetch(url);
+            if (!res.ok) throw new Error('Failed to fetch turns');
+            const data = await res.json();
+
+            this.setState(prevState => {
+                const session = prevState.sessions[id];
+                if (!session) return null;
+
+                let newTurns;
+                if (beforeTurn !== undefined) {
+                    newTurns = [...data.turns, ...session.turns];
+                } else {
+                    newTurns = data.turns;
+                }
+
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [id]: {
+                            ...session,
+                            turns: newTurns
+                        }
+                    }
+                };
+            });
+
+            return { count: data.turns.length, hasMore: data.hasMore };
+        } catch (e) {
+            console.error('Failed to fetch turns', e);
+            return { count: 0, hasMore: false };
         }
     };
 
@@ -907,7 +974,7 @@ class App extends React.Component<AppProps, AppState> {
                 id: sessionData.id,
                 status: 'idle', // Ready to use
                 projectId: sessionData.projectId ?? this.state.projectId!, // Use created/source project ID
-                messages: [],
+                turns: [],
                 statusMessages: [],
                 requestStartTime: null,
                 currentTurn: sessionData.currentTurn ?? 0,
@@ -1203,15 +1270,19 @@ class App extends React.Component<AppProps, AppState> {
         // Optimistic update
         this.updateSession(activeSessionId, {
             status: 'busy',
-            messages: [
-                ...session.messages,
+            turns: [
+                ...session.turns,
                 {
-                    role: 'user',
-                    content: optimisticContent,
-                    selection: selectionData,
                     turn: session.currentTurn + 1,
-                    attachment: attachment, // Include attachment for immediate rendering
-                    createdAt: new Date().toISOString() // Include timestamp
+                    beginTime: new Date().toISOString(),
+                    // endTime: undefined, // Incomplete
+                    request: optimisticContent,
+                    response: '',
+                    provider: session.provider,
+                    fastMode: session.unsent?.fastMode ?? session.fastMode ?? false,
+                    selection: selectionData,
+                    attachment: attachment,
+                    version: session.currentVersion
                 }
             ],
             selection: null, // Clear selection
@@ -1423,7 +1494,8 @@ class App extends React.Component<AppProps, AppState> {
             isConnected,
             sessionToDelete,
             sessionOrder,
-            sessions
+            sessions,
+            notFoundSessionId
         } = this.state;
 
 
@@ -1527,38 +1599,52 @@ class App extends React.Component<AppProps, AppState> {
                 ) : isSettingsPage ? (
                     <Settings />
                 ) : (
-                    // Use stableSessionIds for rendering to prevent DOM reordering (which reloads iframes)
-                    this.state.stableSessionIds.map(sessionId => {
-                        const session = sessions[sessionId];
-                        if (!session) return null;
-                        const isVisible = sessionId === activeSessionId;
+                    (notFoundSessionId && notFoundSessionId === (this.props.router.params as any)['sessionId']) ? (
+                        <div style={{
+                            gridColumn: '1 / -1',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            height: '100%',
+                            fontSize: '1.5rem',
+                            color: 'var(--text-secondary, #888)'
+                        }}>
+                            Session Not Found
+                        </div>
+                    ) :
+                        // Use stableSessionIds for rendering to prevent DOM reordering (which reloads iframes)
+                        this.state.stableSessionIds.map(sessionId => {
+                            const session = sessions[sessionId];
+                            if (!session) return null;
+                            const isVisible = sessionId === activeSessionId;
 
-                        return (
-                            <WorkSession
-                                key={sessionId}
-                                session={session}
-                                isVisible={isVisible}
-                                onSend={this.sendMessage}
-                                onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
-                                onCloneTurn={this.cloneTurn}
-                                onPreviewTurn={this.previewTurn}
+                            return (
+                                <WorkSession
+                                    key={sessionId}
+                                    session={session}
+                                    isVisible={isVisible}
+                                    onSend={this.sendMessage}
+                                    onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
+                                    onCloneTurn={this.cloneTurn}
+                                    onPreviewTurn={this.previewTurn}
 
-                                onProviderChange={this.handleProviderChange}
-                                onUndo={this.handleUndo}
-                                onStop={this.handleStopGeneration}
-                                onUpload={this.handleUpload}
-                                onDeleteAttachment={this.handleDeleteAttachment}
-                                onAttachmentChange={this.handleAttachmentChange}
-                                unsentInput={session.unsent?.input ?? undefined}
-                                onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
+                                    onProviderChange={this.handleProviderChange}
+                                    onUndo={this.handleUndo}
+                                    onStop={this.handleStopGeneration}
+                                    onUpload={this.handleUpload}
+                                    onDeleteAttachment={this.handleDeleteAttachment}
+                                    onAttachmentChange={this.handleAttachmentChange}
+                                    unsentInput={session.unsent?.input ?? undefined}
+                                    onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
 
-                                onResizeStart={this.handleResizeStart}
-                                isResizing={this.state.isResizing}
-                                sessionIds={Object.keys(sessions)}
-                                onSwitchSession={this.switchSession}
-                            />
-                        );
-                    })
+                                    onResizeStart={this.handleResizeStart}
+                                    isResizing={this.state.isResizing}
+                                    sessionIds={Object.keys(sessions)}
+                                    onSwitchSession={this.switchSession}
+                                    onLoadMore={(before) => this.fetchTurns(sessionId, before)}
+                                />
+                            );
+                        })
                 )}
             </div>
         );
