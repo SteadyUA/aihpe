@@ -801,7 +801,7 @@ export class ChatService {
         return content;
     }
 
-    private async generateHistorySummary(sessionId: string, turn: number): Promise<boolean> {
+    public async generateHistorySummary(sessionId: string, turn: number): Promise<boolean> {
 
         const session = this.sessionStore.getOrCreate(sessionId);
 
@@ -871,11 +871,43 @@ export class ChatService {
                 // We do NOT add a message to history/context anymore.
             });
 
-            console.log(`Generated history summary for session ${sessionId} covering turns 1-${targetSummaryEnd}`);
+            console.log(`Generated history summary for session ${sessionId}. Added turns ${previousSummaryTurn + 1}-${targetSummaryEnd}. Total coverage: 1-${targetSummaryEnd}.`);
+            console.log(`Summary: ${summary}\n`);
         } catch (error) {
             console.error(`Failed to generate history summary for session ${sessionId}:`, error);
         }
         return true;
+    }
+
+    async rebuildSessionSummary(sessionId: string): Promise<void> {
+        const session = this.sessionStore.getOrCreate(sessionId);
+        console.log(`Rebuilding summary for session ${sessionId}, total turns: ${session.lastTurn || 0}`);
+
+        // Reset summary
+        this.sessionStore.upsert(sessionId, {
+            summary: undefined,
+            summaryTurn: 0,
+        });
+
+        // Iterate through turns to trigger summarization
+        // Logic: generateHistorySummary checks if summarization is needed for a given turn.
+        // It summarizes up to calculateContextStartTurn(turn) - 1.
+        // So we just need to hit the thresholds.
+
+        const lastTurn = session.lastTurn || 0;
+
+        // We simulate the progression of the session
+        for (let t = 1; t <= lastTurn; t++) {
+            // We only need to check at specific intervals where summarization MIGHT trigger.
+            // But valid logic is encapsulated in generateHistorySummary, so we can just call it?
+            // Actually generateHistorySummary expects 'turn' to be the CURRENT turn being generated.
+            // And it calculates what to summarize based on that.
+
+            await this.generateHistorySummary(sessionId, t);
+        }
+
+        this.notifyStatus(sessionId, 'completed', 'Summary regeneration complete.');
+        console.log(`Finished rebuilding summary for session ${sessionId}`);
     }
 
     getSession(sessionId: string): SessionData {

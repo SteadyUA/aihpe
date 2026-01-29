@@ -194,20 +194,18 @@ export class OpenaiRawClient extends BaseLlmClient {
                 // Filter out invalid tool calls
                 const validToolCalls = toolCalls.filter(tc => tc.function.name && tc.function.name.trim() !== '');
 
-                if (validToolCalls.length > 0) {
+                // litellm with gemini can call tools even if there is text in the response
+                // so we need to check if there is text in the response
+                if (stepText && stepText.trim().length > -1) {
+                    stop = true;
+                } else if (validToolCalls.length > 0) {
                     assistantMessage.tool_calls = validToolCalls;
                 }
 
                 currentMessages.push(assistantMessage);
                 collectedNewMessages.push(assistantMessage);
 
-                // litellm with gemini can call tools even if there is text in the response
-                // so we need to check if there is text in the response
-                if (stepText && stepText.trim().length > 0) {
-                    stop = true;
-                }
-
-                console.log(`OpenaiRawClient: Step finished. FinishReason: ${finishReason}, ValidToolCalls: ${validToolCalls.length}`);
+                console.log(`OpenaiRawClient: Step finished. Has text: ${stepText.length > 0 ? 'yes' : 'no'}, FinishReason: ${finishReason}, ValidToolCalls: ${validToolCalls.length}`);
 
                 if (!stop && validToolCalls.length > 0) {
                     for (const toolCall of validToolCalls) {

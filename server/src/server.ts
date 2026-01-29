@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './config/env';
 import { createApp } from './app';
 import { Container } from 'typedi';
 import { SseService } from './services/SseService';

@@ -1,8 +1,7 @@
-
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import path from 'path';
-import 'dotenv/config';
+import './config/env';
 import { getDataDir } from './utils/pathUtils';
 
 const DATA_DIR = getDataDir();

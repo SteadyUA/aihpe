@@ -410,7 +410,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     handleNewWindow = () => {
         const { sessionId, version } = this.props;
         if (!sessionId) return;
-        const url = `/api/sessions/${sessionId}/${version}/files/index.html`;
+        const url = `${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/index.html`;
         window.open(url, '_blank');
     };
 
@@ -454,7 +454,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         const previewUrl =
             sessionId && typeof version === 'number'
-                ? `/api/sessions/${sessionId}/${version}/files/index.html`
+                ? `${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/index.html`
                 : 'about:blank';
 
         // Key logic: Combine identifying props to force remount of iframe when any changes

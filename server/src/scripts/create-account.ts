@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import 'dotenv/config';
+import '../config/env';
 import { Container } from 'typedi';
 import { AccountService } from '../services/AccountService';
 

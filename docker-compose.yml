@@ -1,21 +1,30 @@
 services:
+  # 1. VPN SERVICE (Sidecar)
+  vpn:
+    image: dperson/openvpn-client
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    volumes:
+      - ./vpn.ovpn:/vpn/vpn.ovpn
+    security_opt:
+      - label:disable
+    ports:
+      - "${PORT}:${PORT}"
+    env_file:
+      - .env
+    command: -f ""
+    restart: always
+
+  # 2. APPLICATION SERVICE
   app:
     build: .
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./server/data:/app/server/data
-    environment:
-      - LITELLM_API_URL=http://litellm:4000
+    network_mode: "service:vpn"
     depends_on:
-      - litellm
-
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    ports:
-      - "4000:4000"
-    command: --config /app/config.yaml
+      - vpn
     volumes:
-      - ./litellm/config.yaml:/app/config.yaml
+      - "./server/data:${DATA_DIR}"
+    restart: always
     env_file:
       - .env

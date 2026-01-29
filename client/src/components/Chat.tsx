@@ -229,14 +229,14 @@ class Message extends React.Component<MessageProps> {
                     {msg.attachment && (
                         <div className={styles.messageAttachments}>
                             <img
-                                src={`/api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`}
+                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`}
                                 alt={msg.attachment.originalName || msg.attachment.filename}
                                 className={styles.messageThumbnail}
                                 title={msg.attachment.originalName || msg.attachment.filename}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (msg.attachment) {
-                                        window.open(`/api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`, '_blank');
+                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`, '_blank');
                                     }
                                 }}
                             />
@@ -901,7 +901,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     <div className={styles.attachmentList}>
                                         <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
                                             <img
-                                                src={`/api/sessions/${this.props.sessionId}/uploads/${attachment.filename}`}
+                                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${attachment.filename}`}
                                                 alt={attachment.originalName || attachment.filename}
                                                 className={styles.imagePreview}
                                                 title={attachment.originalName || attachment.filename}

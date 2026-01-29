@@ -491,7 +491,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                 <div className={styles.editModalContent}>
                     <div className={styles.editImageContainer}>
                         <img
-                            src={`/api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
+                            src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
                             alt={editingImage.filename}
                             className={styles.editImagePreview}
                         />
@@ -589,7 +589,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                                 >
                                     <div className={styles.imageThumbContainer}>
                                         <img
-                                            src={`/api/sessions/${sessionId}/${version}/files/${img.filename}`}
+                                            src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${img.filename}`}
                                             alt={img.description}
                                             className={styles.imageThumb}
                                         />

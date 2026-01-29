@@ -564,7 +564,7 @@ class App extends React.Component<AppProps, AppState> {
             this.evtSource.close();
         }
 
-        this.evtSource = new EventSource('/api/sse');
+        this.evtSource = new EventSource(`${import.meta.env.BASE_URL}api/sse`);
 
         this.evtSource.onopen = () => {
             console.log('SSE Connected');
