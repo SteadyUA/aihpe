@@ -50,12 +50,10 @@ export interface Session {
     subject?: string;
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
     // messages: MessageData[]; // DEPRECATED
-    turns: Turn[];
-    statusMessages: string[];
-    requestStartTime: number | null;
+    // turns: Turn[]; // MOVED TO CHAT COMPONENT STATE
 
     currentVersion?: number;
-    currentTurn: number;
+    lastTurn: number;
     activeTurn: number | null;
     activeTab: TabType;
 
@@ -67,8 +65,7 @@ export interface Session {
     selection: string | null;
     attachment?: ChatAttachment;
     isPicking: boolean;
-
-    unsent?: UnsentData;
+    input?: string;
 
     group: number;
     tokenUsage?: TokenUsage;

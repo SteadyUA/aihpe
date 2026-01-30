@@ -8,14 +8,13 @@ import { apiAuth } from './utils/api';
 
 import { WorkSession } from './components/WorkSession';
 
-import { SessionStore } from './store/SessionStore';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import styles from './App.module.css';
 
 import { ProjectCreationModal } from './components/ProjectCreationModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { withRouter, RouterProps } from './components/withRouter';
-import { ChatAttachment, TabType, Session, Project, LlmProvider } from './types';
+import { TabType, Session, Project, LlmProvider } from './types';
 
 interface AppProps extends RouterProps { }
 
@@ -96,18 +95,6 @@ class App extends React.Component<AppProps, AppState> {
                     router.navigate('/projects');
                 }
             });
-        } else {
-            // Root route or direct /projects route
-            const legacyProjectId = SessionStore.loadProjectId();
-
-            if (legacyProjectId && this.state.token) {
-                // Restore migration logic: fetch project (assigns user on server) then clear legacy ID
-                this.fetchProject(legacyProjectId).finally(() => {
-                    SessionStore.clearProjectId();
-                });
-            } else if (router.location.pathname === '/' || router.location.pathname === '') {
-                router.navigate('/projects');
-            }
         }
 
         // Setup persistent SSE connection
@@ -133,8 +120,8 @@ class App extends React.Component<AppProps, AppState> {
             const res = await apiAuth.fetch(`/api/projects/${projectId}`);
             if (!res.ok) throw new Error('Failed to fetch project');
 
-            // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number }[] }
-            const data: { id: string; name: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; modelRole?: string; sessions: { sessionId: string; group: number; subject?: string }[]; activeSessionId?: string } = await res.json();
+            // Expected response: { rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, sessions: { sessionId: string; group: number, status?: string }[] }
+            const data: { id: string; name: string; rulesAndGoal: string; imageGenerationPref?: string; defaultProvider?: LlmProvider; modelRole?: string; sessions: { sessionId: string; group: number; subject?: string; status?: string; lastTurn?: number }[]; activeSessionId?: string } = await res.json();
 
             const { router } = this.props;
             const params = router.params as Record<string, string | undefined>;
@@ -146,36 +133,53 @@ class App extends React.Component<AppProps, AppState> {
                 const sessionsMap: Record<string, Session> = {};
                 const sessionOrder: string[] = [];
 
-                data.sessions.forEach(({ sessionId, group, subject }) => {
+                data.sessions.forEach(({ sessionId, group, subject, status: serverStatus, lastTurn }) => {
                     sessionOrder.push(sessionId);
                     const existing = prevState.sessions[sessionId];
+                    const safeLastTurn = lastTurn ?? 0;
+
+                    // Unified status mapping
+                    const mappedStatus = (serverStatus === 'started' || serverStatus === 'generating') ? 'busy' :
+                        (serverStatus === 'error') ? 'error' :
+                            'idle';
+
                     if (existing) {
                         sessionsMap[sessionId] = {
                             ...existing,
                             group: group ?? existing.group,
-                            subject: subject ?? existing.subject
+                            subject: subject ?? existing.subject,
+                            status: mappedStatus === 'idle' ? (existing.status || 'idle') : mappedStatus,
+                            lastTurn: safeLastTurn, // Update lastTurn from project data
                         };
                     } else {
-                        // Restore state from URL if this is the active session in URL
                         const isUrlSession = sessionId === urlSessionId;
-                        const initialActiveTurn = isUrlSession && urlTurn ? parseInt(urlTurn, 10) : null;
+                        const isProjectActiveSession = sessionId === data.activeSessionId;
+
+                        let initialActiveTurn = null;
+
+                        if (isUrlSession) {
+                            initialActiveTurn = urlTurn ? parseInt(urlTurn, 10) : safeLastTurn;
+                        } else if (!urlSessionId && isProjectActiveSession) {
+                            // No deep link, just opening project, so resume this session at last turn
+                            initialActiveTurn = safeLastTurn;
+                        } else {
+                            // Not active or URL session
+                        }
+
                         const initialActiveTab = isUrlSession && urlTab ? urlTab : 'preview';
 
                         sessionsMap[sessionId] = {
                             id: sessionId,
                             projectId,
-                            status: 'unloaded',
-                            turns: [],
-                            statusMessages: [],
-                            requestStartTime: null,
-                            currentTurn: 0,
+                            status: mappedStatus,
+                            // turns: [], // Removed
+                            lastTurn: safeLastTurn,
                             activeTurn: initialActiveTurn,
                             activeTab: initialActiveTab,
                             selection: null,
                             isPicking: false,
                             pendingRefreshTurn: null,
                             group: group ?? 0,
-                            unsent: {},
                             provider: 'openai',
                             subject: subject || '...',
                         };
@@ -262,7 +266,13 @@ class App extends React.Component<AppProps, AppState> {
             // Apply URL params to the session state immediately
             if (this.state.sessions[targetSessionId]) {
                 const updates: Partial<Session> = {};
-                if (turnFromUrl) updates.activeTurn = parseInt(turnFromUrl, 10);
+                const session = this.state.sessions[targetSessionId];
+                if (turnFromUrl) {
+                    updates.activeTurn = parseInt(turnFromUrl, 10);
+                } else {
+                    // Default to lastTurn if no turn in URL (and enforce it via updateUrl later)
+                    updates.activeTurn = session.lastTurn;
+                }
                 if (tabFromUrl) updates.activeTab = tabFromUrl;
 
                 if (Object.keys(updates).length > 0) {
@@ -298,9 +308,10 @@ class App extends React.Component<AppProps, AppState> {
             if (newSessionId && newSessionId !== activeSessionId) {
                 if (sessions[newSessionId]) {
                     // Session exists in state
-                    const turnVal = newTurn ? parseInt(newTurn, 10) : null;
-                    const tabVal = newTab || 'preview';
                     const targetSession = sessions[newSessionId];
+                    // Default to lastTurn if not specified in URL
+                    const turnVal = newTurn ? parseInt(newTurn, 10) : targetSession.lastTurn;
+                    const tabVal = newTab || 'preview';
 
                     // Ensure target session matches URL params before switching active ID
                     // ensuring updateUrl later sees correct values and doesn't wipe URL params
@@ -347,7 +358,8 @@ class App extends React.Component<AppProps, AppState> {
             // Turn/Tab change via URL for current session
             if (activeSessionId && sessions[activeSessionId]) {
                 const session = sessions[activeSessionId];
-                const cleanTurn = newTurn ? parseInt(newTurn, 10) : null;
+                // Default to lastTurn if URL param removed
+                const cleanTurn = newTurn ? parseInt(newTurn, 10) : session.lastTurn;
                 const cleanTab = newTab || 'preview';
 
                 if (session.activeTurn !== cleanTurn || session.activeTab !== cleanTab) {
@@ -368,11 +380,13 @@ class App extends React.Component<AppProps, AppState> {
                 if (session) {
                     this.handleSessionChange(activeSessionId);
 
-                    // Only navigate if URL doesn't match (avoid double nav)
+                    // If URL session ID matches new active session ID, use REPLACE to just fix params
+                    // Otherwise PUSH.
                     const params = router.params as Record<string, string | undefined>;
-                    if (params['sessionId'] !== activeSessionId) {
-                        this.updateUrl(activeSessionId, session.activeTurn, session.activeTab);
-                    }
+                    const isSameSession = params['sessionId'] === activeSessionId;
+
+                    this.updateUrl(activeSessionId, session.activeTurn, session.activeTab, isSameSession);
+
                     this.saveActiveSession(activeSessionId);
 
                     // Clear not found state if we switched to a valid session
@@ -382,9 +396,8 @@ class App extends React.Component<AppProps, AppState> {
                 }
             }
         }
-
-        // Session State (Turn/Tab) changed
-        if (activeSessionId && sessions[activeSessionId]) {
+        // Session State (Turn/Tab) changed - ONLY if active session didn't change (processed above)
+        else if (activeSessionId && sessions[activeSessionId]) {
             const prevSession = prevState.sessions[activeSessionId];
             const currSession = sessions[activeSessionId];
 
@@ -514,7 +527,7 @@ class App extends React.Component<AppProps, AppState> {
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
     };
 
-    updateUrl = (sessionId: string, turn: number | null, tab: TabType) => {
+    updateUrl = (sessionId: string, turn: number | null, tab: TabType, replace: boolean = false) => {
         const params = new URLSearchParams();
         if (turn !== null) params.set('turn', turn.toString());
         if (tab && tab !== 'preview') params.set('tab', tab); // Default tab is preview, unnecessary to show
@@ -529,7 +542,7 @@ class App extends React.Component<AppProps, AppState> {
         const currentSearch = this.props.router.location.search;
 
         if (currentPath !== path || currentSearch !== search) {
-            this.props.router.navigate(`${path}${search}`);
+            this.props.router.navigate(`${path}${search}`, { replace });
         }
     }
 
@@ -596,82 +609,14 @@ class App extends React.Component<AppProps, AppState> {
 
         this.evtSource.addEventListener('chat-status', (e) => {
             const data = JSON.parse(e.data);
-            const { sessionId } = data;
 
-            this.setState(prevState => {
-                const session = prevState.sessions[sessionId];
-                if (!session) return null; // Update for unknown session? Ignore.
 
-                const updatedSession = { ...session };
+            // Dispatch event for Chat component to handle specific turn updates
+            window.dispatchEvent(new CustomEvent('processed-chat-event', {
+                detail: data
+            }));
 
-                if (data.status === 'started') {
-                    updatedSession.status = 'busy';
-                    updatedSession.statusMessages = [data.message || 'Thinking...'];
-                    updatedSession.requestStartTime = Date.now();
-                } else if (data.status === 'generating') {
-                    if (data.message) {
-                        updatedSession.statusMessages = [...updatedSession.statusMessages, data.message];
-                    }
-                } else if (data.status === 'completed') {
-                    updatedSession.status = 'idle';
-                    updatedSession.statusMessages = [];
-                    updatedSession.requestStartTime = null;
 
-                    // Auto-switch to preview if we are in plan view (user expectation: seeing the result)
-                    if (updatedSession.activeTab === 'plan') {
-                        updatedSession.activeTab = 'preview';
-                    }
-
-                    if (data.details) {
-                        if (data.details.message) {
-                            const assistantMsg = data.details.message;
-
-                            // Update the existing turn
-                            const targetTurnNum = assistantMsg.turn ?? updatedSession.currentTurn;
-                            const turnIndex = updatedSession.turns.findIndex(t => t.turn === targetTurnNum);
-
-                            if (turnIndex !== -1) {
-                                const nextTurns = [...updatedSession.turns];
-                                nextTurns[turnIndex] = {
-                                    ...nextTurns[turnIndex],
-                                    response: assistantMsg.content,
-                                    endTime: new Date().toISOString(), // Mark complete
-                                    version: assistantMsg.version ?? nextTurns[turnIndex].version
-                                };
-                                updatedSession.turns = nextTurns;
-                            }
-
-                            // Update currentTurn/Version
-                            if (typeof assistantMsg.turn === 'number') {
-                                updatedSession.currentTurn = assistantMsg.turn;
-                            }
-                            if (typeof assistantMsg.version === 'number') {
-                                updatedSession.currentVersion = assistantMsg.version;
-                            }
-                        }
-
-                        if (data.details.tokenUsage) {
-                            updatedSession.tokenUsage = data.details.tokenUsage;
-                        }
-                    }
-
-                    if (!data.details?.message) {
-                        // Fallback: Trigger fetch if no message in payload (legacy or error case)
-                        setTimeout(() => this.fetchSession(sessionId, true), 0);
-                    }
-                } else if (data.status === 'error') {
-                    updatedSession.status = 'error';
-                    updatedSession.statusMessages = [...updatedSession.statusMessages, data.message || 'Error occurred'];
-                    updatedSession.requestStartTime = null;
-                }
-
-                return {
-                    sessions: {
-                        ...prevState.sessions,
-                        [sessionId]: updatedSession
-                    }
-                };
-            });
         });
 
 
@@ -701,20 +646,14 @@ class App extends React.Component<AppProps, AppState> {
                     id: data.newSessionId,
                     projectId: data.projectId ?? this.state.projectId ?? '',
                     status: 'idle',
-                    turns: [],
-                    statusMessages: [],
-                    requestStartTime: null,
-                    currentTurn: 0,
-                    activeTurn: null,
-
+                    // turns: [], // Removed
+                    lastTurn: 0,
+                    activeTurn: 0,
                     activeTab: 'preview',
                     selection: null,
                     isPicking: false,
-                    // provider: 'openai', // REMOVED default
                     group: data.group ?? 0,
                     pendingRefreshTurn: null,
-                    unsent: {},
-
                 };
 
                 // Calculate new order
@@ -810,7 +749,7 @@ class App extends React.Component<AppProps, AppState> {
             // Fetch history is now included in the main session endpoint
             // New API always returns full history, no version needed
             // Use currentTurn directly from API
-            const lastTurn = data.currentTurn ?? 0;
+            const lastTurn = data.lastTurn ?? 0;
 
             this.setState(prevState => {
                 const session = prevState.sessions[id];
@@ -819,10 +758,10 @@ class App extends React.Component<AppProps, AppState> {
                     id,
                     projectId: data.projectId,
                     status: 'idle',
-                    turns: [],
+                    // turns: [], // Removed
                     statusMessages: [],
                     requestStartTime: null,
-                    currentTurn: 0,
+                    lastTurn: 0,
                     activeTurn: null,
                     activeTab: 'preview',
                     selection: null,
@@ -844,7 +783,8 @@ class App extends React.Component<AppProps, AppState> {
                             ...baseSession,
                             // messages: history, // REMOVED: history not in session response
                             currentVersion: data.currentVersion,
-                            currentTurn: lastTurn,
+                            lastTurn: lastTurn,
+                            activeTurn: (baseSession.activeTurn !== null && baseSession.activeTurn > lastTurn) ? null : baseSession.activeTurn,
                             projectId: data.projectId ?? baseSession.projectId, // Ensure projectId is up to date
 
                             // Use server provided status directly, mapped to client types
@@ -853,22 +793,14 @@ class App extends React.Component<AppProps, AppState> {
                             status: (data.status === 'started' || data.status === 'generating') ? 'busy' :
                                 (data.status === 'error') ? 'error' :
                                     'idle',
-                            // statusMessages: data.statusMessage ? [data.statusMessage] : [], // Field removed per user request
-                            // But we shoudln't clear statusMessages on simple fetch? or?
-                            // Logic before was: statusMessages: data.statusMessage ? [data.statusMessage] : [],
-                            // Since we removed statusMessage from data, this will be undefined.
-                            // If I leave [], it clears the status.
-                            // If status is busy, and we have no message, we just show Busy.
-                            // It's acceptable.
-                            statusMessages: (data.status === 'started' || data.status === 'generating')
-                                ? (session ? (session.statusMessages || []) : [])
-                                : (data.status === 'error' && data.errorMessage)
-                                    ? [data.errorMessage]
-                                    : [],
+
+                            // Set pendingRefreshTurn only if completion triggered this fetch
 
                             // Set pendingRefreshTurn only if completion triggered this fetch
                             pendingRefreshTurn: isCompletion ? lastTurn : (session ? session.pendingRefreshTurn : null),
-                            unsent: data.unsent || (session ? session.unsent : {}) || {},
+
+                            // Flatten unsent input to top-level
+                            input: data.unsent?.input || (session ? session.input : undefined),
 
                             selection: (data.unsent?.selection) ?? (session ? session.selection : null),
                             tokenUsage: data.tokenUsage ?? (session ? session.tokenUsage : undefined),
@@ -880,7 +812,7 @@ class App extends React.Component<AppProps, AppState> {
                     }
                 };
             }, () => {
-                this.fetchTurns(id);
+                // fetchTurns is now internal to Chat, no need to call it here.
             });
             return data;
         } catch (error) {
@@ -889,41 +821,8 @@ class App extends React.Component<AppProps, AppState> {
         }
     };
 
-    fetchTurns = async (id: string, beforeTurn?: number) => {
-        try {
-            const url = `/api/sessions/${id}/turns` + (beforeTurn !== undefined ? `?before=${beforeTurn}` : '');
-            const res = await apiAuth.fetch(url);
-            if (!res.ok) throw new Error('Failed to fetch turns');
-            const data = await res.json();
 
-            this.setState(prevState => {
-                const session = prevState.sessions[id];
-                if (!session) return null;
-
-                let newTurns;
-                if (beforeTurn !== undefined) {
-                    newTurns = [...data.turns, ...session.turns];
-                } else {
-                    newTurns = data.turns;
-                }
-
-                return {
-                    sessions: {
-                        ...prevState.sessions,
-                        [id]: {
-                            ...session,
-                            turns: newTurns
-                        }
-                    }
-                };
-            });
-
-            return { count: data.turns.length, hasMore: data.hasMore };
-        } catch (e) {
-            console.error('Failed to fetch turns', e);
-            return { count: 0, hasMore: false };
-        }
-    };
+    // fetchTurns MOVED TO Chat.tsx
 
     private static creatingSessionPromise: Promise<any> | null = null;
 
@@ -974,20 +873,17 @@ class App extends React.Component<AppProps, AppState> {
                 id: sessionData.id,
                 status: 'idle', // Ready to use
                 projectId: sessionData.projectId ?? this.state.projectId!, // Use created/source project ID
-                turns: [],
-                statusMessages: [],
-                requestStartTime: null,
-                currentTurn: sessionData.currentTurn ?? 0,
+                // turns: [], // Removed
+                lastTurn: sessionData.lastTurn ?? 0,
                 currentVersion: sessionData.currentVersion ?? 0,
-                activeTurn: null,
-
+                activeTurn: 0,
                 activeTab: 'preview',
                 selection: null,
                 isPicking: false,
                 provider: sessionData.provider,
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
-                unsent: sessionData.unsent ?? {},
+                input: sessionData.unsent?.input,
                 subject: sessionData.subject || '...',
             };
 
@@ -1003,6 +899,7 @@ class App extends React.Component<AppProps, AppState> {
                     // Insert after source
                     newOrder.splice(sourceIndex + 1, 0, sessionData.id);
                 } else {
+                    // Source not found, append
                     newOrder.push(sessionData.id);
                 }
             } else {
@@ -1061,142 +958,15 @@ class App extends React.Component<AppProps, AppState> {
                 ...prev.sessions,
                 [id]: { ...prev.sessions[id], ...updates }
             }
-        }), () => {
-            // Auto-save triggers
-            if (updates.selection !== undefined) {
-                // Pass null to clear if updates.selection is null/empty, otherwise value
-                this.handleSaveUnsent(id, { selection: updates.selection ? updates.selection : null });
-            }
-        });
+        }));
     }
 
-    handleSaveUnsent = async (sessionId?: string, data?: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null, fastMode?: boolean }) => {
-        const targetId = sessionId || this.state.activeSessionId;
-        if (!targetId || !data) return;
-
-        // Optimistic update of unsent in state
-        this.setState(prev => {
-            const session = prev.sessions[targetId];
-            if (!session) return null;
-
-            // Helper to merge unsent data: if val is null, remove key. if val is undefined, keep. if val defined, update.
-            const currentUnsent = { ...(session.unsent || {}) };
-            if (data.input !== undefined) {
-                if (data.input === null) delete currentUnsent.input;
-                else currentUnsent.input = data.input;
-            }
-            if (data.attachment !== undefined) {
-                if (data.attachment === null) delete currentUnsent.attachment;
-                else currentUnsent.attachment = data.attachment;
-            }
-            if (data.selection !== undefined) {
-                if (data.selection === null) delete currentUnsent.selection;
-                else currentUnsent.selection = data.selection;
-            }
-            if (data.provider !== undefined) {
-                if (data.provider === null) delete currentUnsent.provider;
-                else currentUnsent.provider = data.provider;
-            }
-            if (data.fastMode !== undefined) {
-                // Boolean doesn't really have "null" to delete, but let's assume valid boolean means update.
-                currentUnsent.fastMode = data.fastMode;
-            }
-
-            return {
-                sessions: {
-                    ...prev.sessions,
-                    [targetId]: {
-                        ...session,
-                        unsent: currentUnsent
-                    }
-                }
-            };
-        });
-
-        try {
-            await apiAuth.fetch(`/api/sessions/${targetId}/unsent`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-        } catch (e) {
-            console.error('Failed to save unsent data', e);
-        }
-    };
-
-
-    handleUndo = async () => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        try {
-            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/undo`, { method: 'POST' });
-            if (!res.ok) throw new Error('Undo failed');
-            const data = await res.json();
-
-            if (data.success) {
-                // If there's a selection restored, update it locally immediately so UI reflects it
-                if (data.restoredSelection) {
-                    this.updateSession(activeSessionId, { selection: data.restoredSelection });
-                }
-
-                // Fetch updated session state (history, versions, etc.)
-                await this.fetchSession(activeSessionId);
-
-                // Explicitly reset activeTurn to null (HEAD) so the UI shows the new latest turn
-                // as the current active one. If we don't do this, and we were previously time-travelling
-                // or just had a stale state, it might not update correctly.
-                this.updateSession(activeSessionId, { activeTurn: null });
-
-                // If we went back a turn, we might want to refresh preview?
-                // `fetchSession` updates `currentTurn`. `WorkSession` detects turn change and might refresh?
-                // If `activeTurn` was null (HEAD), it becomes the new HEAD turn.
-                // If `activeTurn` was set, we might need to reset it or keep it?
-                // Usually undo means we go back to HEAD logic.
-                // Let's force a preview refresh by ensuring activeTurn aligns.
-
-                return { restoredInput: data.restoredInput };
-            }
-        } catch (error) {
-            console.error('Failed to undo', error);
-        }
-    };
-
-    handleStopGeneration = async () => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        try {
-            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/stop`, {
-                method: 'POST'
-            });
-            if (!res.ok) throw new Error('Stop failed');
-            const data = await res.json();
-
-            if (data.success) {
-                if (data.restoredSelection) {
-                    this.updateSession(activeSessionId, { selection: data.restoredSelection });
-                }
-
-                await this.fetchSession(activeSessionId);
-                this.updateSession(activeSessionId, { activeTurn: null });
-
-                if (data.restoredInput || data.restoredAttachment) {
-                    this.handleSaveUnsent(activeSessionId, {
-                        input: data.restoredInput,
-                        attachment: data.restoredAttachment
-                    });
-                }
-
-                return { restoredInput: data.restoredInput };
-            }
-
-        } catch (e) {
-            console.error('Failed to stop generation', e);
-        }
-    };
 
     switchSession = (id: string) => {
+        const session = this.state.sessions[id];
+        if (session && session.activeTurn === null) {
+            this.updateSession(id, { activeTurn: session.lastTurn });
+        }
         this.setState({ activeSessionId: id }, () => {
             // handleSessionChange call is now redundant here if we rely on componentDidUpdate/URL sync
             // But for immediate response we can keep it, or just let the URL update trigger it.
@@ -1253,141 +1023,6 @@ class App extends React.Component<AppProps, AppState> {
                 this.handleSessionChange(activeSessionId);
             }
         });
-    };
-
-    sendMessage = async (text: string) => {
-        const { activeSessionId, sessions } = this.state;
-        if (!activeSessionId) return;
-        const session = sessions[activeSessionId];
-        if (!session) return;
-
-        const attachment = session.attachment;
-
-        const selectionData = session.selection ? { selector: session.selection } : undefined;
-
-        const optimisticContent = text;
-
-        // Optimistic update
-        this.updateSession(activeSessionId, {
-            status: 'busy',
-            turns: [
-                ...session.turns,
-                {
-                    turn: session.currentTurn + 1,
-                    beginTime: new Date().toISOString(),
-                    // endTime: undefined, // Incomplete
-                    request: optimisticContent,
-                    response: '',
-                    provider: session.provider,
-                    fastMode: session.unsent?.fastMode ?? session.fastMode ?? false,
-                    selection: selectionData,
-                    attachment: attachment,
-                    version: session.currentVersion
-                }
-            ],
-            selection: null, // Clear selection
-            activeTurn: null, // Reset time travel
-
-        });
-
-        try {
-            const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: text,
-                    attachment,
-                    selection: selectionData,
-                    provider: session.provider,
-                    fastMode: session.unsent?.fastMode ?? session.fastMode ?? false,
-                }),
-            });
-
-            const data = await res.json();
-
-            // Update session with the confirmed turn number
-            this.updateSession(activeSessionId, {
-                attachment: undefined,
-                currentTurn: data.turn,
-                activeTurn: data.turn, // Navigate to the new turn
-            });
-
-            this.setState(prev => {
-                const s = prev.sessions[activeSessionId];
-                return {
-                    sessions: {
-                        ...prev.sessions,
-                        [activeSessionId]: {
-                            ...s,
-                            fastMode: s.unsent?.fastMode ?? s.fastMode ?? false,
-                            unsent: undefined
-                        }
-                    }
-                };
-            });
-        } catch (e) {
-            this.updateSession(activeSessionId, { status: 'error' });
-        }
-    };
-
-    handleUpload = async (file: File): Promise<ChatAttachment> => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) throw new Error("No active session");
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const res = await apiAuth.fetch(`/api/sessions/${activeSessionId}/uploads`, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!res.ok) {
-            throw new Error('Upload failed');
-        }
-
-        const data = await res.json();
-        return {
-            type: 'image',
-            filename: data.filename,
-            id: data.filename,
-            originalName: data.originalName
-        };
-    };
-
-    handleDeleteAttachment = async (attachment: ChatAttachment) => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        try {
-            await apiAuth.fetch(`/api/sessions/${activeSessionId}/uploads/${attachment.filename}`, {
-                method: 'DELETE'
-            });
-
-            // Clear from state
-            this.updateSession(activeSessionId, { attachment: undefined });
-            // Clear from unsent explicitly to ensure server sync
-            this.handleSaveUnsent(activeSessionId, { attachment: null });
-
-        } catch (error) {
-            console.error('Failed to delete attachment', error);
-        }
-    };
-
-    handleAttachmentChange = (attachment?: ChatAttachment) => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        this.updateSession(activeSessionId, { attachment });
-        this.handleSaveUnsent(activeSessionId, { attachment: attachment ?? null });
-    };
-
-    handleProviderChange = async (provider: LlmProvider) => {
-        const { activeSessionId } = this.state;
-        if (!activeSessionId) return;
-
-        this.updateSession(activeSessionId, { provider });
-        this.handleSaveUnsent(activeSessionId, { provider });
     };
 
     // Resize Handlers
@@ -1623,25 +1258,16 @@ class App extends React.Component<AppProps, AppState> {
                                     key={sessionId}
                                     session={session}
                                     isVisible={isVisible}
-                                    onSend={this.sendMessage}
                                     onUpdateSession={(updates) => this.updateSession(sessionId, updates)}
+                                    // Modified props
                                     onCloneTurn={this.cloneTurn}
                                     onPreviewTurn={this.previewTurn}
 
-                                    onProviderChange={this.handleProviderChange}
-                                    onUndo={this.handleUndo}
-                                    onStop={this.handleStopGeneration}
-                                    onUpload={this.handleUpload}
-                                    onDeleteAttachment={this.handleDeleteAttachment}
-                                    onAttachmentChange={this.handleAttachmentChange}
-                                    unsentInput={session.unsent?.input ?? undefined}
-                                    onSaveUnsent={(data) => this.handleSaveUnsent(sessionId, data)}
 
                                     onResizeStart={this.handleResizeStart}
                                     isResizing={this.state.isResizing}
                                     sessionIds={Object.keys(sessions)}
                                     onSwitchSession={this.switchSession}
-                                    onLoadMore={(before) => this.fetchTurns(sessionId, before)}
                                 />
                             );
                         })

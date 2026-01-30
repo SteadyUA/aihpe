@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import './index.css';
 import App from './App';
 
@@ -10,7 +10,7 @@ createRoot(document.getElementById('root')!).render(
             <Routes>
                 <Route path="/session/:sessionId" element={<App />} />
                 <Route path="/projects" element={<App />} />
-                <Route path="/" element={<App />} />
+                <Route path="/" element={<Navigate to="/projects" replace />} />
                 <Route path="*" element={<App />} />
             </Routes>
         </BrowserRouter>

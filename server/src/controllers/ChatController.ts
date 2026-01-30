@@ -230,10 +230,10 @@ export class ChatController {
             // We verify if s.projectId matches, OR if it's a legacy session we might want to allow it?
             // But for new logic, checking projectId is safer to avoid ghost sessions.
             if (s.projectId === projectId) {
-                acc.push({ sessionId: s.id, group: s.group, status: s.status, subject: s.subject });
+                acc.push({ sessionId: s.id, group: s.group, status: s.status, subject: s.subject, lastTurn: s.lastTurn ?? 0 });
             }
             return acc;
-        }, [] as { sessionId: string, group: number, status: string, subject?: string }[]);
+        }, [] as { sessionId: string, group: number, status: string, subject?: string, lastTurn: number }[]);
 
         return {
             id: project.id,
@@ -630,7 +630,7 @@ export class ChatController {
             updatedAt: snapshot.updatedAt.toISOString(),
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
-            currentTurn: snapshot.lastTurn ?? 0,
+            lastTurn: snapshot.lastTurn ?? 0,
             provider: snapshot.provider ?? 'openai',
             fastMode: snapshot.fastMode ?? false,
             subject: snapshot.subject,
@@ -657,7 +657,6 @@ export class ChatController {
 
         return {
             turns,
-            hasMore: turns.length === limit // approximation
         };
     }
 

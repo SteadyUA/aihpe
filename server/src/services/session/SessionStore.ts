@@ -588,7 +588,8 @@ export class SessionStore {
 
     getTurns(sessionId: string, limit: number = 50, beforeTurn?: number): Turn[] {
         const session = this.getOrCreate(sessionId);
-
+        return session.turns;
+        /*
         // Filter turns if beforeTurn is specified
         let turns = session.turns;
         if (typeof beforeTurn === 'number') {
@@ -600,6 +601,7 @@ export class SessionStore {
 
         // Return the last 'limit' turns
         return turns.slice(-limit);
+        */
     }
 
     snapshot(sessionId: string): SessionData | undefined {

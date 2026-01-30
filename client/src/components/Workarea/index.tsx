@@ -24,7 +24,6 @@ interface WorkareaProps {
     onProceed?: () => void;
     isBusy?: boolean;
     isLatest?: boolean;
-    fastMode?: boolean;
     displayedTurn: number;
 }
 

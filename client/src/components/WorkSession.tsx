@@ -1,31 +1,24 @@
 import React from 'react';
 import { Chat } from './Chat';
 import { Workarea } from './Workarea';
-import { Session, LlmProvider, ChatAttachment } from '../types';
+import { Session } from '../types';
 import { ResizeHandle } from './ResizeHandle';
 import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
     session: Session;
     isVisible: boolean;
-    onSend: (text: string) => void;
+    // Removed onSend
     onUpdateSession: (updates: Partial<Session>) => void;
     onCloneTurn: (turn: number) => void;
     onPreviewTurn: (turn: number) => void;
 
-    onProviderChange: (provider: LlmProvider) => void;
-    onUndo?: () => Promise<any>;
-    onStop?: () => Promise<{ restoredInput?: string } | void>;
-    onUpload?: (file: File) => Promise<ChatAttachment>;
-    onDeleteAttachment?: (attachment: ChatAttachment) => void;
-    onAttachmentChange: (attachment?: ChatAttachment) => void;
-    unsentInput?: string;
-    onSaveUnsent?: (data: { input?: string | null; fastMode?: boolean }) => void;
+    // Removed onSaveUnsent
     onResizeStart?: (e: React.MouseEvent) => void;
     isResizing?: boolean;
     sessionIds: string[];
     onSwitchSession: (id: string) => void;
-    onLoadMore?: (limit?: number, beforeTurn?: number) => Promise<any>;
+    // Removed onLoadMore
 }
 
 export class WorkSession extends React.Component<WorkSessionProps> {
@@ -48,22 +41,6 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         }
     }
 
-    getVersionForTurn = (turn: number): number => {
-        const { session } = this.props;
-        // Look backwards from the end of history to find the first turn with a version <= turn
-        // Just like the server does
-        const relevantTurns = session.turns.filter(t => t.turn <= turn);
-        if (relevantTurns.length === 0) return 0;
-
-        for (let i = relevantTurns.length - 1; i >= 0; i--) {
-            const t = relevantTurns[i];
-            if (typeof t.version === 'number') {
-                return t.version;
-            }
-        }
-        return 0;
-    };
-
     getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
         // Prepare to hide: Save scroll position before display becomes none
         if (prevProps.isVisible && !this.props.isVisible) {
@@ -77,9 +54,9 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         if (this.props.isVisible && !this.hasInitialScrollHappened && this.chatRef.current) {
             // If we have an active turn, scroll to it, otherwise bottom
             if (this.props.session.activeTurn !== null && this.props.session.activeTurn !== undefined) {
-                this.chatRef.current.scrollToTurn(this.props.session.activeTurn);
+                // Scroll calls removed
             } else {
-                this.chatRef.current.scrollToBottom();
+                // Scroll calls removed
             }
             this.hasInitialScrollHappened = true;
         }
@@ -112,8 +89,8 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         }
 
         // 2. Handle Turn Switch
-        const prevTurn = prevProps.session.activeTurn ?? prevProps.session.currentTurn;
-        const currentTurn = this.props.session.activeTurn ?? this.props.session.currentTurn;
+        const prevTurn = prevProps.session.activeTurn ?? prevProps.session.lastTurn;
+        const currentTurn = this.props.session.activeTurn ?? this.props.session.lastTurn;
         const turnChanged = prevTurn !== currentTurn;
 
         if (turnChanged) {
@@ -232,17 +209,11 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         const {
             session,
             isVisible,
-            onSend,
+            // onSend rem
             onCloneTurn,
             onPreviewTurn,
 
-            onProviderChange,
-            onUndo,
-            onUpload,
-            onDeleteAttachment,
-            onAttachmentChange,
-            unsentInput,
-            onSaveUnsent,
+            // onSaveUnsent rem
             sessionIds,
             onSwitchSession
         } = this.props;
@@ -279,20 +250,19 @@ export class WorkSession extends React.Component<WorkSessionProps> {
         }
 
         // Calculate current turn for Preview
-        const currentTurn = session.activeTurn ?? session.currentTurn;
+        const currentTurn = session.activeTurn ?? session.lastTurn;
         // Check if we are at the latest turn
-        const isLatest = (session.activeTurn === undefined || session.activeTurn === null || session.activeTurn === session.currentTurn);
+        const isLatest = currentTurn === session.lastTurn;
 
         return (
             <div style={{ display: isVisible ? 'contents' : 'none' }}>
                 <Chat
                     ref={this.chatRef}
                     sessionId={session.id}
-                    turns={session.turns || []}
-                    onSend={onSend}
+                    // turns passed removed
+                    onUpdateSession={this.props.onUpdateSession}
                     status={session.status || 'idle'}
-                    statusMessages={session.statusMessages || []}
-                    startTime={session.requestStartTime}
+                    isVisible={isVisible}
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
                     selection={session.selection || null}
@@ -301,25 +271,17 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     onSelectChip={this.restoreSelection}
                     onCloneTurn={onCloneTurn}
                     activeTurn={session.activeTurn}
+                    lastTurn={session.lastTurn}
                     onPreviewTurn={onPreviewTurn}
 
                     provider={session.provider}
-                    onProviderChange={onProviderChange}
-                    onUndo={onUndo}
-                    onStop={this.props.onStop}
-                    onUpload={onUpload}
-                    onDeleteAttachment={onDeleteAttachment}
                     attachment={session.attachment}
-                    onAttachmentChange={onAttachmentChange}
-                    unsentInput={unsentInput}
-                    onSaveUnsent={onSaveUnsent}
+                    unsentInput={session.input ?? undefined}
                     sessionIds={sessionIds}
                     onSwitchSession={onSwitchSession}
-                    fastMode={session.unsent?.fastMode ?? session.fastMode}
-                    onFastModeChange={(val) => onSaveUnsent?.({ fastMode: val })}
+                    fastMode={session.fastMode}
                     sessionTitle={session.subject}
                     tokenUsage={session.tokenUsage}
-                    onLoadMore={this.props.onLoadMore}
                 />
 
                 {this.props.onResizeStart && (
@@ -332,7 +294,7 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                 <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
-                    version={this.getVersionForTurn(currentTurn)}
+                    version={session.currentVersion ?? 0}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
@@ -341,7 +303,6 @@ export class WorkSession extends React.Component<WorkSessionProps> {
                     isBusy={session.status === 'busy'}
                     isLatest={isLatest}
                     displayedTurn={currentTurn}
-                    fastMode={session.unsent?.fastMode ?? session.fastMode}
                 />
             </div>
         );
