@@ -1,0 +1,26 @@
+.layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.headerWrapper {
+    flex-shrink: 0;
+    background: var(--bg-color);
+}
+
+.content {
+    flex: 1;
+    position: relative;
+    /* Default is overflow-y: auto, handled via class composition or inline style in component if needed, 
+       but typically we want auto here unless overridden. */
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.noScroll {
+    overflow: hidden;
+}

@@ -31,6 +31,7 @@ class Settings extends Component<SettingsProps, SettingsState> {
     }
 
     componentDidMount() {
+        document.title = 'Settings';
         const login = this.getLoginFromToken();
         if (login) {
             this.setState({ login });
