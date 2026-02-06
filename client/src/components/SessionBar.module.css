@@ -2,16 +2,14 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    padding: 0.5rem;
-    /* overflow-x handled in sessionTabs */
-    margin-bottom: -6px;
 }
 
 .projectContext {
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    padding-bottom: 6px;
+    padding-left: 0.5rem;
+    padding-bottom: 4px;
 }
 
 .projectName {
@@ -40,10 +38,10 @@
 
 .sessionTabs {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     flex: 1;
     overflow-x: scroll;
-    padding-bottom: 2px;
+    /* padding-bottom: 4px; */
     /* Prevent scrollbar from overlapping content slightly */
 }
 
@@ -69,15 +67,22 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
+    padding: 4px 0.5rem;
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: 4px;
-    font-size: 0.8rem;
+    /* font-size: 0.85rem; */
     color: var(--text-secondary);
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.2s;
+    position: relative;
+    height: 28px;
+}
+
+.sessionTab:hover {
+    background: rgba(0, 0, 0, 0.03);
+    color: var(--text-primary);
 }
 
 .sessionTab.pending {
@@ -88,10 +93,11 @@
 }
 
 .sessionTab.active {
-    background: rgba(37, 99, 235, 0.1);
-    border-color: var(--accent);
+    background: white;
+    border-color: var(--border-color);
     color: var(--accent);
     font-weight: 500;
+    z-index: 1;
 }
 
 .sessionTabStatus {
@@ -104,9 +110,9 @@
 }
 
 .sessionTabStatus.busy {
-    border: 2px solid var(--text-secondary);
+    border: 2px solid currentColor;
     border-radius: 50%;
-    border-top-color: transparent;
+    border-top-color: transparent !important;
     animation: spin 1s linear infinite;
 }
 
@@ -116,14 +122,7 @@
     }
 }
 
-.sessionTab.active .sessionTabStatus {
-    color: var(--accent);
-}
-
-.sessionTab.active .sessionTabStatus.busy {
-    border-color: var(--accent);
-    border-top-color: transparent;
-}
+/* Removed active session tab status color override */
 
 .sessionTabClose {
     opacity: 0.5;
@@ -153,9 +152,8 @@
 }
 
 .sessionTabNew:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(37, 99, 235, 0.05);
+    background: rgba(0, 0, 0, 0.03);
+    color: var(--text-primary);
 }
 
 .sessionControls {
@@ -219,62 +217,22 @@
 
 /* Gray */
 
-.sessionGroup0,
-.sessionGroup1,
-.sessionGroup2,
-.sessionGroup3,
-.sessionGroup4,
-.sessionGroup5,
-.sessionGroup6,
-.sessionGroup7,
-.sessionGroup8,
-.sessionGroup9 {
-    border-left: 4px solid var(--group-color);
-}
+/* Group indicator coloring */
 
-.sessionTab.active.sessionGroup0,
-.sessionTab.active.sessionGroup1,
-.sessionTab.active.sessionGroup2,
-.sessionTab.active.sessionGroup3,
-.sessionTab.active.sessionGroup4,
-.sessionTab.active.sessionGroup5,
-.sessionTab.active.sessionGroup6,
-.sessionTab.active.sessionGroup7,
-.sessionTab.active.sessionGroup8,
-.sessionTab.active.sessionGroup9 {
-    border-color: var(--group-color);
-    color: var(--group-color);
-    border-left: 4px solid var(--group-color);
-    background: color-mix(in srgb, var(--group-color), var(--bg-color) 90%);
-    background-color: white;
-}
-
-.sessionTab.active.sessionGroup0 .sessionTabStatus,
-.sessionTab.active.sessionGroup1 .sessionTabStatus,
-.sessionTab.active.sessionGroup2 .sessionTabStatus,
-.sessionTab.active.sessionGroup3 .sessionTabStatus,
-.sessionTab.active.sessionGroup4 .sessionTabStatus,
-.sessionTab.active.sessionGroup5 .sessionTabStatus,
-.sessionTab.active.sessionGroup6 .sessionTabStatus,
-.sessionTab.active.sessionGroup7 .sessionTabStatus,
-.sessionTab.active.sessionGroup8 .sessionTabStatus,
-.sessionTab.active.sessionGroup9 .sessionTabStatus {
+.sessionGroup0 .sessionTabStatus,
+.sessionGroup1 .sessionTabStatus,
+.sessionGroup2 .sessionTabStatus,
+.sessionGroup3 .sessionTabStatus,
+.sessionGroup4 .sessionTabStatus,
+.sessionGroup5 .sessionTabStatus,
+.sessionGroup6 .sessionTabStatus,
+.sessionGroup7 .sessionTabStatus,
+.sessionGroup8 .sessionTabStatus,
+.sessionGroup9 .sessionTabStatus {
     color: var(--group-color);
 }
 
-.sessionTab.active.sessionGroup0 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup1 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup2 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup3 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup4 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup5 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup6 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup7 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup8 .sessionTabStatus.busy,
-.sessionTab.active.sessionGroup9 .sessionTabStatus.busy {
-    border-color: var(--group-color);
-    border-top-color: transparent;
-}
+/* Removed group-based tab styling overrides */
 
 .sessionTitle {
     overflow: hidden;
@@ -288,7 +246,7 @@
 
 .dropIndicator {
     min-width: 4px;
-    margin: 0 -5px;
+    margin: 0 -4px;
     background-color: var(--accent);
     pointer-events: none;
 }

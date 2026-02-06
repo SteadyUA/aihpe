@@ -80,7 +80,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
     initApp = async () => {
         const { router, fetchSession, projectId, fetchProject, syncProjectSessions, sessionOrder } = this.props;
 
-        const urlSessionId = (router.params as Record<string, string | undefined>)['sessionId'];
+        const urlSessionId = router.searchParams.get('sessionId');
 
         if (urlSessionId) {
             const sessionData = await fetchSession(urlSessionId);
