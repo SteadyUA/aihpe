@@ -1,28 +1,11 @@
 services:
-  # 1. VPN SERVICE (Sidecar)
-  vpn:
-    image: dperson/openvpn-client
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
-    volumes:
-      - ./vpn.ovpn:/vpn/vpn.ovpn
-    security_opt:
-      - label:disable
+  app:
+    build:
+      context: .
+      args:
+        APP_BASE_PATH: "${APP_BASE_PATH}"
     ports:
       - "${PORT}:${PORT}"
-    env_file:
-      - .env
-    command: -f ""
-    restart: always
-
-  # 2. APPLICATION SERVICE
-  app:
-    build: .
-    network_mode: "service:vpn"
-    depends_on:
-      - vpn
     volumes:
       - "./server/data:${DATA_DIR}"
     restart: always

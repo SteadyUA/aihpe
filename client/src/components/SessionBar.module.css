@@ -2,6 +2,8 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
+    /* Ensure the bar itself doesn't overflow unpredictably, though it's usually inside a layout */
+    min-width: 0;
 }
 
 .projectContext {
@@ -36,13 +38,27 @@
     background-color: var(--success, #22c55e);
 }
 
+.tabsContainer {
+    display: flex;
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    /* Important for flex items */
+}
+
 .sessionTabs {
     display: flex;
     gap: 4px;
     flex: 1;
     overflow-x: scroll;
-    /* padding-bottom: 4px; */
+    overflow-y: hidden;
+    padding-top: 4px;
     /* Prevent scrollbar from overlapping content slightly */
+}
+
+.sessionTabs.scrolling::-webkit-scrollbar-thumb {
+    background: var(--border-color);
 }
 
 .sessionTabs::-webkit-scrollbar {
@@ -55,12 +71,37 @@
 }
 
 .sessionTabs::-webkit-scrollbar-thumb {
-    background: var(--border-color);
+    background: transparent;
     border-radius: 4px;
 }
 
 .sessionTabs::-webkit-scrollbar-thumb:hover {
     background: var(--text-secondary);
+}
+
+.scrollIndicator {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.scrollIndicatorVisible {
+    opacity: 1;
+}
+
+.scrollIndicatorLeft {
+    left: 0;
+    background: linear-gradient(to right, var(--bg-primary, white) 20%, transparent);
+}
+
+.scrollIndicatorRight {
+    right: 0;
+    background: linear-gradient(to left, var(--bg-primary, white) 20%, transparent);
 }
 
 .sessionTab {
@@ -78,6 +119,8 @@
     transition: all 0.2s;
     position: relative;
     height: 28px;
+    flex-shrink: 0;
+    /* Prevent shrinking */
 }
 
 .sessionTab:hover {
@@ -249,4 +292,5 @@
     margin: 0 -4px;
     background-color: var(--accent);
     pointer-events: none;
+    z-index: 2;
 }

@@ -3,12 +3,19 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+# Install build dependencies
+RUN apt-get update && apt-get install -y python3 make g++
+
+ARG APP_BASE_PATH
+ENV APP_BASE_PATH=$APP_BASE_PATH
+
 # Copy root package files
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY server/package*.json ./server/
 
 # Install dependencies
+RUN npm install -g npm@latest
 RUN npm ci
 
 # Copy source code
@@ -31,12 +38,14 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
-COPY server/package*.json ./server/
+# We only copy the server package files to treat it as a standalone app, avoiding workspace devDependencies
+COPY server/package*.json ./
 
 # Install only production dependencies for server
-WORKDIR /app/server
-RUN npm ci --omit=dev
+RUN npm install -g npm@latest
+# We use npm install instead of ci because the lockfile was generated in a monorepo
+# and we are now installing as a standalone app, so the lockfile needs to be updated.
+RUN npm install --omit=dev && npm prune --production && npm cache clean --force
 
 # Copy built artifacts from builder
 COPY --from=builder /app/server/dist ./dist

@@ -19,6 +19,7 @@ interface WorkspaceLayoutProps extends SessionContextProps, RouterProps {
     projectDefaultProvider?: LlmProvider;
     projectModelRole?: string;
     initialProjectSessions?: any[];
+    initialActiveSessionId?: string | null;
 
     onUpdateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string, role: string) => Promise<void>;
     onCreateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string) => Promise<void>;
@@ -42,6 +43,10 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
 
     componentDidMount() {
         this.updateTitle();
+        if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
+            const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
+            this.props.syncProjectSessions(this.props.initialProjectSessions, sessionId);
+        }
         this.initApp();
     }
 
@@ -57,7 +62,8 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
 
         if (this.props.initialProjectSessions !== prevProps.initialProjectSessions) {
             if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
-                this.props.syncProjectSessions(this.props.initialProjectSessions);
+                const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
+                this.props.syncProjectSessions(this.props.initialProjectSessions, sessionId);
             }
         }
     }
@@ -96,7 +102,8 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                             if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
                                 // Use passed sessions from parent (ProjectWorkspace) to avoid double fetch
                                 console.log('[WorkspaceLayout] Syncing initial sessions', this.props.initialProjectSessions);
-                                syncProjectSessions(this.props.initialProjectSessions);
+                                const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
+                                syncProjectSessions(this.props.initialProjectSessions, sessionId);
                             } else {
                                 console.log('[WorkspaceLayout] Fetching project fresh');
                                 await fetchProject(sessionData.projectId, syncProjectSessions);
@@ -111,8 +118,6 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
     toggleProjectSettings = () => {
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
     };
-
-
 
     handleCreateProjectWrapper = async (rules: string, imgPref: string, provider: LlmProvider, name: string) => {
         await this.props.onCreateProject(rules, imgPref, provider, name);
@@ -139,7 +144,6 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             confirmDeleteSession,
             cancelDeleteSession,
             handleSessionReorder,
-            router
         } = this.props;
 
         const {

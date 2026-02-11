@@ -46,5 +46,17 @@ export function createApp(): express.Express {
         classTransformer: true,
     });
 
+    // SPA Fallback: Serve index.html for any unknown non-API routes
+    if (process.env.NODE_ENV !== 'development') {
+        app.get(/(.*)/, (req, res) => {
+            if (req.path.startsWith(`${basePath}/api`)) {
+                // Let API 404s follow standard behavior or return JSON
+                res.status(404).json({ message: 'Not Found' });
+                return;
+            }
+            res.sendFile(path.join(publicDir, 'index.html'));
+        });
+    }
+
     return app;
 }

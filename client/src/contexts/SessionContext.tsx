@@ -547,4 +547,4 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
     }
 }
 
-export const SessionProvider = withRouter(SessionProviderInternal);
+export const SessionProvider = withRouter<SessionProviderProps>(SessionProviderInternal);

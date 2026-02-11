@@ -18,6 +18,7 @@ interface ProjectWorkspaceState {
     projectDefaultProvider: LlmProvider;
     projectModelRole: string;
     projectSessions: any[];
+    activeSessionId?: string | null;
 }
 
 class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWorkspaceState> {
@@ -31,6 +32,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             projectDefaultProvider: 'openai',
             projectModelRole: '',
             projectSessions: [],
+            activeSessionId: null
         };
     }
 
@@ -70,7 +72,8 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                 projectImageGenerationPref: data.imageGenerationPref,
                 projectDefaultProvider: data.defaultProvider,
                 projectModelRole: data.modelRole,
-                projectSessions: data.sessions || []
+                projectSessions: data.sessions || [],
+                activeSessionId: data.activeSessionId
             }, () => {
                 if (sessionContextSync && data.sessions) {
                     sessionContextSync(data.sessions, data.activeSessionId);
@@ -179,6 +182,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                     projectDefaultProvider={projectDefaultProvider}
                     projectModelRole={projectModelRole}
                     initialProjectSessions={this.state.projectSessions}
+                    initialActiveSessionId={this.state.activeSessionId}
 
                     onUpdateProject={this.handleUpdateProject}
                     onCreateProject={this.handleCreateProject}
