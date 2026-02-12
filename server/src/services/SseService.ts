@@ -39,9 +39,10 @@ export class SseService {
 
     addClient(request: Request, response: Response): void {
         response.setHeader('Content-Type', 'text/event-stream');
-        response.setHeader('Cache-Control', 'no-cache');
+        response.setHeader('Cache-Control', 'no-cache, no-transform');
         response.setHeader('Connection', 'keep-alive');
         response.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx buffering
+        response.setHeader('Transfer-Encoding', 'chunked');
         response.flushHeaders?.();
         response.write('retry: 5000\n\n');
 
