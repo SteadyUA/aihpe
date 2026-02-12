@@ -100,8 +100,8 @@ const areArraysEqual = (a?: any[], b?: any[]) => {
 
 class Message extends React.Component<MessageProps> {
     shouldComponentUpdate(nextProps: MessageProps) {
-        const { msg, sessionIds, statusMessages, ...otherProps } = this.props;
-        const { msg: nextMsg, sessionIds: nextSessionIds, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
+        const { msg, sessionIds, sessionId, statusMessages, ...otherProps } = this.props;
+        const { msg: nextMsg, sessionIds: nextSessionIds, sessionId: nextSessionId, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
 
         // 1. Primitive props check (shallow comparison of the rest)
         const keys = Object.keys(otherProps) as (keyof typeof otherProps)[];
@@ -110,6 +110,8 @@ class Message extends React.Component<MessageProps> {
         }
         // Also check if nextProps has new keys (though unlikely with TS)
         if (Object.keys(nextOtherProps).length !== keys.length) return true;
+
+        if (sessionId !== nextSessionId) return true;
 
         // 2. Message content check
         if (msg.content !== nextMsg.content) return true;
@@ -131,7 +133,7 @@ class Message extends React.Component<MessageProps> {
     render() {
         const {
             msg,
-            id,
+            sessionId,
             onSelectChip,
             onCloneTurn,
             onPreviewTurn,
@@ -164,7 +166,7 @@ class Message extends React.Component<MessageProps> {
 
         return (
             <div
-                id={id}
+                id={`msg-session-${sessionId}-turn-${msg.turn}`}
                 className={messageClass}
                 onClick={
                     isAssistant && onPreviewTurn
@@ -374,7 +376,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     private richInputRef = React.createRef<RichInput>();
     private lastSavedUnsent: UnsentData = {};
     private messagesRef = React.createRef<HTMLDivElement>();
-    private resizeObserver: ResizeObserver | null = null;
 
     constructor(props: ChatProps) {
         super(props);
@@ -408,17 +409,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidMount() {
-        if (this.props.sessionId && this.props.isVisible) {
+        if (this.props.sessionId && this.props.isVisible && this.props.status !== 'pending') {
             this.fetchTurns();
-        }
-
-        if (this.messagesRef.current) {
-            this.resizeObserver = new ResizeObserver(() => {
-                if (this.props.status === 'busy' && this.isLastTurn()) {
-                    this.scrollToActiveTurn('smooth', 'end');
-                }
-            });
-            this.resizeObserver.observe(this.messagesRef.current);
         }
 
         window.addEventListener('processed-chat-event', this.handleServerMessage as EventListener);
@@ -485,6 +477,16 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
 
     componentDidUpdate(prevProps: ChatProps, prevState: ChatState) {
+        if (prevProps.sessionId !== this.props.sessionId) {
+            this.setState({ historyLoaded: false, turns: [] });
+            this.fetchTurns();
+            return;
+        }
+
+        if (this.props.status === 'idle' && prevProps.status !== 'idle') {
+            this.fetchTurns();
+        }
+
         if (!prevProps.isVisible && this.props.isVisible && !this.state.historyLoaded) {
             this.fetchTurns();
         }
@@ -506,18 +508,13 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         const turnChanged = prevProps.activeTurn !== this.props.activeTurn;
         const historyJustLoaded = !prevState.historyLoaded && this.state.historyLoaded;
 
-
         if (turnChanged) {
             this.scrollToActiveTurn('smooth', 'start');
             this.syncVersion(this.props.activeTurn);
         } else if (historyJustLoaded) {
-            requestAnimationFrame(() => {
-                this.scrollToActiveTurn('auto', 'start');
-            });
+            this.scrollToActiveTurn('auto', 'start');
             this.syncVersion(this.props.activeTurn);
         }
-        // Removed generationFinished check that triggered fetchTurns
-        // Events now handle the updates.
     }
 
     syncVersion = (activeTurnProp: number | null) => {
@@ -528,19 +525,30 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.props.onUpdateSession({ currentVersion: version });
     }
 
-    scrollToActiveTurn = (behavior: ScrollBehavior = 'smooth', block: ScrollLogicalPosition = 'start') => {
+    scrollToActiveTurn = (behavior: ScrollBehavior = 'smooth', block: ScrollLogicalPosition = 'start', attempts = 0) => {
         const effectiveTurn = this.props.activeTurn ?? this.props.lastTurn;
-        const el = document.getElementById(`msg-turn-${effectiveTurn}`);
-        if (el) {
+
+        // Verify turn exists in data
+        const turnExists = this.state.turns.some(t => t.turn === effectiveTurn);
+        if (!turnExists && effectiveTurn !== 0) {
+            return;
+        }
+
+        const el = document.getElementById(`msg-session-${this.props.sessionId}-turn-${effectiveTurn}`);
+
+        // Check if element is visible (offsetParent is null if display: none or not in DOM tree)
+        const isVisible = el && el.offsetParent !== null;
+
+        if (el && isVisible) {
             el.scrollIntoView({ behavior, block });
+        } else if (attempts < 10) {
+            // Element might exist but be hidden (e.g. inside a display:none container or before layout)
+            // Retry with exponential backoff or just rAF
+            setTimeout(() => this.scrollToActiveTurn(behavior, block, attempts + 1), 50 * (attempts + 1));
         }
     };
 
     componentWillUnmount() {
-        if (this.resizeObserver) {
-            this.resizeObserver.disconnect();
-            this.resizeObserver = null;
-        }
         window.removeEventListener('processed-chat-event', this.handleServerMessage as EventListener);
     }
 
@@ -631,13 +639,15 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             let finalTurns: Turn[];
             if (beforeTurn !== undefined) {
                 finalTurns = [...newlyFetched, ...this.state.turns];
+                this.setState({ turns: finalTurns, historyLoaded: true, isLoading: false }, () => {
+                    this.syncVersion(this.props.activeTurn);
+                });
             } else {
                 finalTurns = newlyFetched;
+                this.setState({ turns: finalTurns, historyLoaded: true, isLoading: false }, () => {
+                    this.syncVersion(this.props.activeTurn);
+                });
             }
-
-            this.setState({ turns: finalTurns, historyLoaded: true, isLoading: false }, () => {
-                this.syncVersion(this.props.activeTurn);
-            });
 
             return { count: newlyFetched.length, hasMore: newlyFetched.length > 0 };
         } catch (e) {
@@ -948,13 +958,19 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     removeAttachment = async () => {
         const { sessionId, attachment } = this.props;
-        if (sessionId && attachment) {
-            try {
-                await apiAuth.fetch(`/api/sessions/${sessionId}/uploads/${attachment.filename}`, {
-                    method: 'DELETE'
-                });
-            } catch (error) {
-                console.error('Failed to delete attachment', error);
+        if (attachment) {
+            // 1. Explicitly clear unsent state via the /unsent endpoint
+            this.handleSaveUnsent({ attachment: null });
+
+            // 2. Perform actual file deletion
+            if (sessionId) {
+                try {
+                    await apiAuth.fetch(`/api/sessions/${sessionId}/uploads/${attachment.filename}`, {
+                        method: 'DELETE'
+                    });
+                } catch (error) {
+                    console.error('Failed to delete attachment', error);
+                }
             }
         }
         this.props.onUpdateSession({ attachment: undefined });
@@ -1125,7 +1141,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         </div>
                     )}
                 </div>
-                <div className={styles.messages} id="messages">
+                <div className={styles.messages}>
                     <div ref={this.messagesRef} className={styles.messagesContent}>
                         {isLoading && <div className={styles.spinner} />}
                         <div>
@@ -1148,18 +1164,20 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         }
                                         key={i}
                                         msg={m}
+                                        sessionIds={this.props.sessionIds}
                                         sessionId={this.props.sessionId}
                                         onSelectChip={onSelectChip}
                                         onCloneTurn={onCloneTurn}
-                                        onPreviewTurn={this.handlePreviewTurn}
-                                        isActiveTurn={isTurnMatch}
-                                        isDimmed={shouldDim}
-                                        isLastAssistant={i === lastAssistantIndex}
+                                        onPreviewTurn={onPreviewTurn}
+                                        isActiveTurn={effectiveActiveTurn === m.turn}
+                                        isDimmed={effectiveActiveTurn !== null && m.turn! > effectiveActiveTurn}
+                                        isLastAssistant={i === messages.length - 1 && m.role === 'assistant'}
                                         status={status}
                                         onUndo={this.handleUndo}
-                                        sessionIds={sessionIds}
+                                        isPending={false}
+                                        statusMessages={this.state.statusMessages}
+                                        startTime={this.state.startTime ?? undefined}
                                         onSwitchSession={onSwitchSession}
-                                        onImageLoad={this.handleImageLoad}
                                     />
                                 );
                             })}

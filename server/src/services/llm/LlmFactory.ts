@@ -6,7 +6,8 @@ import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
 import { OpenaiRawClient } from './OpenaiRawClient';
 import { ImageService } from '../image/ImageService';
-import { SessionStore } from '../session/SessionStore';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 import { LlmProvider } from '../../types/chat';
 
 @Service()
@@ -15,7 +16,10 @@ export class LlmFactory {
     private imageService!: ImageService;
 
     @Inject()
-    private sessionStore!: SessionStore;
+    private filesService!: FilesService;
+
+    @Inject()
+    private sessionService!: SessionService;
 
     getClient(provider: LlmProvider = 'openai'): LlmClient {
         let modelId = '';
@@ -50,7 +54,8 @@ export class LlmFactory {
         if (litellmUrl && litellmKey) {
             return new OpenaiRawClient(
                 this.imageService,
-                this.sessionStore,
+                this.filesService,
+                this.sessionService,
                 litellmUrl,
                 litellmKey,
                 modelId,
@@ -83,7 +88,8 @@ export class LlmFactory {
 
         return new AiSdkClient(
             this.imageService,
-            this.sessionStore,
+            this.filesService,
+            this.sessionService,
             model,
             modelId,
             maxTokens,

@@ -49,7 +49,7 @@
 
 .sessionTabs {
     display: flex;
-    gap: 4px;
+    /* gap: 4px; */
     flex: 1;
     overflow-x: scroll;
     overflow-y: hidden;
@@ -289,7 +289,7 @@
 
 .dropIndicator {
     min-width: 4px;
-    margin: 0 -4px;
+    margin: 0 -2px;
     background-color: var(--accent);
     pointer-events: none;
     z-index: 2;

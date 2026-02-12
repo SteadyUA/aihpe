@@ -173,7 +173,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
         if (!projectId) return <div>Loading Workspace...</div>;
 
         return (
-            <SessionProvider projectId={projectId}>
+            <SessionProvider projectId={projectId} initialActiveSessionId={this.state.activeSessionId}>
                 <WorkspaceLayout
                     projectId={projectId}
                     projectName={projectName}

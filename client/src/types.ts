@@ -63,7 +63,7 @@ export interface Session {
 
     // UI selections per session
     selection: string | null;
-    attachment?: ChatAttachment;
+    attachment?: ChatAttachment | null;
     isPicking: boolean;
     input?: string;
 

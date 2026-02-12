@@ -47,7 +47,6 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
             this.props.syncProjectSessions(this.props.initialProjectSessions, sessionId);
         }
-        this.initApp();
     }
 
     componentDidUpdate(prevProps: WorkspaceLayoutProps) {
@@ -82,38 +81,6 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             document.title = 'AiLand';
         }
     }
-
-    initApp = async () => {
-        const { router, fetchSession, projectId, fetchProject, syncProjectSessions, sessionOrder } = this.props;
-
-        const urlSessionId = router.searchParams.get('sessionId');
-
-        if (urlSessionId) {
-            const sessionData = await fetchSession(urlSessionId);
-
-            if (sessionData) {
-                if (sessionData.projectId) {
-                    if (sessionData.projectId !== projectId) {
-                        await fetchProject(sessionData.projectId, syncProjectSessions);
-                    } else {
-                        // Relaxed check: if we have 0 or 1 sessions (active only), we might be missing the full list.
-                        console.log('[WorkspaceLayout] Checking session order', { orderLen: sessionOrder.length, initialLen: this.props.initialProjectSessions?.length });
-                        if (sessionOrder.length <= 1) {
-                            if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
-                                // Use passed sessions from parent (ProjectWorkspace) to avoid double fetch
-                                console.log('[WorkspaceLayout] Syncing initial sessions', this.props.initialProjectSessions);
-                                const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
-                                syncProjectSessions(this.props.initialProjectSessions, sessionId);
-                            } else {
-                                console.log('[WorkspaceLayout] Fetching project fresh');
-                                await fetchProject(sessionData.projectId, syncProjectSessions);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    };
 
     toggleProjectSettings = () => {
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));

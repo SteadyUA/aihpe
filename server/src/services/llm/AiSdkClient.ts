@@ -17,18 +17,20 @@ import {
 } from './types';
 import { ImageService } from '../image/ImageService';
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
-import { SessionStore } from '../session/SessionStore';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 
 export class AiSdkClient extends BaseLlmClient {
 
     constructor(
         imageService: ImageService,
-        sessionStore: SessionStore,
+        filesService: FilesService,
+        sessionService: SessionService,
         private readonly model?: LanguageModel,
         private readonly modelId?: string,
         maxContextTokens: number = 128000,
     ) {
-        super(imageService, sessionStore, maxContextTokens);
+        super(imageService, filesService, sessionService, maxContextTokens);
     }
 
     async generatePage(

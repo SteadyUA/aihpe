@@ -33,18 +33,15 @@ export interface Project {
     modelRole?: string;
 }
 
-export interface SessionData {
+export interface SessionMetadata {
     id: string;
     projectId: string;
-    files: SessionFiles;
-    context: ChatMessage[];
     updatedAt: Date;
     group: number;
     currentVersion: number;
     lastTurn?: number;
     provider?: LlmProvider;
     fastMode?: boolean;
-    unsent?: UnsentData;
 
     status: SessionStatus;
     errorMessage?: string; // Persisted error message
@@ -53,8 +50,6 @@ export interface SessionData {
     // Conversation Summary Management
     summary?: string; // Cumulative summary of "dropped" history
     summaryTurn?: number; // The last turn included in the summary
-
-    turns: Turn[];
 }
 
 export interface TokenUsage {
@@ -93,9 +88,9 @@ export type ChatAttachment = ImageAttachment;
 
 
 export interface UnsentData {
-    input?: string;
-    attachment?: ChatAttachment;
-    selection?: string;
-    provider?: LlmProvider;
-    fastMode?: boolean;
+    input?: string | null;
+    attachment?: ChatAttachment | null;
+    selection?: string | null;
+    provider?: LlmProvider | null;
+    fastMode?: boolean | null;
 }

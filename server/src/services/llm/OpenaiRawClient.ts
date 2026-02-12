@@ -1,7 +1,8 @@
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
 import { GeneratePageRequest, GeneratePageResult, SessionFiles, SummarizeHistoryRequest } from './types';
 import { ImageService } from '../image/ImageService';
-import { SessionStore } from '../session/SessionStore';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 import { ChatMessage } from '../../types/chat';
 
 export class OpenaiRawClient extends BaseLlmClient {
@@ -10,13 +11,14 @@ export class OpenaiRawClient extends BaseLlmClient {
 
     constructor(
         imageService: ImageService,
-        sessionStore: SessionStore,
+        filesService: FilesService,
+        sessionService: SessionService,
         url: string,
         apiKey: string,
         private readonly modelId: string,
         maxContextTokens: number = 128000,
     ) {
-        super(imageService, sessionStore, maxContextTokens);
+        super(imageService, filesService, sessionService, maxContextTokens);
         // Ensure url doesn't end with slash if we append it, but usually standard is base url
         // If the url is just the base (e.g. http://localhost:4000), we might need to append /chat/completions later
         // But usually LITELLM_API_URL might be the full base. Standard openai is https://api.openai.com/v1

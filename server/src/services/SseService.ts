@@ -24,9 +24,10 @@ interface SseClient {
 
 export interface SessionCreatedPayload {
     sourceSessionId: string;
-    newSessionId: string;
+    id: string;
     group?: number;
     projectId?: string;
+    lastTurn?: number;
     timestamp?: string;
 }
 

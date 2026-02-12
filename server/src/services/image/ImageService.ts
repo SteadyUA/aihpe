@@ -6,6 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { imageSize } from 'image-size';
 import { SessionFiles } from '../../types/chat';
 import { ImageServiceFactory } from './ImageServiceFactory';
+import { SessionImage } from '../../entities/SessionImage';
+import { AppDataSource } from '../../data-source';
+import { MoreThan, LessThanOrEqual } from 'typeorm';
+import { In } from 'typeorm';
 
 export interface ImageMetadata {
     filename: string;
@@ -29,12 +33,13 @@ export interface TokenUsageData {
 export abstract class ImageService {
     protected modelId = 'gemini-2.5-flash-image';
     protected agentName = 'image';
+    protected readonly repository = AppDataSource.getRepository(SessionImage);
 
     protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
     protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;
     protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }>;
 
-    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
         const result = await this.generateRaw(description, abortSignal);
         const base64Data = result.base64;
 
@@ -63,7 +68,7 @@ export abstract class ImageService {
         }
 
         // Save metadata
-        this.saveMetadata(sessionId, version, {
+        await this.saveMetadata(sessionId, version, {
             filename,
             description,
             createdAt: new Date().toISOString(),
@@ -76,7 +81,7 @@ export abstract class ImageService {
         return filename;
     }
 
-    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
         // Resolve source file: check target version first (in case it was already modified in this turn)
         let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
         let sourcePath = path.join(sourceDir, filename);
@@ -125,7 +130,7 @@ export abstract class ImageService {
         }
 
         // Save metadata
-        this.saveMetadata(sessionId, targetVersion, {
+        await this.saveMetadata(sessionId, targetVersion, {
             filename,
             description: newDescription || prompt,
             createdAt: new Date().toISOString(),
@@ -198,7 +203,7 @@ export abstract class ImageService {
             isUsed: false,
         };
 
-        this.saveMetadata(sessionId, version, metadata);
+        await this.saveMetadata(sessionId, version, metadata);
 
         return metadata;
     }
@@ -219,85 +224,67 @@ export abstract class ImageService {
     }
 
     async updateImageDescription(sessionId: string, version: number, filename: string, newDescription: string): Promise<void> {
-        const metadataList = this.loadMetadata(sessionId, version);
-        const imageIndex = metadataList.findIndex(img => img.filename === filename);
-
-        if (imageIndex === -1) {
+        const image = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (!image) {
             throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
         }
-
-        metadataList[imageIndex].description = newDescription;
-
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to save updated image description for ${sessionId} v${version}`, e);
-            throw new Error('Failed to save image metadata');
-        }
+        image.description = newDescription;
+        await this.repository.save(image);
     }
 
     async listImages(sessionId: string, version: number): Promise<ImageMetadata[]> {
-        const metadata = this.loadMetadata(sessionId, version);
-        return metadata;
+        const images = await this.repository.find({ where: { sessionId, version } });
+        return images.map(img => ({
+            filename: img.filename,
+            description: img.description,
+            createdAt: img.createdAt.toISOString(),
+            model: img.model,
+            width: img.width,
+            height: img.height,
+            isUsed: img.isUsed
+        }));
     }
 
     async getImageInfo(sessionId: string, version: number, filename: string): Promise<ImageMetadata | undefined> {
-        const metadata = this.loadMetadata(sessionId, version);
-        return metadata.find(img => img.filename === filename);
+        const img = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (!img) return undefined;
+        return {
+            filename: img.filename,
+            description: img.description,
+            createdAt: img.createdAt.toISOString(),
+            model: img.model,
+            width: img.width,
+            height: img.height,
+            isUsed: img.isUsed
+        };
     }
 
     async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
-        const metadata = this.loadMetadata(sessionId, version);
-        if (metadata.length === 0) return;
+        const images = await this.repository.find({ where: { sessionId, version } });
+        if (images.length === 0) return;
 
-        let hasChanges = false;
         const htmlContent = files['index.html'] || files['html'] || '';
         const cssContent = files['styles.css'] || files['css'] || '';
         const jsContent = files['script.js'] || files['js'] || '';
 
-        const updatedMetadata = metadata.map(img => {
-            // Check usage
+        const updates = [];
+        for (const img of images) {
             const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename) || jsContent.includes(img.filename);
-
             if (img.isUsed !== isUsed) {
-                hasChanges = true;
-                return { ...img, isUsed };
+                img.isUsed = isUsed;
+                updates.push(img);
             }
-            return img;
-        });
+        }
 
-        if (hasChanges) {
-            const metaPath = this.getMetadataPath(sessionId, version);
-            try {
-                fs.writeFileSync(metaPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
-            } catch (e) {
-                console.error(`Failed to save updated image usage for ${sessionId} v${version}`, e);
-            }
+        if (updates.length > 0) {
+            await this.repository.save(updates);
         }
     }
 
     async deleteImage(sessionId: string, version: number, filename: string): Promise<void> {
-        const metadataList = this.loadMetadata(sessionId, version);
-        const imageIndex = metadataList.findIndex(img => img.filename === filename);
-
-        if (imageIndex === -1) {
-            throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
-        }
-
-        const image = metadataList[imageIndex];
-        if (image.isUsed) {
+        const image = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (image && image.isUsed) {
             throw new Error(`Cannot delete used image ${filename}`);
-        }
-
-        // Remove from metadata
-        metadataList.splice(imageIndex, 1);
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to update metadata after deleting ${filename}`, e);
-            throw new Error('Failed to update metadata');
         }
 
         // Delete file
@@ -309,8 +296,10 @@ export abstract class ImageService {
             }
         } catch (e) {
             console.error(`Failed to delete image file ${filename}`, e);
-            // We removed it from metadata, so it's "deleted" logically. 
-            // We might want to warn but not fail entirely if file was missing/locked.
+        }
+
+        if (image) {
+            await this.repository.remove(image);
         }
     }
 
@@ -321,42 +310,87 @@ export abstract class ImageService {
         return path.join(root, safeId, 'versions', String(safeVersion));
     }
 
+    async copyImagesToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
+        const sourceImages = await this.repository.find({ where: { sessionId, version: sourceVersion } });
+
+        for (const img of sourceImages) {
+            // Check if already exists in target (idempotency)
+            const exists = await this.repository.findOne({ where: { sessionId, version: targetVersion, filename: img.filename } });
+            if (exists) continue;
+
+            const newImg = new SessionImage();
+            newImg.sessionId = sessionId;
+            newImg.version = targetVersion;
+            newImg.filename = img.filename;
+            newImg.description = img.description;
+            newImg.createdAt = img.createdAt;
+            newImg.model = img.model;
+            newImg.width = img.width;
+            newImg.height = img.height;
+            newImg.isUsed = img.isUsed;
+
+            await this.repository.save(newImg);
+        }
+    }
+
+    async deleteImagesAfterVersion(sessionId: string, version: number): Promise<void> {
+        await this.repository.delete({
+            sessionId: sessionId,
+            version: MoreThan(version),
+        });
+    }
+
+    async deleteSessionImages(sessionId: string): Promise<void> {
+        await this.repository.delete({ sessionId });
+    }
+
+
     protected ensureDirectory(dir: string): void {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
     }
 
-    protected getMetadataPath(sessionId: string, version: number): string {
-        return path.join(this.resolveVersionDir(sessionId, version), 'images.json');
-    }
-
-    protected loadMetadata(sessionId: string, version: number): ImageMetadata[] {
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            if (!fs.existsSync(metaPath)) {
-                return [];
-            }
-            const content = fs.readFileSync(metaPath, 'utf-8');
-            return JSON.parse(content) as ImageMetadata[];
-        } catch (e) {
-            console.error(`Failed to load image metadata for ${sessionId} v${version}`, e);
-            return [];
+    protected async saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): Promise<void> {
+        let image = await this.repository.findOne({ where: { sessionId, version, filename: newEntry.filename } });
+        if (!image) {
+            image = new SessionImage();
+            image.sessionId = sessionId;
+            image.version = version;
+            image.filename = newEntry.filename;
         }
+
+        image.description = newEntry.description;
+        image.createdAt = new Date(newEntry.createdAt);
+        image.model = newEntry.model;
+        if (newEntry.width) image.width = newEntry.width;
+        if (newEntry.height) image.height = newEntry.height;
+        if (newEntry.isUsed !== undefined) image.isUsed = newEntry.isUsed;
+
+        await this.repository.save(image);
     }
 
-    protected saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): void {
-        let current = this.loadMetadata(sessionId, version);
-        // Remove existing entry if any to support updates
-        current = current.filter(item => item.filename !== newEntry.filename);
-        // Add new entry
-        current.push(newEntry);
+    async copySessionImages(sourceId: string, targetId: string, maxVersion?: number): Promise<void> {
+        const whereClause: any = { sessionId: sourceId };
+        if (maxVersion !== undefined) {
+            whereClause.version = LessThanOrEqual(maxVersion);
+        }
 
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(current, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to save image metadata for ${sessionId} v${version}`, e);
+        const sourceImages = await this.repository.find({ where: whereClause });
+
+        for (const img of sourceImages) {
+            const newImg = new SessionImage();
+            newImg.sessionId = targetId;
+            newImg.version = img.version;
+            newImg.filename = img.filename;
+            newImg.description = img.description;
+            newImg.createdAt = img.createdAt;
+            newImg.model = img.model;
+            newImg.width = img.width;
+            newImg.height = img.height;
+            newImg.isUsed = img.isUsed;
+
+            await this.repository.save(newImg);
         }
     }
 }

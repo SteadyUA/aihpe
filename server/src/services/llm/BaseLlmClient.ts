@@ -1,5 +1,6 @@
 import { ImageService } from '../image/ImageService';
-import { SessionStore } from '../session/SessionStore';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 import { GeneratePageRequest, GeneratePageResult, LlmClient, SessionFiles, SummarizeHistoryRequest } from './types';
 import { ChatMessage } from '../../types/chat';
 
@@ -19,7 +20,8 @@ export abstract class BaseLlmClient implements LlmClient {
 
     constructor(
         protected readonly imageService: ImageService,
-        protected readonly sessionStore: SessionStore,
+        protected readonly filesService: FilesService,
+        protected readonly sessionService: SessionService,
         protected readonly maxContextTokens: number = 128000,
     ) { }
 
@@ -30,9 +32,11 @@ export abstract class BaseLlmClient implements LlmClient {
         return this.maxContextTokens;
     }
 
-    protected ensureNextVersion(sessionId: string): number {
+    protected async ensureNextVersion(sessionId: string): Promise<number> {
         if (this.targetVersion === undefined) {
-            this.targetVersion = this.sessionStore.initNextVersion(sessionId);
+            const metadata = await this.sessionService.getMetadata(sessionId);
+            const currentVersion = metadata?.currentVersion || 0;
+            this.targetVersion = await this.filesService.initNextVersion(sessionId, currentVersion);
         }
         return this.targetVersion;
     }
@@ -196,7 +200,7 @@ Respond ONLY with the summary text.`;
                 //    This matches the FIRST code edit in this turn.
 
                 if (this.targetVersion === undefined) {
-                    this.ensureNextVersion(request.sessionId);
+                    await this.ensureNextVersion(request.sessionId);
                 }
 
                 const versionToUpdate = this.targetVersion !== undefined ? this.targetVersion : request.currentVersion;
@@ -250,7 +254,7 @@ Respond ONLY with the summary text.`;
                 return `Successfully updated ${file}`;
             },
             update_subject: async ({ subject }: { subject: string }) => {
-                this.sessionStore.upsert(request.sessionId, { subject });
+                await this.sessionService.updateMetadata(request.sessionId, { subject });
                 if (request.onPatch) {
                     request.onPatch({ subject });
                 }
@@ -298,7 +302,7 @@ Respond ONLY with the summary text.`;
             },
             generate_image: async ({ description, summary }: { description: string; summary: string }) => {
                 try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    const nextVersion = await this.ensureNextVersion(request.sessionId);
                     const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal, request.trackRequestTokenUsage);
                     return `Image generated successfully: ${filename}`;
                 } catch (error: any) {
@@ -307,7 +311,7 @@ Respond ONLY with the summary text.`;
             },
             edit_image: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
                 try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
+                    const nextVersion = await this.ensureNextVersion(request.sessionId);
                     // Use currentVersion as source, nextVersion as target
                     const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal, request.trackRequestTokenUsage);
                     return `Image edited successfully: ${savedFilename}`;

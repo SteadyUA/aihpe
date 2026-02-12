@@ -1,7 +1,10 @@
-import { Inject, Service } from 'typedi';
-import { ChatAttachment, ChatMessage, LlmProvider, SessionData, SessionStatus, Turn } from '../types/chat';
+import { Service } from 'typedi';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionMetadata, SessionStatus, Turn } from '../types/chat';
 import { ChatStatus, SseService } from './SseService';
-import { SessionStore } from './session/SessionStore';
+import { FilesService, EMPTY_FILES } from './session/FilesService';
+import { SessionService } from './session/SessionService';
+import { ContextService } from './session/ContextService';
+import { TurnService } from './session/TurnService';
 import { LlmFactory } from './llm/LlmFactory';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
@@ -10,16 +13,24 @@ import fs from 'fs';
 import path from 'path';
 import { getSessionsDir } from '../utils/pathUtils';
 import { TokenUsageService } from './TokenUsageService';
+import { UnsentService } from './session/UnsentService';
+import { randomUUID } from 'node:crypto';
+import { UploadService } from './image/UploadService';
 
 @Service()
 export class ChatService {
     constructor(
-        private readonly sessionStore: SessionStore,
+        private readonly filesService: FilesService,
+        private readonly sessionService: SessionService,
+        private readonly contextService: ContextService,
+        private readonly turnService: TurnService,
         private readonly sseService: SseService,
         private readonly llmFactory: LlmFactory,
         private readonly imageService: ImageService,
         private readonly projectService: ProjectService,
         private readonly tokenUsageService: TokenUsageService,
+        private readonly unsentService: UnsentService,
+        private readonly uploadService: UploadService,
     ) { }
 
     private activeGenerations = new Map<string, AbortController>();
@@ -33,7 +44,7 @@ export class ChatService {
         fastMode?: boolean,
     ): Promise<{
         turn: number;
-        session: SessionData;
+        // session: SessionData; // Removed session from return type
         promptData?: {
             message: string;
             attachment?: ChatAttachment;
@@ -48,7 +59,11 @@ export class ChatService {
             trimmed.length > 0 ||
             !!normalizedAttachment ||
             !!selection;
-        const session = this.sessionStore.getOrCreate(sessionId);
+
+        const metadata = await this.sessionService.getMetadata(sessionId);
+        if (!metadata) {
+            await this.createSession(sessionId, '');
+        }
 
         if (!hasContent) {
             this.notifyStatus(
@@ -57,19 +72,20 @@ export class ChatService {
                 'Message is empty. No changes applied.',
             );
             return {
-                turn: session.lastTurn ?? 0,
-                session,
+                turn: metadata?.lastTurn ?? 0,
+                // session, // Removed session from return type
                 skipped: true,
             };
         }
 
         // Update provider if specified and different
         if (provider) {
-            this.sessionStore.updateProvider(sessionId, provider);
+            await this.sessionService.updateMetadata(sessionId, { provider });
         }
 
-        // Reload session data after potential update
-        const currentSessionData = this.sessionStore.getOrCreate(sessionId);
+        // Reload session metadata after potential update
+        const currentMetadata = await this.sessionService.getMetadata(sessionId);
+        if (!currentMetadata) throw new Error(`Session ${sessionId} not found`);
 
         // 1. Append user message immediately
         const userContentForHistory = this.composeUserContent(
@@ -78,7 +94,7 @@ export class ChatService {
         );
         const now = new Date();
         // Determine turn: User message starts a new turn
-        const currentTurn = currentSessionData.lastTurn ?? 0;
+        const currentTurn = currentMetadata.lastTurn ?? 0;
 
         const newTurn = currentTurn + 1;
 
@@ -87,7 +103,7 @@ export class ChatService {
             content: userContentForHistory,
             createdAt: now,
             selection,
-            version: currentSessionData.currentVersion,
+            version: currentMetadata.currentVersion,
             turn: newTurn,
             attachment: normalizedAttachment,
         };
@@ -98,7 +114,7 @@ export class ChatService {
             createdAt: now,
             selection,
             attachment: normalizedAttachment,
-            version: currentSessionData.currentVersion,
+            version: currentMetadata.currentVersion,
             turn: newTurn,
         };
 
@@ -109,25 +125,31 @@ export class ChatService {
             // endTime: undefined, // Incomplete
             request: userContentForHistory,
             response: '',
-            provider: provider ?? currentSessionData.provider ?? 'openai',
-            fastMode: fastMode ?? currentSessionData.fastMode ?? false,
+            provider: provider ?? currentMetadata.provider ?? 'openai',
+            fastMode: fastMode ?? currentMetadata.fastMode ?? false,
             selection,
             attachment: normalizedAttachment,
-            version: currentSessionData.currentVersion,
+            version: currentMetadata.currentVersion,
         };
 
-        this.sessionStore.upsert(sessionId, {
-            context: [...currentSessionData.context, contextEntry],
-            turns: [...currentSessionData.turns, newTurnEntry],
-            lastTurn: newTurn, // Update lastTurn
+        // Append new messages
+        await this.contextService.appendMessage(sessionId, contextEntry);
+
+        // Append new turn
+        await this.turnService.appendTurn(sessionId, newTurnEntry);
+
+        await this.sessionService.updateMetadata(sessionId, {
+            lastTurn: newTurn,
             updatedAt: now,
-            fastMode: fastMode ?? currentSessionData.fastMode, // Persist fastMode if provided
-            unsent: undefined // Clear unsent data as we just sent it
+            fastMode: fastMode ?? currentMetadata.fastMode,
         });
+
+        // Clear unsent data as we just sent it
+        await this.unsentService.deleteUnsent(sessionId);
 
         return {
             turn: newTurn,
-            session: this.sessionStore.getOrCreate(sessionId),
+            // session: await this.getRequiredSessionData(sessionId), // REMOVED
             promptData: {
                 message: trimmed,
                 attachment: normalizedAttachment,
@@ -163,19 +185,15 @@ export class ChatService {
         const controller = new AbortController();
         this.activeGenerations.set(sessionId, controller);
 
-        let currentSessionData = this.sessionStore.getOrCreate(sessionId);
+        // Refresh session metadata to get the new summary
+        let currentMetadata = await this.sessionService.getMetadata(sessionId);
+        if (!currentMetadata) throw new Error(`Session ${sessionId} not found`);
 
         // 0. Generate history summary properly BEFORE generation
-        // This ensures the LLM gets the latest summary including the "dropped" messages
-        // We call it every turn, as it internally checks if there is work to do (idempotent).
-        if (await this.generateHistorySummary(sessionId, turn)) {
-            // Refresh session data to get the new summary
-            currentSessionData = this.sessionStore.getOrCreate(sessionId);
-        }
+        await this.generateHistorySummary(sessionId, turn);
 
         // 2. Prepare conversation history for prompt
-        // Use separate context list. Exclude the last message (just added) as it's the instruction.
-        const currentContext = currentSessionData.context;
+        const currentContext = await this.contextService.loadContext(sessionId);
 
         // Apply Step-based Window logic
         const startTurn = calculateContextStartTurn(turn);
@@ -229,42 +247,44 @@ export class ChatService {
             effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
 
-        const project = await this.projectService.getProject(currentSessionData.projectId);
+        const project = await this.projectService.getProject(currentMetadata.projectId);
         const rulesAndGoal = project?.rulesAndGoal;
         const imageGenerationPref = project?.imageGenerationPref;
         const modelRole = project?.modelRole;
+
+        const currentFiles = this.filesService.readVersionFiles(sessionId, currentMetadata.currentVersion) || EMPTY_FILES;
 
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
             let thoughtBuffer = '';
 
-            const client = this.llmFactory.getClient(currentSessionData.provider);
+            const client = this.llmFactory.getClient(currentMetadata.provider);
             const generation = await client.generatePage({
                 sessionId,
                 instructions: effectiveInstructions,
-                files: currentSessionData.files,
+                files: currentFiles,
                 conversation,
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
-                currentVersion: currentSessionData.currentVersion,
+                currentVersion: currentMetadata.currentVersion,
                 rulesAndGoal,
                 imageGenerationPref,
                 modelRole,
-                fastMode: fastModeOverride ?? currentSessionData.fastMode,
-                subject: currentSessionData.subject,
+                fastMode: fastModeOverride ?? currentMetadata.fastMode,
+                subject: currentMetadata.subject,
                 abortSignal: controller.signal,
-                summary: currentSessionData.summary, // Pass cumulative summary
-                trackRequestTokenUsage: async (u) => {
+                summary: currentMetadata.summary, // Pass cumulative summary
+                trackRequestTokenUsage: async (usage) => {
                     if (controller.signal.aborted) return;
                     await this.tokenUsageService.saveUsage({
-                        projectId: currentSessionData.projectId,
+                        projectId: currentMetadata.projectId,
                         sessionId: sessionId,
-                        agent: u.agent,
+                        agent: usage.agent,
                         turn: turn,
-                        model: u.model,
-                        prompt: u.prompt,
-                        completion: u.completion,
-                        total: u.total,
+                        model: usage.model,
+                        prompt: usage.prompt,
+                        completion: usage.completion,
+                        total: usage.total,
                     });
                 },
                 onPatch: (patch) => {
@@ -302,33 +322,36 @@ export class ChatService {
                         `Tool call: generate_variant`,
                     );
 
-                    // Re-instantiate session data just in case
-                    const session = this.sessionStore.getOrCreate(sessionId);
+                    // Re-instantiate metadata
+                    const sessionMetadata = await this.sessionService.getMetadata(sessionId);
+                    if (!sessionMetadata) throw new Error(`Session ${sessionId} not found`);
 
                     const targetTurn = Math.max(0, turn - 1);
-                    const { id: variantId } = this.sessionStore.prepareClone(sessionId);
+                    const variantId = randomUUID();
                     const variantGroup = Math.floor(Math.random() * 32);
 
-                    const newSession = await this.sessionStore.executeCloneAtTurn(variantId, sessionId, targetTurn);
+                    const newSession = await this.performCloneSession(variantId, sessionId, targetTurn);
 
                     // 2. Set up the new session
-                    this.sessionStore.upsert(newSession.id, {
+                    await this.sessionService.updateMetadata(newSession.id, {
                         group: variantGroup,
-                        context: newSession.context, // Already correct from clone
                         lastTurn: targetTurn,
                     });
+                    const updatedContext = await this.contextService.loadContext(newSession.id);
+                    await this.contextService.saveContext(newSession.id, updatedContext);
 
                     // Add to project
-                    if (session.projectId) {
-                        this.projectService.addSessionToProject(session.projectId, newSession.id);
+                    if (sessionMetadata.projectId) {
+                        await this.projectService.addSessionToProject(sessionMetadata.projectId, newSession.id);
                     }
 
                     // Emit creation event
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
-                        newSessionId: newSession.id,
+                        id: newSession.id,
                         group: variantGroup,
-                        projectId: session.projectId,
+                        projectId: sessionMetadata.projectId,
+                        lastTurn: targetTurn,
                     });
 
                     this.addUserMessage(
@@ -356,13 +379,14 @@ export class ChatService {
 
             if (generation.targetVersion !== undefined && generation.targetVersion !== null) {
                 // Merge existing files with new changes to avoid overwriting with partial updates
-                const mergedFiles = { ...currentSessionData.files, ...generation.files };
+                const mergedFiles = { ...currentFiles, ...generation.files };
 
-                const updated = this.sessionStore.updateFiles(
-                    sessionId,
-                    mergedFiles,
-                    generation.targetVersion,
-                );
+                await this.filesService.persistVersionFiles(sessionId, generation.targetVersion, mergedFiles);
+                await this.sessionService.updateMetadata(sessionId, {
+                    currentVersion: generation.targetVersion > currentMetadata.currentVersion ? generation.targetVersion : currentMetadata.currentVersion,
+                    updatedAt: new Date(),
+                });
+
                 await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
 
 
@@ -372,7 +396,6 @@ export class ChatService {
                 // REMOVED file-change event emission
             } else {
                 // No changes to files/version, just append messages
-                const session = this.sessionStore.getOrCreate(sessionId);
             }
 
             // Token usage is now tracked per-request via trackRequestTokenUsage callback
@@ -384,7 +407,8 @@ export class ChatService {
             };
 
             // Re-fetch strict session state
-            const updated = this.sessionStore.getOrCreate(sessionId);
+            const updatedMetadata = await this.sessionService.getMetadata(sessionId);
+            if (!updatedMetadata) throw new Error(`Session ${sessionId} not found`);
 
             if (generation.newMessages && generation.newMessages.length > 0) {
                 for (const msg of generation.newMessages) {
@@ -396,21 +420,18 @@ export class ChatService {
                         role: msg.role,
                         content: msg.content,
                         createdAt: new Date(),
-                        version: updated.currentVersion,
+                        version: updatedMetadata.currentVersion,
                         selection: msg.selection,
-                        turn: updated.lastTurn ?? 0, // Use current turn (which was updated by user message)
+                        turn: updatedMetadata.lastTurn ?? 0, // Use current turn (which was updated by user message)
                     };
-
-                    const sessionParams = this.sessionStore.getOrCreate(sessionId);
 
                     // Filter logic: User always in, others only if non-empty string
                     const shouldAddToHistory = msg.role === 'user' || uiContent.trim().length > 0;
 
                     // Update lists
-
-                    this.sessionStore.upsert(sessionId, {
-                        context: [...sessionParams.context, cleanMsg],
-                    });
+                    if (shouldAddToHistory) {
+                        await this.contextService.appendMessage(sessionId, cleanMsg);
+                    }
                 }
             }
 
@@ -443,7 +464,7 @@ export class ChatService {
                 this.appendAssistantMessage(
                     sessionId,
                     generation.summary,
-                    updated.currentVersion,
+                    updatedMetadata.currentVersion,
                     false, // Do not add to context
                 );
             }
@@ -453,27 +474,18 @@ export class ChatService {
                 role: 'assistant',
                 content: generation.summary,
                 createdAt: new Date(),
-                version: updated.currentVersion,
-                turn: updated.lastTurn ?? 0,
+                version: updatedMetadata.currentVersion,
+                turn: updatedMetadata.lastTurn ?? 0,
             };
 
-            const finalSession = this.sessionStore.getOrCreate(sessionId);
-
             // Update the existing turn with response, endTime and version
-            const updatedTurns = [...finalSession.turns];
-            const turnIndexFull = turn - 1; // turn is passed from addUserMessage
-            if (updatedTurns[turnIndexFull]) {
-                updatedTurns[turnIndexFull] = {
-                    ...updatedTurns[turnIndexFull],
-                    endTime: new Date(),
-                    response: generation.summary || '',
-                    version: updated.currentVersion,
-                };
-            }
-
-            this.sessionStore.upsert(sessionId, {
-                turns: updatedTurns
+            // turn is passed from addUserMessage (1-based), but turn in DB is also 1-based.
+            await this.turnService.updateTurn(sessionId, turn, {
+                endTime: new Date(),
+                response: generation.summary || '',
+                version: updatedMetadata.currentVersion,
             });
+            await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });
 
             // Summary generation moved to start of function
             /* 
@@ -517,22 +529,16 @@ export class ChatService {
             );
 
             // Update the failed turn
-            const finalSessionError = this.sessionStore.getOrCreate(sessionId);
-            const updatedTurnsError = [...finalSessionError.turns];
-            const errorTurnIndex = turn - 1;
+            // Update the failed turn
+            const finalMetadataError = await this.sessionService.getMetadata(sessionId);
+            if (!finalMetadataError) throw new Error(`Session ${sessionId} not found`);
 
-            if (updatedTurnsError[errorTurnIndex]) {
-                updatedTurnsError[errorTurnIndex] = {
-                    ...updatedTurnsError[errorTurnIndex],
-                    endTime: new Date(),
-                    response: description,
-                    version: finalSessionError.currentVersion,
-                };
-            }
-
-            this.sessionStore.upsert(sessionId, {
-                turns: updatedTurnsError
+            await this.turnService.updateTurn(sessionId, turn, {
+                endTime: new Date(),
+                response: description,
+                version: finalMetadataError.currentVersion,
             });
+            await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });
 
             // We don't throw here as this is a background task now
             console.error('Generation failed:', error);
@@ -557,7 +563,7 @@ export class ChatService {
 
         // 2. Undo last turn (cleanup)
         // This removes the user message and any partial state if persisted (though generatePage usually doesn't persist until done)
-        const result = this.sessionStore.undoLastTurn(sessionId);
+        const result = await this.undoLastTurn(sessionId);
 
         // 3. Notify status
         // Since we undid the turn, the frontend will likely reload or rely on result data.
@@ -590,12 +596,13 @@ export class ChatService {
         return this.activeGenerations.has(sessionId);
     }
 
-    private notifyStatus(
+
+    private async notifyStatus(
         sessionId: string,
         status: ChatStatus,
         message?: string,
         details?: any,
-    ): void {
+    ): Promise<void> {
         this.sseService.emitChatStatus({
             sessionId,
             status,
@@ -617,7 +624,7 @@ export class ChatService {
             // So we store 'started'/'generating'. Client should handle 'started' as busy.
         }
 
-        this.sessionStore.upsert(sessionId, {
+        await this.sessionService.updateMetadata(sessionId, {
             status: newStatus,
             errorMessage: status === 'error' ? message : undefined,
         });
@@ -759,15 +766,16 @@ export class ChatService {
         return message.trim();
     }
 
-    private appendAssistantMessage(
+    private async appendAssistantMessage(
         sessionId: string,
         content: any,
         version?: number,
         addToContext: boolean = true,
-    ): void {
+    ): Promise<void> {
         const uiContent = formatContentForUi(content);
 
-        const session = this.sessionStore.getOrCreate(sessionId);
+        const session = await this.sessionService.getMetadata(sessionId);
+        if (!session) throw new Error(`Session ${sessionId} not found`);
 
         const assistantMessage: ChatMessage = {
             role: 'assistant',
@@ -780,14 +788,10 @@ export class ChatService {
         // Filter logic for HISTORY (UI)
 
         // Context logic
-        let newContext = session.context;
         if (addToContext) {
-            newContext = [...newContext, assistantMessage];
+            await this.contextService.appendMessage(sessionId, assistantMessage);
+            await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });
         }
-
-        this.sessionStore.upsert(sessionId, {
-            context: newContext,
-        });
     }
 
     private enrichContentWithSelection(
@@ -801,9 +805,10 @@ export class ChatService {
         return content;
     }
 
-    public async generateHistorySummary(sessionId: string, turn: number): Promise<boolean> {
+    public async generateHistorySummary(sessionId: string, turn: number): Promise<void> {
 
-        const session = this.sessionStore.getOrCreate(sessionId);
+        const session = await this.sessionService.getMetadata(sessionId);
+        if (!session) throw new Error(`Session ${sessionId} not found`);
 
         // Apply Step-based Window logic (sync with generateResponse)
         const contextStartTurn = calculateContextStartTurn(turn);
@@ -817,23 +822,16 @@ export class ChatService {
 
         if (targetSummaryEnd <= previousSummaryTurn) {
             // console.log(`Skipping summarization for session ${sessionId}: target summary end ${targetSummaryEnd} <= previous summary turn ${previousSummaryTurn}`);
-            return false;
         }
 
         // Collect messages to summarize: turns (previousSummaryTurn + 1) to targetSummaryEnd
-        // We use context, but we might need to be careful if messages were already dropped from context?
-        // SessionData.context usually keeps growing? Or do we prune it?
-        // Current implementation: context is NOT pruned in upsert, just appended.
-        // But generateResponse slices it.
-        // So session.context has full history.
-
-        const messagesToSummarize = session.context.filter((msg) =>
+        const currentContext = await this.contextService.loadContext(sessionId);
+        const messagesToSummarize = currentContext.filter((msg) =>
             (msg.turn ?? 0) > previousSummaryTurn && (msg.turn ?? 0) <= targetSummaryEnd
         );
 
         if (messagesToSummarize.length === 0 && !session.summary) {
             console.log(`Skipping summarization for session ${sessionId}: no messages to summarize.`);
-            return false;
         }
 
         const project = await this.projectService.getProject(session.projectId);
@@ -850,25 +848,24 @@ export class ChatService {
                 modelRole,
                 abortSignal: this.activeGenerations.get(sessionId)?.signal,
                 previousSummary: session.summary,
-                trackRequestTokenUsage: async (u) => {
+                trackRequestTokenUsage: async (usage) => {
                     await this.tokenUsageService.saveUsage({
                         projectId: session.projectId,
                         sessionId: sessionId,
-                        agent: u.agent,
+                        agent: usage.agent,
                         turn: turn,
-                        model: u.model,
-                        prompt: u.prompt,
-                        completion: u.completion,
-                        total: u.total,
+                        model: usage.model,
+                        prompt: usage.prompt,
+                        completion: usage.completion,
+                        total: usage.total,
                     });
-                }
+                },
             });
 
             // Update session with new summary
-            this.sessionStore.upsert(sessionId, {
+            await this.sessionService.updateMetadata(sessionId, {
                 summary: summary,
                 summaryTurn: targetSummaryEnd,
-                // We do NOT add a message to history/context anymore.
             });
 
             console.log(`Generated history summary for session ${sessionId}. Added turns ${previousSummaryTurn + 1}-${targetSummaryEnd}. Total coverage: 1-${targetSummaryEnd}.`);
@@ -876,15 +873,16 @@ export class ChatService {
         } catch (error) {
             console.error(`Failed to generate history summary for session ${sessionId}:`, error);
         }
-        return true;
     }
 
     async rebuildSessionSummary(sessionId: string): Promise<void> {
-        const session = this.sessionStore.getOrCreate(sessionId);
+        const session = await this.sessionService.getMetadata(sessionId);
+        if (!session) throw new Error(`Session ${sessionId} not found`);
+
         console.log(`Rebuilding summary for session ${sessionId}, total turns: ${session.lastTurn || 0}`);
 
         // Reset summary
-        this.sessionStore.upsert(sessionId, {
+        await this.sessionService.updateMetadata(sessionId, {
             summary: undefined,
             summaryTurn: 0,
         });
@@ -910,7 +908,210 @@ export class ChatService {
         console.log(`Finished rebuilding summary for session ${sessionId}`);
     }
 
-    getSession(sessionId: string): SessionData {
-        return this.sessionStore.getOrCreate(sessionId);
+
+    public async createSession(sessionId: string, projectId: string, group?: number): Promise<SessionMetadata> {
+        const now = new Date();
+        const metadata: SessionMetadata = {
+            id: sessionId,
+            projectId,
+            updatedAt: now,
+            group: group ?? this.sessionService.getNextGroup(),
+            currentVersion: 0,
+            lastTurn: 0,
+            provider: 'openai',
+            fastMode: false,
+            status: 'idle',
+            subject: '...',
+        };
+
+        await this.sessionService.saveMetadata(metadata);
+        await this.contextService.saveContext(sessionId, []);
+        await this.turnService.saveTurns(sessionId, []);
+        this.filesService.persistVersionFiles(sessionId, 0, EMPTY_FILES);
+
+        return metadata;
     }
+
+    public async performCloneSession(targetId: string, sourceId: string, turn?: number): Promise<SessionMetadata> {
+        const sourceMetadata = await this.sessionService.getMetadata(sourceId);
+        if (!sourceMetadata) throw new Error(`Source session ${sourceId} not found`);
+
+        const sourceContext = await this.contextService.loadContext(sourceId);
+        const sourceTurns = await this.turnService.loadTurns(sourceId);
+
+        let targetVersion = sourceMetadata.currentVersion;
+        let lastTurn = sourceMetadata.lastTurn ?? 0;
+        let contextSnapshot = [...sourceContext];
+        let turnsSnapshot = [...sourceTurns];
+
+        if (turn !== undefined) {
+            const normalizedTurn = Math.floor(turn);
+            if (!Number.isFinite(normalizedTurn) || normalizedTurn < 0) {
+                throw new Error(`Invalid turn ${turn}`);
+            }
+            if (normalizedTurn > (sourceMetadata.lastTurn ?? 0)) {
+                throw new Error(`Turn ${normalizedTurn} exceeds current session turn ${sourceMetadata.lastTurn}`);
+            }
+
+            lastTurn = normalizedTurn;
+            contextSnapshot = sourceContext
+                .filter(m => typeof m.turn === 'number' && m.turn <= normalizedTurn)
+                .map(m => ({ ...m }));
+            turnsSnapshot = sourceTurns
+                .filter(t => t.turn <= normalizedTurn)
+                .map(t => ({ ...t }));
+
+            targetVersion = 0;
+            if (turnsSnapshot.length > 0) {
+                targetVersion = turnsSnapshot[turnsSnapshot.length - 1].version;
+            }
+            for (const ctx of contextSnapshot) {
+                if (typeof ctx.version === 'number' && ctx.version > targetVersion) {
+                    targetVersion = ctx.version;
+                }
+            }
+        }
+
+        const filesSnapshot = this.filesService.readVersionFiles(sourceId, targetVersion);
+        if (!filesSnapshot) {
+            throw new Error(`Files for version ${targetVersion} not found for session ${sourceId}`);
+        }
+
+        // We should eventually return just metadata or void.
+        // ChatController expects SessionData, so we construct it.
+        const newMetadata: SessionMetadata = {
+            ...sourceMetadata,
+            id: targetId,
+            updatedAt: new Date(),
+            currentVersion: targetVersion,
+            lastTurn: lastTurn,
+            status: 'idle',
+        };
+
+        this.filesService.deleteSessionDir(targetId);
+        if (turn === undefined) {
+            this.filesService.copyVersionHistory(sourceId, targetId);
+        } else {
+            this.filesService.copyVersionHistoryUpTo(sourceId, targetId, targetVersion);
+        }
+
+        const uploadMapping = await this.uploadService.copyUploads(sourceId, targetId);
+
+        // Update attachment IDs
+        contextSnapshot.forEach(msg => {
+            if (msg.attachment?.id && uploadMapping.has(msg.attachment.id)) {
+                msg.attachment = { ...msg.attachment, id: uploadMapping.get(msg.attachment.id)! };
+            }
+        });
+        turnsSnapshot.forEach(t => {
+            if (t.attachment?.id && uploadMapping.has(t.attachment.id)) {
+                t.attachment = { ...t.attachment, id: uploadMapping.get(t.attachment.id)! };
+            }
+        });
+
+        await this.imageService.copySessionImages(sourceId, targetId, turn === undefined ? undefined : targetVersion).catch(err => {
+            console.error(`Failed to copy images for session ${targetId}`, err);
+        });
+
+        await this.sessionService.saveMetadata(newMetadata);
+        await this.contextService.saveContext(targetId, contextSnapshot);
+        await this.turnService.saveTurns(targetId, turnsSnapshot);
+
+        return newMetadata;
+    }
+
+    public async undoLastTurn(sessionId: string): Promise<{
+        success: boolean;
+        restoredInput?: string;
+        restoredSelection?: string;
+        restoredAttachment?: ChatAttachment;
+        previousTurn?: number;
+    }> {
+        const sessionMetadata = await this.sessionService.getMetadata(sessionId);
+        if (!sessionMetadata) throw new Error(`Session ${sessionId} not found`);
+
+        const currentTurn = sessionMetadata.lastTurn ?? 0;
+
+        if (currentTurn <= 0) {
+            return { success: false, previousTurn: 0 };
+        }
+
+        // We need turns to know what to remove
+        const turns = await this.turnService.loadTurns(sessionId);
+        const turnToRemove = turns[currentTurn - 1]; // turns are 1-based index but array is 0-based
+
+        if (!turnToRemove) {
+            // Inconsistency? Just decrement lastTurn
+            await this.sessionService.updateMetadata(sessionId, {
+                lastTurn: currentTurn - 1,
+                updatedAt: new Date(),
+            });
+            return { success: true, previousTurn: currentTurn - 1 };
+        }
+
+        const restoredInput = turnToRemove.request;
+        const restoredSelection = turnToRemove.selection?.selector;
+        const restoredAttachment = turnToRemove.attachment;
+
+        const currentContext = await this.contextService.loadContext(sessionId);
+
+        const newContext = currentContext.filter(m => typeof m.turn !== 'number' || m.turn < currentTurn);
+        const newTurns = turns.filter(t => t.turn < currentTurn);
+
+        let targetVersion = 0;
+        if (newTurns.length > 0) {
+            targetVersion = newTurns[newTurns.length - 1].version;
+        }
+        for (const ctx of newContext) {
+            if (typeof ctx.version === 'number' && ctx.version > targetVersion) {
+                targetVersion = ctx.version;
+            }
+        }
+
+        this.filesService.cleanupHigherVersions(sessionId, targetVersion);
+
+        await this.sessionService.updateMetadata(sessionId, {
+            currentVersion: targetVersion,
+            lastTurn: currentTurn - 1,
+            updatedAt: new Date(),
+            status: 'idle',
+        });
+        await this.contextService.saveContext(sessionId, newContext);
+        await this.turnService.saveTurns(sessionId, newTurns);
+
+        await this.unsentService.saveUnsent(sessionId, {
+            input: restoredInput,
+            selection: restoredSelection,
+            attachment: restoredAttachment,
+        });
+
+        try {
+            await this.imageService.deleteImagesAfterVersion(sessionId, targetVersion);
+        } catch (e) {
+            console.error(`Failed to cleanup images for session ${sessionId} after undo`, e);
+        }
+
+        return {
+            success: true,
+            restoredInput,
+            restoredSelection,
+            restoredAttachment,
+            previousTurn: currentTurn - 1
+        };
+    }
+
+    public async deleteSession(sessionId: string): Promise<void> {
+        this.sessionService.deleteFromCache(sessionId);
+        this.filesService.deleteSessionDir(sessionId);
+
+        await Promise.all([
+            this.sessionService.deleteFromDb(sessionId),
+            this.contextService.deleteContext(sessionId),
+            this.turnService.deleteTurns(sessionId),
+            this.imageService.deleteSessionImages(sessionId).catch(e => console.error(`Failed to delete images`, e)),
+            this.unsentService.deleteUnsent(sessionId).catch(e => console.error(`Failed to delete unsent`, e)),
+            this.uploadService.deleteSessionUploads(sessionId).catch(e => console.error(`Failed to delete uploads`, e)),
+        ]);
+    }
+
 }

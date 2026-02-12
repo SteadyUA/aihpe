@@ -50,6 +50,7 @@ export function withSession<P extends SessionContextProps>(
 interface SessionProviderProps extends RouterProps {
     children: React.ReactNode;
     projectId: string | null;
+    initialActiveSessionId?: string | null;
 }
 
 interface SessionProviderState {
@@ -70,7 +71,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         this.state = {
             sessions: {},
             sessionOrder: [],
-            activeSessionId: null,
+            activeSessionId: props.initialActiveSessionId || null,
             isConnected: true, // Assumed handled by Global App, can listen to disconnect if needed
             sessionToDelete: null,
             stableSessionIds: [],
@@ -309,37 +310,49 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
     handleSessionCreated = (sessionData: any, sourceSessionId?: string) => {
         this.setState((prevState) => {
             const exists = prevState.sessions[sessionData.id];
-            if (exists) return null;
+
+            // If session exists and is NOT pending, we ignore it (duplicate event).
+            // If it IS pending, we need to update it with the confirm data (status: idle, etc).
+            if (exists && exists.status !== 'pending') return null;
+
+            const lastTurn = sessionData.lastTurn ?? sessionData.currentTurn ?? 0;
+
+            // If updating a pending session, assume status is 'idle' unless specified otherwise.
+            const status = sessionData.status ?? 'idle';
 
             const newSession: Session = {
+                ...(exists || {}), // Keep existing props if merging
                 id: sessionData.id,
-                status: 'idle',
-                projectId: sessionData.projectId ?? this.props.projectId ?? '',
-                lastTurn: sessionData.lastTurn ?? 0,
+                status: status,
+                projectId: sessionData.projectId ?? this.props.projectId ?? (exists?.projectId || ''),
+                lastTurn: lastTurn,
                 currentVersion: sessionData.currentVersion ?? 0,
-                activeTurn: 0,
-                activeTab: 'preview',
-                selection: null,
-                isPicking: false,
-                provider: sessionData.provider,
+                // Preserve activeTurn if exists (optimistic), else use lastTurn
+                activeTurn: (exists && exists.activeTurn !== null) ? exists.activeTurn : lastTurn,
+                activeTab: exists?.activeTab || 'preview',
+                selection: exists?.selection || null,
+                isPicking: exists?.isPicking || false,
+                provider: sessionData.provider ?? exists?.provider,
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
-                input: sessionData.unsent?.input,
-                subject: sessionData.subject || '...',
+                input: sessionData.unsent?.input ?? exists?.input,
+                subject: sessionData.subject || exists?.subject || '...',
             };
 
             let newOrder = [...prevState.sessionOrder];
-            const sourceId = sourceSessionId || (sessionData.sourceSessionId);
+            if (!exists) {
+                const sourceId = sourceSessionId || (sessionData.sourceSessionId);
 
-            if (sourceId && sourceId !== 'system') {
-                const sourceIndex = newOrder.indexOf(sourceId);
-                if (sourceIndex !== -1) {
-                    newOrder.splice(sourceIndex + 1, 0, sessionData.id);
+                if (sourceId && sourceId !== 'system') {
+                    const sourceIndex = newOrder.indexOf(sourceId);
+                    if (sourceIndex !== -1) {
+                        newOrder.splice(sourceIndex + 1, 0, sessionData.id);
+                    } else {
+                        newOrder.push(sessionData.id);
+                    }
                 } else {
                     newOrder.push(sessionData.id);
                 }
-            } else {
-                newOrder.push(sessionData.id);
             }
 
             const newStable = prevState.stableSessionIds.includes(sessionData.id)
@@ -350,18 +363,26 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 sessions: { ...prevState.sessions, [sessionData.id]: newSession },
                 sessionOrder: newOrder,
                 stableSessionIds: newStable,
-                activeSessionId: sessionData.id
+                activeSessionId: exists ? prevState.activeSessionId : sessionData.id // Don't switch if updating (already on it)
             };
         });
 
-        this.fetchSession(sessionData.id);
+        // Trigger fetch to ensure full data (e.g. tokenUsage)
+        const status = sessionData.status ?? 'idle';
+        if (status !== 'pending') {
+            this.fetchSession(sessionData.id);
+        }
     };
 
     createSession = async () => {
         if (this.creatingSessionPromise) {
             try {
-                const session = await this.creatingSessionPromise;
-                this.handleSessionCreated(session);
+                // Wait for existing promise
+                const sessionData = await this.creatingSessionPromise;
+                if (sessionData) {
+                    // Start pending session from existing data
+                    this.handleSessionCreated({ ...sessionData, status: 'pending' });
+                }
                 return;
             } catch (e) {
                 this.creatingSessionPromise = null;
@@ -369,15 +390,23 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         }
 
         try {
+            const projectId = this.props.projectId;
             this.creatingSessionPromise = apiAuth.fetch('/api/sessions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ projectId: this.props.projectId })
-            }).then(res => res.json());
+                body: JSON.stringify({ projectId })
+            }).then(res => {
+                if (!res.ok) throw new Error('Failed to create session');
+                return res.json();
+            });
 
-            const session = await this.creatingSessionPromise;
-            this.handleSessionCreated(session);
+            const sessionData = await this.creatingSessionPromise;
+
+            // Start optimistic pending session
+            this.handleSessionCreated({ ...sessionData, status: 'pending' });
+
             this.creatingSessionPromise = null;
+
         } catch (error) {
             console.error('Failed to create session', error);
             this.creatingSessionPromise = null;
@@ -467,7 +496,8 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             );
             if (!res.ok) throw new Error('Clone turn failed');
             const session = await res.json();
-            this.handleSessionCreated(session, activeSessionId);
+            // Force status to pending so Chat knows to wait for SSE (and then refetch turns)
+            this.handleSessionCreated({ ...session, status: 'pending' }, activeSessionId);
         } catch (error) {
             console.error('Failed to clone turn', error);
         }

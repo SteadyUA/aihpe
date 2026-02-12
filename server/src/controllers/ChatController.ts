@@ -27,6 +27,7 @@ import {
     ValidateIf,
     ValidateNested,
     IsBoolean,
+    IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Service } from 'typedi';
@@ -35,12 +36,17 @@ import fs from 'fs';
 import { ChatService } from '../services/ChatService';
 import { ProjectService } from '../services/ProjectService';
 import { SseService } from '../services/SseService';
-import { SessionStore } from '../services/session/SessionStore';
+import { FilesService } from '../services/session/FilesService';
+import { SessionService } from '../services/session/SessionService';
+import { ContextService } from '../services/session/ContextService';
+import { TurnService } from '../services/session/TurnService';
 import { TokenUsageService } from '../services/TokenUsageService';
 import { LlmFactory } from '../services/llm/LlmFactory';
 
 import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
+import { UploadService } from '../services/image/UploadService';
+import { UnsentService } from '../services/session/UnsentService';
 import { getSessionsDir } from '../utils/pathUtils';
 
 class AttachmentRequest {
@@ -176,12 +182,17 @@ class UpdateProjectRequest {
 export class ChatController {
     constructor(
         private readonly chatService: ChatService,
-        private readonly sessionStore: SessionStore,
         private readonly projectService: ProjectService,
         private readonly sseService: SseService,
         private readonly imageService: ImageService,
         private readonly tokenUsageService: TokenUsageService,
         private readonly llmFactory: LlmFactory,
+        private readonly uploadService: UploadService,
+        private readonly unsentService: UnsentService,
+        private readonly filesService: FilesService,
+        private readonly sessionService: SessionService,
+        private readonly contextService: ContextService,
+        private readonly turnService: TurnService,
     ) {
         console.log('ChatController initialized');
     }
@@ -223,17 +234,19 @@ export class ChatController {
         }
 
         const sessionIds = await this.projectService.getProjectSessions(projectId);
-        const sessions = sessionIds.reduce((acc, id) => {
-            const s = this.sessionStore.getOrCreate(id);
-            // Strict check: verify the session actually belongs to this project.
-            // If the session was resurrected (created fresh with empty projectId) or mismatched, exclude it.
-            // We verify if s.projectId matches, OR if it's a legacy session we might want to allow it?
-            // But for new logic, checking projectId is safer to avoid ghost sessions.
-            if (s.projectId === projectId) {
-                acc.push({ sessionId: s.id, group: s.group, status: s.status, subject: s.subject, lastTurn: s.lastTurn ?? 0 });
+        const sessionDataList = [];
+        for (const id of sessionIds) {
+            const s = await this.sessionService.getMetadata(id);
+            if (s && s.projectId === projectId) {
+                sessionDataList.push({
+                    sessionId: s.id,
+                    group: s.group,
+                    status: s.status,
+                    subject: s.subject,
+                    lastTurn: s.lastTurn ?? 0
+                });
             }
-            return acc;
-        }, [] as { sessionId: string, group: number, status: string, subject?: string, lastTurn: number }[]);
+        }
 
         return {
             id: project.id,
@@ -243,7 +256,7 @@ export class ChatController {
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
             modelRole: project.modelRole,
-            sessions,
+            sessions: sessionDataList,
         };
     }
 
@@ -296,7 +309,7 @@ export class ChatController {
             try {
                 // Ensure active generation is stopped
                 await this.chatService.stopGeneration(sessionId).catch(() => { });
-                this.sessionStore.deleteSession(sessionId);
+                await this.chatService.deleteSession(sessionId);
             } catch (e) {
                 console.error(`Failed to delete session ${sessionId} during project deletion`, e);
                 // Continue deleting other sessions and the project
@@ -311,95 +324,78 @@ export class ChatController {
 
     @Post('/api/sessions')
     @UseBefore(AuthMiddleware)
-    createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
+    async createSession(@Body() body: CreateSessionRequest, @Res() response: Response) {
         const { projectId } = body;
-        const { id, group } = this.sessionStore.prepareCreate(); // prepareCreate doesn't need projectId
+        const id = crypto.randomUUID();
+        const group = this.sessionService.getNextGroup();
 
-        // Start creation in background
+        // 1. Immediate response
+        response.status(201).json({
+            id,
+            projectId,
+            group,
+        });
+
+        // 2. Background processing
         setImmediate(async () => {
             try {
-                // Determine provider: explicitly requested > project default > 'openai' (default in session store)
-                // SessionStore.executeCreate handles defaults if undefined is passed, but we want project default logic.
+                // Determine provider: explicitly requested > project default > 'openai'
                 const project = await this.projectService.getProject(projectId);
-                const provider = project?.defaultProvider; // If project has a default, pass it.
+                const provider = project?.defaultProvider || 'openai';
 
-                // If executeCreate accepted provider, we'd pass it here. 
-                // Currently executeCreate doesn't take provider arg, it defaults to 'openai' inside.
-                // We need to update SessionStore to accept provider or update session after creation.
-                // Looking at SessionStore.executeCreate(id, projectId, group) -> it calls createFreshSession -> defaults to 'openai'.
-
-                await this.sessionStore.executeCreate(id, projectId, group);
+                await this.chatService.createSession(id, projectId, group);
 
                 // If we have a project default provider, update the session immediately
                 if (provider) {
-                    this.sessionStore.upsert(id, { provider });
+                    await this.sessionService.updateMetadata(id, { provider });
                 }
 
                 await this.projectService.addSessionToProject(projectId, id);
+
+                // 3. Emit event to confirm creation
                 this.sseService.emitSessionCreated({
-                    sourceSessionId: 'system',
-                    newSessionId: id,
+                    sourceSessionId: 'system', // or empty
+                    id,
                     group,
                     projectId,
                 });
+
             } catch (error) {
-                console.error('Background session creation failed', error);
+                console.error(`Background session creation failed for ${id}`, error);
+                // Should we emit an error event?
                 this.sseService.emitChatStatus({
                     sessionId: id,
                     status: 'error',
-                    message: 'Failed to create session in background',
-                    details: error,
+                    message: 'Failed to create session',
                 });
             }
         });
 
-        return response.status(201).json({
-            id,
-            group,
-            currentVersion: 0,
-            files: {},
-            updatedAt: new Date().toISOString(),
-            projectId,
-            status: 'idle',
-        });
+        return response;
     }
 
 
 
     @Post('/api/sessions/:sessionId/unsent')
     @UseBefore(AuthMiddleware)
-    saveUnsent(
+    async saveUnsent(
         @Param('sessionId') sessionId: string,
         @Body() body: UnsentDataRequest,
     ) {
-        const session = this.sessionStore.getOrCreate(sessionId);
-
         // Filter out undefined values from body to ensure we don't overwrite existing data with undefined
         // This is crucial for partial updates (e.g. saving input shouldn't clear selection)
-        // Initialize updates using the Current state (avoiding spread in the final upsert)
-        const updates: Partial<UnsentDataRequest> = { ...(session.unsent || {}) };
-
-        // Define a helper or just check each field. 
-        // If value is null, remove it from updates (clearing the field).
-        // If value is defined (and not null), update it.
-        // If value is undefined, ignore (preserve existing).
+        const updates: Partial<UnsentData> = {};
 
         const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider', 'fastMode'];
 
         for (const field of fields) {
             const value = body[field];
             if (value !== undefined) {
-                if (value === null) {
-                    delete updates[field];
-                } else {
-                    updates[field] = value as any;
-                }
+                updates[field] = value as any;
             }
         }
 
-        this.sessionStore.upsert(sessionId, {
-            unsent: updates
-        });
+        await this.unsentService.saveUnsent(sessionId, updates);
 
         return { status: 'saved' };
     }
@@ -475,57 +471,29 @@ export class ChatController {
                     );
                 }
 
-                const hash = crypto.createHash('md5').update(req.file.buffer).digest('hex');
-                const ext = path.extname(req.file.originalname);
-                const filename = `${hash}${ext}`;
-                const filePath = path.join(uploadDir, filename);
-
-                // Metadata handling
-                const metadataPath = path.join(uploadDir, 'uploads.json');
-                let metadata: Record<string, any> = {};
                 try {
-                    if (fs.existsSync(metadataPath)) {
-                        const content = fs.readFileSync(metadataPath, 'utf-8');
-                        metadata = JSON.parse(content);
-                    }
-                } catch (e) {
-                    console.error('Failed to read uploads metadata', e);
-                }
+                    const metadata = await this.uploadService.saveUpload(sessionId, req.file);
 
-                try {
-                    if (!fs.existsSync(filePath)) {
-                        fs.writeFileSync(filePath, req.file.buffer);
-                    }
-
-                    // Always ensure metadata exists/is updated
-                    metadata[filename] = {
-                        originalName: req.file.originalname,
-                        timestamp: Date.now(),
-                        mimeType: req.file.mimetype,
-                        size: req.file.size
-                    };
-                    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+                    resolve(
+                        res.json({
+                            filename: metadata.filename,
+                            type: 'image',
+                            originalName: metadata.originalName,
+                        }),
+                    );
                 } catch (e) {
-                    console.error('Failed to save uploaded file or metadata', e);
+                    console.error('Failed to save uploaded file', e);
                     return resolve(
                         res.status(500).json({ message: 'Failed to save file' }),
                     );
                 }
-
-                resolve(
-                    res.json({
-                        filename: filename,
-                        type: 'image',
-                        originalName: req.file.originalname,
-                    }),
-                );
             });
         });
     }
 
     @Delete('/api/sessions/:sessionId/uploads/:filename')
     @UseBefore(AuthMiddleware)
-    deleteUploadedFile(
+    async deleteUploadedFile(
         @Param('sessionId') sessionId: string,
         @Param('filename') filename: string,
         @Res() response: Response,
@@ -540,39 +508,28 @@ export class ChatController {
         const uploadDir = path.join(sessionRoot, safeId, 'uploads');
         const filePath = path.join(uploadDir, filename);
 
-        if (fs.existsSync(filePath)) {
-            try {
-                // Check if file is used in session history or turns
-                const session = this.sessionStore.getOrCreate(sessionId);
-                const isUsedInTurns = session.turns.some(turn => turn.attachment?.filename === filename);
+        try {
+            // Check if file is used in session history or turns
+            const turns = await this.turnService.loadTurns(sessionId);
+            const isUsedInTurns = turns.some(turn => turn.attachment?.filename === filename);
 
-                if (isUsedInTurns) {
-                    // Do not delete physically, just return success (it was removed from the active input on client)
-                    return response.status(200).json({ message: 'Attachment detached' });
-                }
-
-                fs.unlinkSync(filePath);
-
-                // Update metadata
-                const metadataPath = path.join(uploadDir, 'uploads.json');
-                if (fs.existsSync(metadataPath)) {
-                    try {
-                        const content = fs.readFileSync(metadataPath, 'utf-8');
-                        const metadata = JSON.parse(content);
-                        if (metadata[filename]) {
-                            delete metadata[filename];
-                            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-                        }
-                    } catch (e) {
-                        console.error('Failed to update uploads metadata', e);
-                    }
-                }
-
-                return response.status(200).json({ message: 'File deleted' });
-            } catch (error) {
-                console.error('Failed to delete file', error);
-                return response.status(500).json({ message: 'Failed to delete file' });
+            if (isUsedInTurns) {
+                // Do not delete physically, just return success (it was removed from the active input on client)
+                return response.status(200).json({ message: 'Attachment detached' });
             }
+
+            // Safety: if the deleted file was currently the unsent attachment, clear it
+            const unsent = await this.unsentService.getUnsent(sessionId);
+            if (unsent?.attachment?.filename === filename) {
+                await this.unsentService.saveUnsent(sessionId, { attachment: null });
+            }
+
+            await this.uploadService.deleteUpload(sessionId, filename);
+
+            return response.status(200).json({ message: 'File deleted' });
+        } catch (error) {
+            console.error('Failed to delete file', error);
+            return response.status(500).json({ message: 'Failed to delete file' });
         }
 
         return response.status(404).send('File not found');
@@ -612,7 +569,7 @@ export class ChatController {
     @Get('/api/sessions/:sessionId')
     @UseBefore(AuthMiddleware)
     async getSession(@Param('sessionId') sessionId: string) {
-        const snapshot = this.sessionStore.snapshot(sessionId);
+        const snapshot = await this.sessionService.getMetadata(sessionId);
         if (!snapshot) {
             throw new NotFoundError('Session not found');
         }
@@ -635,7 +592,7 @@ export class ChatController {
             fastMode: snapshot.fastMode ?? false,
             subject: snapshot.subject,
             tokenUsage,
-            unsent: snapshot.unsent,
+            unsent: await this.unsentService.getUnsent(sessionId),
             status: snapshot.status,
             errorMessage: snapshot.errorMessage,
             projectId: snapshot.projectId,
@@ -644,7 +601,7 @@ export class ChatController {
 
     @Get('/api/sessions/:sessionId/turns')
     @UseBefore(AuthMiddleware)
-    getTurns(
+    async getTurns(
         @Param('sessionId') sessionId: string,
         @QueryParam('limit') limitArg?: number,
         @QueryParam('before') beforeTurn?: number,
@@ -653,7 +610,9 @@ export class ChatController {
         // or allow it up to a max. Let's stick to 10 as requested in previous tasks,
         // or just use the store default. The user asked to keep pagination logic.
         const limit = 10;
-        const turns = this.sessionStore.getTurns(sessionId, limit, beforeTurn);
+        const turns = await this.turnService.loadTurns(sessionId);
+        // We probably need to implement pagination in TurnService if needed, but for now:
+        const slicedTurns = turns.filter(t => !beforeTurn || t.turn < beforeTurn).slice(-limit);
 
         return {
             turns,
@@ -663,10 +622,10 @@ export class ChatController {
     @Get('/api/sessions/:sessionId/summary')
     @UseBefore(AuthMiddleware)
     async getSessionSummary(@Param('sessionId') sessionId: string) {
-        const session = this.sessionStore.getOrCreate(sessionId);
+        const s = await this.sessionService.getMetadata(sessionId);
         return {
-            summary: session.summary,
-            summaryTurn: session.summaryTurn,
+            summary: s?.summary,
+            summaryTurn: s?.summaryTurn,
         };
     }
 
@@ -676,10 +635,9 @@ export class ChatController {
     @UseBefore(AuthMiddleware)
     async deleteSession(@Param('sessionId') sessionId: string, @Res() response: Response) {
         try {
-            // Retrieve session to identify the project it belongs to.
-            const session = this.sessionStore.getOrCreate(sessionId);
+            const session = await this.sessionService.getMetadata(sessionId);
 
-            if (session.projectId) {
+            if (session?.projectId) {
                 await this.projectService.removeSessionFromProject(session.projectId, sessionId);
             }
 
@@ -687,7 +645,7 @@ export class ChatController {
             await this.chatService.stopGeneration(sessionId).catch(() => { });
 
             // Remove session files
-            this.sessionStore.deleteSession(sessionId);
+            await this.chatService.deleteSession(sessionId);
 
             return response.status(200).json({ message: 'Session deleted' });
         } catch (error) {
@@ -715,7 +673,11 @@ export class ChatController {
             }
 
             // Get code files
-            const files = this.sessionStore.getFilesByVersion(sessionId, version);
+            const session = await this.sessionService.getMetadata(sessionId);
+            if (!session) {
+                return response.status(404).json({ message: 'Session not found' });
+            }
+            const files = this.filesService.readVersionFiles(sessionId, version);
             if (!files) {
                 return response
                     .status(404)
@@ -788,7 +750,7 @@ export class ChatController {
     }
 
     @Get('/api/sessions/:sessionId/:version/files/:filename')
-    getFile(
+    async getFile(
         @Param('sessionId') sessionId: string,
         @Param('version') versionParam: string,
         @Param('filename') filename: string,
@@ -801,7 +763,7 @@ export class ChatController {
 
         const validFiles = ['index.html', 'styles.css', 'script.js'];
         if (validFiles.includes(filename)) {
-            const files = this.sessionStore.getFilesByVersion(sessionId, version);
+            const files = this.filesService.readVersionFiles(sessionId, version);
             if (!files) {
                 return response.status(404).send('Files not found');
             }
@@ -864,7 +826,7 @@ export class ChatController {
 
     @Post('/api/sessions/:sessionId/undo')
     @UseBefore(AuthMiddleware)
-    undoLastTurn(
+    async undoLastTurn(
         @Param('sessionId') sessionId: string,
         @Res() response: Response,
     ) {
@@ -872,8 +834,8 @@ export class ChatController {
             if (this.chatService.isGenerating(sessionId)) {
                 return response.status(400).json({ message: 'Cannot undo while generation is in progress. Please stop the generation first.' });
             }
-            const result = this.sessionStore.undoLastTurn(sessionId);
-            return result;
+            const { success, restoredInput, restoredSelection, restoredAttachment, previousTurn } = await this.chatService.undoLastTurn(sessionId);
+            return { success, restoredInput, restoredSelection, restoredAttachment, previousTurn };
         } catch (error) {
             console.error('Failed to undo last turn', error);
             return response
@@ -884,7 +846,7 @@ export class ChatController {
 
     @Post('/api/sessions/:sessionId/clone/:turn')
     @UseBefore(AuthMiddleware)
-    cloneTurn(
+    async cloneTurn(
         @Param('sessionId') sessionId: string,
         @Param('turn') turnParam: string,
         @Res() response: Response,
@@ -898,30 +860,34 @@ export class ChatController {
 
         try {
             // Prepare ID and Group
-            const { id } = this.sessionStore.prepareClone(sessionId);
-            const { group } = this.sessionStore.getOrCreate(sessionId);
+            const newSessionId = crypto.randomUUID();
+            const sourceSession = await this.sessionService.getMetadata(sessionId);
+            if (!sourceSession) {
+                return response.status(404).json({ message: 'Source session not found' });
+            }
+            const variantGroup = sourceSession.group;
 
             // Start cloning in background
             setImmediate(async () => {
                 try {
-                    await this.sessionStore.executeCloneAtTurn(id, sessionId, turn);
+                    const newSessionMetadata = await this.chatService.performCloneSession(newSessionId, sessionId, turn);
 
                     // Add new session to project (using source session's project)
-                    const sourceSession = this.sessionStore.getOrCreate(sessionId);
                     if (sourceSession.projectId) {
-                        this.projectService.addSessionToProject(sourceSession.projectId, id, sessionId);
+                        await this.projectService.addSessionToProject(sourceSession.projectId, newSessionId);
                     }
 
                     this.sseService.emitSessionCreated({
                         sourceSessionId: sessionId,
-                        newSessionId: id,
-                        group,
+                        id: newSessionId,
+                        group: variantGroup,
                         projectId: sourceSession.projectId,
+                        lastTurn: newSessionMetadata.lastTurn,
                     });
                 } catch (error) {
                     console.error('Background session cloning failed', error);
                     this.sseService.emitChatStatus({
-                        sessionId: id,
+                        sessionId: newSessionId,
                         status: 'error',
                         message: 'Failed to clone session in background',
                         details: error,
@@ -930,8 +896,8 @@ export class ChatController {
             });
 
             return response.status(201).json({
-                id,
-                group,
+                id: newSessionId,
+                group: variantGroup,
                 currentTurn: turn,
                 updatedAt: new Date().toISOString(),
             });
@@ -944,7 +910,7 @@ export class ChatController {
     }
 
     @Post('/api/sessions/:sessionId/:version/files/:filename')
-    updateStaticFile(
+    async updateStaticFile(
         @Param('sessionId') sessionId: string,
         @Param('version') versionParam: string,
         @Param('filename') filename: string,
@@ -983,7 +949,7 @@ export class ChatController {
         }
 
         try {
-            this.sessionStore.updateSessionFile(
+            await this.filesService.persistSessionFile(
                 sessionId,
                 version,
                 filename,
@@ -1030,6 +996,7 @@ export class ChatController {
                 }
 
                 try {
+                    const session = await this.sessionService.getMetadata(sessionId);
                     const metadata = await this.imageService.saveUploadedImage(sessionId, version, req.file);
 
                     // Handle description generation
@@ -1154,7 +1121,8 @@ export class ChatController {
 
     private async createTokenTracker(sessionId: string) {
         // Fetch session to getKey info
-        const session = this.sessionStore.getOrCreate(sessionId);
+        const session = await this.sessionService.getMetadata(sessionId);
+        if (!session) throw new Error(`Session ${sessionId} not found`);
 
         return async (usage: { prompt: number, completion: number, total: number, model: string }) => {
             const currentTurn = session.lastTurn || 0;
