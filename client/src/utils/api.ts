@@ -55,6 +55,8 @@ export const apiAuth = {
                             sessionStorage.setItem('refreshToken', data.refreshToken);
                         }
 
+                        notifyTokenListeners(data.accessToken);
+
                         return data.accessToken;
                     } catch (e) {
                         await apiAuth.logout();
@@ -89,5 +91,19 @@ export const apiAuth = {
         sessionStorage.removeItem('refreshToken');
         // Reload to show login form
         window.location.reload();
+    },
+
+    addTokenListener(callback: (token: string) => void) {
+        tokenListeners.push(callback);
+    },
+
+    removeTokenListener(callback: (token: string) => void) {
+        tokenListeners = tokenListeners.filter(cb => cb !== callback);
     }
 };
+
+let tokenListeners: ((token: string) => void)[] = [];
+
+function notifyTokenListeners(token: string) {
+    tokenListeners.forEach(listener => listener(token));
+}

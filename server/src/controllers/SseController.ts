@@ -27,7 +27,18 @@ export class SseController {
         } catch (error) {
             console.error('Error in SSE stream:', error);
             if (!response.headersSent) {
-                return response.status(401).send('Unauthorized');
+                // Return 200 OK with SSE headers even for auth error
+                response.setHeader('Content-Type', 'text/event-stream');
+                response.setHeader('Cache-Control', 'no-cache, no-transform');
+                response.setHeader('Connection', 'keep-alive');
+                response.flushHeaders?.();
+
+                // Send auth-error event
+                response.write(`event: auth-error\ndata: ${JSON.stringify({ message: 'Unauthorized' })}\n\n`);
+
+                // Close connection
+                response.end();
+                return response;
             }
         }
         // Return response to request that routing-controllers does not send headers

@@ -8,6 +8,7 @@ import ProjectWorkspace from './components/ProjectWorkspace';
 import { MainLayout } from './components/MainLayout';
 import { withRouter, RouterProps } from './components/withRouter';
 import { ConnectionProvider } from './contexts/ConnectionContext';
+import { apiAuth } from './utils/api';
 
 
 interface AppState {
@@ -31,6 +32,7 @@ class App extends React.Component<RouterProps, AppState> {
         if (this.state.token) {
             this.setupSse();
         }
+        apiAuth.addTokenListener(this.onTokenChange);
     }
 
     componentDidUpdate(_prevProps: RouterProps, prevState: AppState) {
@@ -43,7 +45,13 @@ class App extends React.Component<RouterProps, AppState> {
 
     componentWillUnmount() {
         this.closeSse();
+        apiAuth.removeTokenListener(this.onTokenChange);
     }
+
+    onTokenChange = (newToken: string) => {
+        console.log('App: Token refreshed, updating state');
+        this.setState({ token: newToken });
+    };
 
     setupSse = () => {
         this.closeSse(); // Ensure clean start
@@ -55,12 +63,25 @@ class App extends React.Component<RouterProps, AppState> {
             this.setState({ isConnected: true });
         };
 
-        this.evtSource.onerror = (err) => {
+        this.evtSource.onerror = (err: any) => {
             console.error('Global SSE Error', err);
             this.setState({ isConnected: false });
             this.closeSse();
+            // Generic error - just retry after delay
             this.retryTimeout = setTimeout(() => this.setupSse(), 2000);
         };
+
+        // Handle specific auth error event from server
+        this.evtSource.addEventListener('auth-error', () => {
+            console.log('SSE Auth Error received');
+            this.closeSse();
+
+            // Trigger token refresh via probe
+            apiAuth.fetch('/api/projects').catch(e => {
+                console.warn('SSE Auth Refresh failed', e);
+                // If refresh fails, we are likely logged out by apiAuth, so do not retry.
+            });
+        });
 
         // Forward Events
         this.evtSource.addEventListener('chat-status', (e: any) => {
