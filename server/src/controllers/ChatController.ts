@@ -204,9 +204,8 @@ export class ChatController {
 
 
     @Get('/api/sse')
-    stream(@Req() request: Request, @Res() response: Response): Response {
+    stream(@Req() request: Request, @Res() response: Response): any {
         this.sseService.addClient(request, response);
-        return response;
     }
 
     @Post('/api/projects')

@@ -42,7 +42,6 @@ export class SseService {
         response.setHeader('Cache-Control', 'no-cache, no-transform');
         response.setHeader('Connection', 'keep-alive');
         response.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx buffering
-        response.setHeader('Transfer-Encoding', 'chunked');
         response.flushHeaders?.();
         response.write('retry: 5000\n\n');
 
