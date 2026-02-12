@@ -24,9 +24,10 @@ interface SseClient {
 
 export interface SessionCreatedPayload {
     sourceSessionId: string;
-    newSessionId: string;
+    id: string;
     group?: number;
     projectId?: string;
+    lastTurn?: number;
     timestamp?: string;
 }
 
@@ -84,12 +85,7 @@ export class SseService {
         this.broadcast('server-stop', { timestamp: new Date().toISOString() });
     }
 
-    emitFileChange(payload: { sessionId: string; version: number; filename: string; turn: number }): void {
-        this.broadcast('file-change', {
-            ...payload,
-            timestamp: new Date().toISOString(),
-        });
-    }
+
 
     emitSessionUpdate(payload: { sessionId: string; subject?: string }): void {
         this.broadcast('session-update', {

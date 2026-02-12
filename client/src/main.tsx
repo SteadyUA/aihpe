@@ -1,18 +1,17 @@
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 import App from './App';
 
-createRoot(document.getElementById('root')!).render(
+const container = document.getElementById('root');
+if (!container) throw new Error('Failed to find the root element');
+
+createRoot(container).render(
     <StrictMode>
-        <BrowserRouter>
-            <Routes>
-                <Route path="/session/:sessionId" element={<App />} />
-                <Route path="/projects" element={<App />} />
-                <Route path="/" element={<App />} />
-                <Route path="*" element={<App />} />
-            </Routes>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
+            <App />
         </BrowserRouter>
     </StrictMode>,
 );

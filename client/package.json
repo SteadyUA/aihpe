@@ -10,8 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "@types/marked": "^6.0.0",
     "@types/turndown": "^5.0.6",
     "classnames": "^2.5.1",
     "marked": "^17.0.1",
@@ -22,7 +20,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@types/classnames": "^2.3.4",
     "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

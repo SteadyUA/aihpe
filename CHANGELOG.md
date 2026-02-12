@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v3.0.0] - 2026-02-12
+
+### Added
+- **Infrastructure**:
+  - Added comprehensive Docker and Devcontainer setup for development and production.
+  - Added `APP_BASE_PATH` configuration support.
+- **AI Integration**:
+  - Implemented `LiteLLMImageService` and `OpenaiClient` for enhanced LLM support.
+  - Added `LITELLM_IMAGE_MODEL` environment variable support.
+  - Added `TokenUsageService` for better token tracking and management.
+  - Added context summarization logic.
+
+### Changed
+- **Storage Migration**:
+  - Migrated data storage from JSON files to a SQLite database.
+- **Architecture**:
+  - Refactored `ChatService` and `AiClient` implementations.
+  - Removed `session.history` abstraction in favor of `session.turns`.
+  - Refactored client layout and components composition.
+- **UI/UX**:
+  - Significant UI improvements including Session Bar refactoring.
+  - Improved usage abort controllers for background requests.
+  - Enhanced session summary generation.
+
+### Fixed
+- Fixed Devcontainer configuration issues.
+- Fixed UI title display.
+
 ## [v2.0.0] - 2026-01-12
 
 ### Added

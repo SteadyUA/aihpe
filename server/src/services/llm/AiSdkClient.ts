@@ -5,6 +5,7 @@ import {
     LanguageModel,
     ImagePart,
     TextPart,
+    generateText,
 } from 'ai';
 import { z } from 'zod';
 import { ChatMessage } from '../../types/chat';
@@ -12,37 +13,24 @@ import {
     GeneratePageRequest,
     GeneratePageResult,
     LlmClient,
+    SummarizeHistoryRequest,
 } from './types';
 import { ImageService } from '../image/ImageService';
+import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 
-const FALLBACK_RESPONSE: GeneratePageResult = {
-    summary:
-        'API key not configured. Returning existing files without modifications. Configure OPENAI_API_KEY or GEMINI_API_KEY.',
-    files: {
-        'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <title>Preview Unavailable</title>\n  </head>\n  <body>\n    <h1>Enable LLM Integration</h1>\n    <p>Provide an API key to generate content.</p>\n  </body>\n</html>',
-        'styles.css': '',
-        'script.js': '',
-    },
-};
-
-import { SessionStore } from '../session/SessionStore';
-
-export class AiSdkClient implements LlmClient {
-    private targetVersion: number | undefined;
+export class AiSdkClient extends BaseLlmClient {
 
     constructor(
-        private readonly imageService: ImageService,
-        private readonly sessionStore: SessionStore,
+        imageService: ImageService,
+        filesService: FilesService,
+        sessionService: SessionService,
         private readonly model?: LanguageModel,
         private readonly modelId?: string,
-        private readonly maxContextTokens: number = 128000,
-    ) { }
-
-    private ensureNextVersion(sessionId: string): number {
-        if (this.targetVersion === undefined) {
-            this.targetVersion = this.sessionStore.initNextVersion(sessionId);
-        }
-        return this.targetVersion;
+        maxContextTokens: number = 128000,
+    ) {
+        super(imageService, filesService, sessionService, maxContextTokens);
     }
 
     async generatePage(
@@ -56,15 +44,19 @@ export class AiSdkClient implements LlmClient {
         const systemPrompt = this.buildSystemPrompt(
             request.rulesAndGoal,
             request.imageGenerationPref,
-            request.modelRole
+            request.modelRole,
+            request.summary
         );
         const initialMessages: ModelMessage[] = this.buildMessages(request);
 
         // Local state for files
         let currentFiles = { ...request.files };
 
+        // Helper to get shared tool implementations
+        const implementations = this.getToolImplementations(request, currentFiles);
 
-        // Tool definitions (kept for usage in loop)
+
+        // Tool definitions using AI SDK 'tool' helper
         const tools: Record<string, any> = {
             read_file: tool({
                 description:
@@ -79,17 +71,7 @@ export class AiSdkClient implements LlmClient {
                             'Explain why you need to read this file. This will be shown to the user.',
                         ),
                 }),
-                execute: async ({
-                    file,
-                    summary,
-                }: {
-                    file: 'index.html' | 'styles.css' | 'script.js';
-                    summary: string;
-                }) => {
-                    const content = currentFiles[file];
-                    if (content !== undefined) return content;
-                    return 'File not found';
-                },
+                execute: implementations.read_file,
             }),
             edit_file: tool({
                 description:
@@ -112,187 +94,54 @@ export class AiSdkClient implements LlmClient {
                             'Explain why you are making this edit. This will be shown to the user.',
                         ),
                 }),
-                execute: async ({
-                    file,
-                    oldString,
-                    newString,
-                    summary,
-                }: {
-                    file: 'index.html' | 'styles.css' | 'script.js';
-                    oldString: string;
-                    newString: string;
-                    summary: string;
-                }) => {
-                    // Logic for Workflow:
-                    // 1. If editing code files, we MUST ensure a new version exists.
-                    //    This matches the FIRST code edit in this turn.
-
-                    if (this.targetVersion === undefined) {
-                        this.ensureNextVersion(request.sessionId);
-                    }
-
-                    const versionToUpdate = this.targetVersion !== undefined ? this.targetVersion : request.currentVersion;
-
-                    let content = currentFiles[file] || '';
-                    if (!content && (file === 'styles.css' || file === 'script.js')) {
-                        // Allow empty css/js if undefined
-                        content = '';
-                    } else if (content === undefined) {
-                        return `Error: File ${file} not found.`;
-                    }
-
-                    let targetString = oldString;
-                    if (!content.includes(targetString)) {
-                        // Try flexible matching for trailing/leading whitespace
-                        if (content.includes(targetString.trim())) {
-                            targetString = targetString.trim();
-                        } else {
-                            // Try normalizing newlines (CRLF vs LF)
-                            const normalizedContent = content.replace(
-                                /\r\n/g,
-                                '\n',
-                            );
-                            const normalizedTarget = targetString.replace(
-                                /\r\n/g,
-                                '\n',
-                            );
-                            if (normalizedContent.includes(normalizedTarget)) {
-                                content = normalizedContent;
-                                targetString = normalizedTarget;
-                            } else if (
-                                normalizedContent.includes(
-                                    normalizedTarget.trim(),
-                                )
-                            ) {
-                                content = normalizedContent;
-                                targetString = normalizedTarget.trim();
-                            } else {
-                                return `Error: oldString not found in ${file}`;
-                            }
-                        }
-                    }
-
-                    if (content.split(targetString).length > 2)
-                        return `Error: oldString found multiple times in ${file}. Provide more unique context.`;
-
-                    const newContent = content.replace(targetString, newString);
-                    currentFiles[file] = newContent;
-
-
-                    return `Successfully updated ${file}`;
-                },
+                execute: implementations.edit_file,
             }),
             update_subject: tool({
                 description: 'Update the subject/topic of the session. Use this tool when the session subject is "..." or generic, and the conversation context allows for a better, short summary (3-5 words).',
                 inputSchema: z.object({
                     subject: z.string().describe('The new subject for the session. Should be concise (3-5 words max) and in the language of the user\'s messages.'),
                 }),
-                execute: async ({ subject }: { subject: string }) => {
-                    this.sessionStore.upsert(request.sessionId, { subject });
-                    if (request.onPatch) {
-                        request.onPatch({ subject });
-                    }
-                    return `Session subject updated to: "${subject}"`;
-                },
+                execute: implementations.update_subject,
             }),
             read_subject: tool({
                 description: 'Read the current subject/topic of the session. Use this to check if the subject is still "..." or if it needs updating based on the current context.',
                 inputSchema: z.object({}),
-                execute: async () => {
-                    const currentSubject = request.subject || '...';
-                    return `Current Session Subject: "${currentSubject}"`;
-                },
+                execute: implementations.read_subject,
+            }),
+            list_images: tool({
+                description: 'List available UNUSED images in the current session. Returns image filenames and their geometry (width/height). Use this to find existing unused assets.',
+                inputSchema: z.object({
+                    summary: z.string().describe('Explain why you are listing images. This will be shown to the user.'),
+                }),
+                execute: implementations.list_images,
+            }),
+            image_info: tool({
+                description: 'Get details about a specific image including its description and geometry (width/height). Use this when you need to know the properties of a specific image file.',
+                inputSchema: z.object({
+                    filename: z.string().describe('The filename of the image (e.g., "image.png").'),
+                    summary: z.string().describe('Explain why you are requesting info for this image. This will be shown to the user.'),
+                }),
+                execute: implementations.image_info,
+            }),
+            generate_image: tool({
+                description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
+                inputSchema: z.object({
+                    description: z.string().describe('Detailed description of the image to generate'),
+                    summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
+                }),
+                execute: implementations.generate_image,
+            }),
+            edit_image: tool({
+                description: 'Edit an existing image based on a description. Use this when the user wants to change specific elements of an image (e.g., "change background to forest") while keeping the main subject. The new image will replace the old one with the same filename.',
+                inputSchema: z.object({
+                    filename: z.string().describe('The filename of the image to edit (e.g., "image.png"). Must exist in the session.'),
+                    description: z.string().describe('The instruction for editing the image (e.g., "Change the background to a modern kitchen").'),
+                    summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
+                }),
+                execute: implementations.edit_image,
             }),
         };
 
-
-        // Add image tools
-        tools.list_images = tool({
-            description: 'List available UNUSED images in the current session. Returns image filenames and their geometry (width/height). Use this to find existing unused assets.',
-            inputSchema: z.object({
-                summary: z.string().describe('Explain why you are listing images. This will be shown to the user.'),
-            }),
-            execute: async ({ summary }: { summary: string }) => {
-                try {
-                    const images = await this.imageService.listImages(request.sessionId, request.currentVersion);
-                    const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
-
-                    if (unusedImages.length === 0) {
-                        return 'No unused images found in this session.';
-                    }
-                    return JSON.stringify(unusedImages.map((img) => ({
-                        filename: img.filename,
-                        description: img.description,
-                        width: img.width,
-                        height: img.height,
-                        model: img.model
-                    })));
-                } catch (error: any) {
-                    return `Failed to list images: ${error.message}`;
-                }
-            },
-        });
-
-        tools.image_info = tool({
-            description: 'Get details about a specific image including its description and geometry (width/height). Use this when you need to know the properties of a specific image file.',
-            inputSchema: z.object({
-                filename: z.string().describe('The filename of the image (e.g., "image.png").'),
-                summary: z.string().describe('Explain why you are requesting info for this image. This will be shown to the user.'),
-            }),
-            execute: async ({ filename, summary }: { filename: string; summary: string }) => {
-                try {
-                    const info = await this.imageService.getImageInfo(request.sessionId, request.currentVersion, filename);
-                    if (!info) {
-                        return `Image not found: ${filename}`;
-                    }
-                    return JSON.stringify({
-                        filename: info.filename,
-                        description: info.description,
-                        width: info.width,
-                        height: info.height,
-                        model: info.model
-                    });
-                } catch (error: any) {
-                    return `Failed to get image info: ${error.message}`;
-                }
-            },
-        });
-
-        tools.generate_image = tool({
-            description: 'Generate an image based on a description. Use this when you need a specific image that doesn\'t exist. Returns the filename of the generated image.',
-            inputSchema: z.object({
-                description: z.string().describe('Detailed description of the image to generate'),
-                summary: z.string().describe('Explain why you are generating this image. This will be shown to the user.'),
-            }),
-            execute: async ({ description, summary }: { description: string; summary: string }) => {
-                try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
-                    const filename = await this.imageService.generateAndSave(request.sessionId, description, nextVersion);
-                    return `Image generated successfully: ${filename}`;
-                } catch (error: any) {
-                    return `Failed to generate image: ${error.message}`;
-                }
-            },
-        });
-
-        tools.edit_image = tool({
-            description: 'Edit an existing image based on a description. Use this when the user wants to change specific elements of an image (e.g., "change background to forest") while keeping the main subject. The new image will replace the old one with the same filename.',
-            inputSchema: z.object({
-                filename: z.string().describe('The filename of the image to edit (e.g., "image.png"). Must exist in the session.'),
-                description: z.string().describe('The instruction for editing the image (e.g., "Change the background to a modern kitchen").'),
-                summary: z.string().describe('Explain why you are editing this image. This will be shown to the user.'),
-            }),
-            execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
-                try {
-                    const nextVersion = this.ensureNextVersion(request.sessionId);
-                    // Use currentVersion as source, nextVersion as target
-                    const savedFilename = await this.imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion);
-                    return `Image edited successfully: ${savedFilename}`;
-                } catch (error: any) {
-                    return `Failed to edit image: ${error.message}`;
-                }
-            },
-        });
 
         if (request.allowVariants) {
             tools.generate_variant = tool({
@@ -305,14 +154,7 @@ export class AiSdkClient implements LlmClient {
                             'Specific, actionable instruction for this variant. Focused on WHAT to change (e.g., "Change background to blue...", "Update font to..."). Must be in the language of the user\'s messages.',
                         ),
                 }),
-                execute: async (args: {
-                    instruction: string;
-                }) => {
-                    if (request.onVariantRequest) {
-                        return await request.onVariantRequest(args.instruction);
-                    }
-                    return 'Variant generation not supported in this context.';
-                },
+                execute: implementations.generate_variant,
             });
         }
 
@@ -327,19 +169,16 @@ export class AiSdkClient implements LlmClient {
             const collectedNewMessages: ModelMessage[] = [];
             let stop = false;
 
+            let usage;
             while (steps < maxSteps && !stop) {
                 steps++;
-
-                if (request.onProgress) {
-                    // Debug log to trace loop execution
-                    // request.onProgress(`Step ${steps}: Context size ${currentMessages.length} messages`);
-                }
 
                 const result = streamText({
                     model: this.model,
                     system: systemPrompt,
                     messages: currentMessages,
                     tools: tools,
+                    abortSignal: request.abortSignal,
                     // Manual loop, so no maxSteps here
                 });
 
@@ -379,9 +218,6 @@ export class AiSdkClient implements LlmClient {
                                 console.log('\n[System] Agent finished (final answer received).');
                                 stop = true;
                             }
-                            // else if (part.finishReason === 'tool-calls') {
-                            //     console.log('\n[System] Step completed, agent calls tools...');
-                            // }
                             break;
                     }
                 }
@@ -391,39 +227,24 @@ export class AiSdkClient implements LlmClient {
                 }
                 fullText += stepText;
 
-                const usage = await result.usage;
-                console.log(usage);
-                console.log(`\n🔍 --- Step ${steps} Token Usage ---`);
-                console.log(`Total Tokens:      ${usage.totalTokens}`);
-                console.log(`Input Tokens:      ${usage.inputTokens}`);
-                console.log(`Output Tokens:     ${usage.outputTokens}`);
+                usage = await result.usage;
 
-                // Check for cached tokens
-                // @ts-ignore: Accessing potential cache properties
-                const cachedTokens =
-                    (usage as any).cachedInputTokens ??
-                    (usage as any).promptTokensDetails?.cachedTokens;
-                if (cachedTokens !== undefined) {
-                    console.log(`📦 CACHED TOKENS:  ${cachedTokens}`);
+
+                if (request.trackRequestTokenUsage) {
+                    await request.trackRequestTokenUsage({
+                        prompt: usage.inputTokens || 0,
+                        completion: usage.outputTokens || 0,
+                        total: usage.totalTokens || 0,
+                        model: this.modelId || 'unknown',
+                        agent: this.agentName,
+                    });
                 }
-
-                const usedTokens = usage.totalTokens || 0;
-                const limit = this.maxContextTokens;
-                const percentage = ((usedTokens / limit) * 100).toFixed(1);
-
-                console.log(
-                    `Context Usage:     ${usedTokens.toLocaleString()} / ${limit.toLocaleString()} tokens`,
-                );
-                console.log(`Capacity Used:     ${percentage}%`);
-                console.log('---------------------------------\n');
 
                 const response = await result.response;
                 // These are the messages generated in this step
                 const stepMessages = response.messages;
 
                 // --- FIX: Sort tool results if they were auto-executed or provided by the model ---
-                // We check if stepMessages contains an assistant message with tool-calls AND a tool message with results.
-                // If so, we sort the results in the tool message to match the order of calls.
                 const assistantMsgWithCalls = stepMessages.find(m => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((c: any) => c.type === 'tool-call'));
                 const toolMsgWithResults = stepMessages.find(m => m.role === 'tool' && Array.isArray(m.content));
 
@@ -434,86 +255,24 @@ export class AiSdkClient implements LlmClient {
 
                     if (callOrder.length > 0) {
                         const results = toolMsgWithResults.content as any[];
-                        // Check if we need to sort
-                        // We only sort if all callIds are present to avoid dataloss
-                        const resultIds = results.map(r => r.toolCallId);
-
-                        // Simple check: do we have results for these calls?
-                        // Note: resultIds might contain more or fewer if something is weird, but usually 1:1.
-
                         results.sort((a, b) => {
                             const idxA = callOrder.indexOf(a.toolCallId);
                             const idxB = callOrder.indexOf(b.toolCallId);
-                            // Place known items in order, unknown items at end
                             return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
                         });
                     }
                 }
-                // ---------------------------------------------------------------------------------
 
                 // Add step messages to current history and collection
                 for (const m of stepMessages) {
                     currentMessages.push(m);
                     collectedNewMessages.push(m);
-
-                    // Notify about content found in response (tool calls and reasoning)
-                    // Notify about content found in response (tool calls and reasoning)
-                    if (
-                        m.role === 'assistant' &&
-                        Array.isArray(m.content) &&
-                        request.onProgress
-                    ) {
-                        // We already handled streaming tool calls.
-                        // We might want to handle non-streamed ones if any?
-                        // Generally stream loop covers it.
-                        // Let's keep it minimal or remove if duplicate.
-                        // If we are strictly streaming, we don't need this.
-                    }
                 }
-
-                if (!stepText && request.onProgress) {
-                    // Debug: Log if no text was streamed but messages were received
-                    console.log('No text streamed in this step.');
-                }
-
-                // Check for tool calls in the last message
-                const toolCalls = await result.toolCalls;
-
-                // if (toolCalls && toolCalls.length > 0) {
-                //     // Identify tool calls that were ALREADY executed by the provider/SDK in this step
-                //     // by checking if there are 'tool' messages with matching toolCallId in stepMessages
-                //     const executedToolCallIds = new Set(
-                //         stepMessages
-                //             .filter((m) => m.role === 'tool')
-                //             .flatMap((m) =>
-                //                 Array.isArray(m.content)
-                //                     ? m.content.map((c: any) => c.toolCallId)
-                //                     : [],
-                //             ),
-                //     );
-
-                //     // if (toolCalls.length > 0) {
-                //     //     // All tools were executed by provider (or we processed results in stepMessages above).
-                //     //     // Check if we should stop loop based on executed tools.
-                //     //     // Stop if variants were generated
-                //     //     const variantsExecuted = toolCalls.some(
-                //     //         (tc) => tc.toolName === 'generate_variant',
-                //     //     );
-
-                //     //     if (variantsExecuted) {
-                //     //         break;
-                //     //     }
-                //     // }
-                // } else {
-                //     // No tool calls, model is done
-                //     break;
-                // }
             }
 
             if (this.modelId) {
                 console.log('Model:', this.modelId);
             }
-            console.log('User Instructions:', request.instructions);
 
             // Map ModelMessage back to ChatMessage-compatible structure
             const newMessages: ChatMessage[] = collectedNewMessages.map(
@@ -526,15 +285,7 @@ export class AiSdkClient implements LlmClient {
                 }),
             );
 
-            // Use the summary from tool if available, otherwise fallback to generated text or generic
-            // Use the summary from tool if available, otherwise fallback to generated text or generic
             const summaryText = fullText || 'Changes applied.';
-
-            // If we created a new version (targetVersion is set), we should reset the plan for the NEXT turn.
-            // effectively, the new version's plan starts empty.
-            if (this.targetVersion !== undefined) {
-                // currentFiles['implementation_plan.md'] = ''; // REMOVED: No more plan file
-            }
 
             return {
                 summary: summaryText,
@@ -550,78 +301,6 @@ export class AiSdkClient implements LlmClient {
             // Rethrow the error so ChatService can handle it and set session status to 'error'
             throw error;
         }
-    }
-
-    private buildSystemPrompt(
-        rulesAndGoal?: string,
-        imageGenerationPref?: string,
-        modelRole?: string
-    ): string {
-
-        const roleDefinition = modelRole || 'You are an expert web developer';
-
-        console.log(roleDefinition);
-        let prompt = `${roleDefinition} that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
-
-The user acts as a Business Analyst who wants to define a set of features to be implemented.
-They want to discuss WHAT features will be implemented and WHY (the goal).
-
-Your goal is to fulfill the user's request by following this strict workflow:
-
-1.  **PLANNING PHASE**:
-    -   All user messages are initially treated as discussion and clarification of the plan.
-    -   Discuss the features and requirements with the user in the chat.
-    -   If the user's request is ambiguous, lacks detail, or you need more context to create a plan, ASK CLARIFYING QUESTIONS. Do not guess.
-    -   **CRITICAL**: DO NOT PROCEED TO IMPLEMENTATION UNTIL THE USER EXPLICITLY APPROVES THE PLAN IN THE CHAT.
-    -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
-    -   **EXCEPTION 1**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
-    -   **EXCEPTION 2**: If you asked CLARIFYING QUESTIONS and the user provided clean answers that make the path forward clear, you may PROCEED directly to implementation without summarizing the plan again.
-
-    -   **PLAN SUMMARY**:
-        -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
-        -   For each feature, provide a clear description of the change and its goal. Use natural language (e.g., "Improve navigation by replacing the progress bar to make it more visible").
-        -   Do NOT mention specific filenames or technical details in this summary.
-
-2.  **IMPLEMENTATION PHASE**:
-    -   ONLY when the user says "ok" or explicitly approves the plan (OR if the user requested "no plan"), proceed to implementation.
-    -   Implement the changes in the code files ('index.html', etc.).
-    -   When you start editing code files, the system will automatically create a NEW version.
-    -   After code generation or image generation, you must re-verify the new plan with the user for the next steps.
-    -   **NOTE**: If the previous step was executed in "fast mode" (without plan), the NEXT step MUST return to the default "PLANNING PHASE" workflow unless the user explicitly requests fast mode again.
-
-3.  **COMPLETION AND SUMMARY**:
-    -   When you have completed the requested changes or answered the user's question, provide a final text summary.
-    -   **IMPORTANT**: Do NOT mention the planning mode (e.g. "fast mode", "no plan", "continuing without plan") in your final summary. Just describe the changes made.
-
-Strategy:
-- Use 'read_file' to inspect the code to inform your plan (check feasibility).
-- Use 'edit_file' to apply changes to code files ONLY after confirmation.
-- Use 'generate_variant' if asked for multiple options.
-- Use 'read_subject' to check the current session topic if you are unsure or if it might be outdated.
-- Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
-
-Rules:
-- **SESSION TITLE**:
-    -   **MANDATORY**: Always check the session subject. If it is "..." or generic, **YOU MUST** use 'update_subject' to set a concise title (3-5 words) reflecting the user's request. Do this early.
-- Preserve valid HTML/CSS/JS syntax.
-- Do not output the full file content unless absolutely necessary (use 'edit_file').
-- 'generate_variant' creates a NEW separate session.
-- **IMAGES**:
-    -   **ALWAYS** use the 'generate_image' tool to create ANY visual assets (photos, icons, illustrations) that the user did not provide.
-    -   **NEVER** use external placeholder URLs (like 'via.placeholder.com', 'unsplash.com', etc.) or broken links. The user wants REAL generated images.
-    -   If a user asks for "an image of a cat", GENERATE IT using 'generate_image'. Do NOT ask if they want to generate it, just do it.
-`;
-
-        if (rulesAndGoal) {
-            prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\n"${rulesAndGoal}"`;
-        }
-
-        if (imageGenerationPref) {
-            prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\n"${imageGenerationPref}"`;
-        }
-
-
-        return prompt;
     }
 
     private buildMessages(request: GeneratePageRequest): ModelMessage[] {
@@ -677,15 +356,43 @@ Rules:
         return messages;
     }
 
-    private formatError(error: unknown): string {
-        if (typeof error === 'string') {
-            return error;
+    async summarizeHistory(request: SummarizeHistoryRequest): Promise<string> {
+        if (!this.model) {
+            throw new Error('No LanguageModel provided to AiSdkClient for summarization');
         }
-        if (error && typeof error === 'object' && 'message' in error) {
-            return String(
-                (error as { message: unknown }).message || 'unknown error',
-            );
+
+        const historyMessages: ModelMessage[] = request.conversation.map(msg => {
+            if (msg.role === 'user') {
+                return { role: 'user', content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) } as ModelMessage;
+            } else if (msg.role === 'assistant') {
+                return { role: 'assistant', content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) } as ModelMessage;
+            }
+            return null;
+        }).filter(m => m !== null) as ModelMessage[];
+
+        const summaryPrompt = this.getHistorySummaryPrompt(request.previousSummary);
+
+        const result = await generateText({
+            model: this.model,
+            system: summaryPrompt,
+            messages: [
+                ...historyMessages,
+                { role: 'user', content: this.getHistorySummaryUserInstruction() } as ModelMessage
+            ],
+            abortSignal: request.abortSignal,
+        });
+
+        if (result.usage && request.trackRequestTokenUsage) {
+            await request.trackRequestTokenUsage({
+                prompt: result.usage.inputTokens || 0,
+                completion: result.usage.outputTokens || 0,
+                total: result.usage.totalTokens || 0,
+                model: this.modelId || 'unknown',
+                agent: this.agentName,
+            });
         }
-        return 'unknown error';
+
+        return result.text || 'Summary failed.';
     }
+
 }

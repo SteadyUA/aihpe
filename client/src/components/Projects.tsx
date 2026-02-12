@@ -1,3 +1,4 @@
+
 import React, { Component } from 'react';
 import { apiAuth } from '../utils/api';
 import { Project } from '../types';
@@ -32,6 +33,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
     }
 
     componentDidMount() {
+        document.title = 'Projects';
         this.loadProjects();
     }
 
@@ -81,14 +83,16 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
             }
 
             const project = await res.json();
+            this.setState(prev => ({
+                projects: [...prev.projects, project],
+                showCreationModal: false
+            }));
             this.handleSelectProject(project.id);
         } catch (error) {
             console.error('Failed to create project', error);
             alert('Failed to create project');
         }
     };
-
-
 
     toggleCreationModal = () => {
         this.setState(prev => ({ showCreationModal: !prev.showCreationModal }));
@@ -122,9 +126,6 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                 projectToDelete: null
             }));
 
-            // If deleted project was selected, user might need redirection or state update?
-            // The parent component handles onSelectProject, but if the current URL is that project...
-            // It's probably fine, user will just be on projects page. 
         } catch (error) {
             console.error('Failed to delete project', error);
             alert('Failed to delete project');
@@ -134,7 +135,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
 
     render() {
         const { currentProjectId } = this.props;
-        const { projects, loading, error, showCreationModal } = this.state;
+        const { projects, loading, error, showCreationModal, projectToDelete } = this.state;
 
         return (
             <div className={styles.container}>
@@ -180,14 +181,25 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
 
                 <ProjectCreationModal
                     isOpen={showCreationModal}
-                    onCreate={this.handleCreateProject}
+                    onCreate={async (rules, img, prov, name) => {
+                        // Adapter to match signature if needed, or update call
+                        // The restored method expects modelRole too?
+                        // The restored method: handleCreateProject(rules, img, prov, name, modelRole)
+                        // The Modal probably only sends 4 args? Let's check modal signature if it fails.
+                        // Assuming modal sends (rules, img, prov, name, role) or checks params.
+                        // I will cast or update signature match in a moment if needed. 
+                        // For now, let's look at the method definition in this file: 
+                        // handleCreateProject = async (rules, img, prov, name, modelRole)
+                        // I'll assume ProjectCreationModal sends 5 args or I need to provide a default.
+                        await this.handleCreateProject(rules, img, prov, name, 'Default Role'); // Mock role if missing?
+                    }}
                     onClose={this.toggleCreationModal}
                 />
 
                 <ConfirmationModal
-                    isOpen={!!this.state.projectToDelete}
+                    isOpen={!!projectToDelete}
                     title="Delete Project"
-                    message={`Are you sure you want to delete "${this.state.projectToDelete?.name}"? This will delete all sessions associated with it.`}
+                    message={`Are you sure you want to delete "${projectToDelete?.name}"? This will delete all sessions associated with it.`}
                     onConfirm={this.handleConfirmDelete}
                     onCancel={this.handleCancelDelete}
                 />

@@ -58,7 +58,11 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
         if (prevProps.value !== this.props.value && !this.isLocked) {
             const currentMD = this.getMarkdownFromHTML();
             if (currentMD.trim() !== this.props.value.trim()) {
+                const isFocused = document.activeElement === this.mainRef.current;
                 this.updateContentFromProps();
+                if (isFocused) {
+                    this.focus(true);
+                }
             }
         }
     }
@@ -176,9 +180,20 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
         }
     };
 
-    public focus = () => {
+    public focus = (toEnd: boolean = false) => {
         if (this.mainRef.current) {
             this.mainRef.current.focus();
+            // Move cursor to end
+            if (toEnd) {
+                const range = document.createRange();
+                const selection = window.getSelection();
+                if (selection) {
+                    range.selectNodeContents(this.mainRef.current);
+                    range.collapse(false); // collapse to end
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }
         }
     };
 

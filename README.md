@@ -31,8 +31,8 @@ It consists of two main workspaces:
     OPENAI_API_KEY=sk-...
     PORT=3000
     # Optional:
-    MODEL=gpt-4o               # Or any compatible model
-    SESSION_ROOT=data/sessions # Path to store session data
+    MODEL=gpt-4o
+    DATA_DIR=data
     ```
 
 ## Development
@@ -64,6 +64,26 @@ To build and serve the production version:
     npm start
     ```
     The server will host the frontend at `http://localhost:3000/`.
+
+## Docker Support
+
+The application supports both development and production-like execution using Docker.
+
+### 1. Development (Dev Container)
+For **writing code**, use the provided Dev Container configuration.
+1.  Open the project in **VS Code**.
+2.  Click "Reopen in Container" when prompted.
+3.  The environment is pre-configured with Node.js 20 and all dependencies.
+
+### 2. Production / Preview (Docker Compose)
+For **running the app** in a production-like environment with the `litellm` service:
+1.  Run: `docker compose up --build`
+2.  Access the app at: `http://localhost:5000`
+3.  Litellm service is available at: `http://localhost:4000`
+
+**Configuration:**
+- Edit `litellm/config.yaml` to configure your LLM models.
+- Server data is persisted in `server/data` (mounted from host).
 
 ## Architecture & API Reference
 

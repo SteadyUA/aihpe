@@ -35,13 +35,22 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
             title="Create Project"
             onClose={() => onClose?.()}
             actions={
-                <UiButton
-                    onClick={handleCreate}
-                    variant="primary"
-                    disabled={isCreating}
-                >
-                    {isCreating ? 'Creating...' : 'Create'}
-                </UiButton>
+                <>
+                    <UiButton
+                        onClick={() => onClose?.()}
+                        variant="secondary"
+                        disabled={isCreating}
+                    >
+                        Cancel
+                    </UiButton>
+                    <UiButton
+                        onClick={handleCreate}
+                        variant="primary"
+                        disabled={isCreating}
+                    >
+                        {isCreating ? 'Creating...' : 'Create'}
+                    </UiButton>
+                </>
             }
             className={styles.modal}
         >

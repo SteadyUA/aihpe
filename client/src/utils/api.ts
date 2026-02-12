@@ -15,6 +15,12 @@ export const apiAuth = {
             mergedHeaders['Content-Type'] = 'application/json';
         }
 
+        if (url.startsWith('/')) {
+            const base = import.meta.env.BASE_URL;
+            const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+            url = `${cleanBase}${url}`;
+        }
+
         let response = await fetch(url, { ...options, headers: mergedHeaders });
 
         if (response.status === 401) {
@@ -26,7 +32,8 @@ export const apiAuth = {
                             throw new Error('No refresh token');
                         }
 
-                        const refreshRes = await fetch('/api/account/refresh', {
+                        const baseUrl = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+                        const refreshRes = await fetch(`${baseUrl}api/account/refresh`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ refreshToken })

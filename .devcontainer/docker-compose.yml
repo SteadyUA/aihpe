@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ..:/workspaces/test_sse_sessions:cached
+    env_file:
+      - .env
+    # Overrides default command so things don't shut down after the process ends.
+    command: /bin/bash -c "/usr/local/bin/antigravity-fix-path.sh & sleep infinity"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    command: --config /app/config.yaml
+    volumes:
+      - ../litellm/config.yaml:/app/config.yaml
+    env_file:
+      - .env
+    restart: unless-stopped

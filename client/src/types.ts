@@ -14,7 +14,6 @@ export interface ImageAttachment {
     type: 'image';
     filename: string;
     originalName?: string;
-    url: string;
     id?: string;
 }
 
@@ -50,27 +49,45 @@ export interface Session {
     projectId: string; // New field
     subject?: string;
     status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
-    messages: MessageData[];
-    statusMessages: string[];
-    requestStartTime: number | null;
+    // messages: MessageData[]; // DEPRECATED
+    // turns: Turn[]; // MOVED TO CHAT COMPONENT STATE
 
     currentVersion?: number;
-    currentTurn: number;
+    lastTurn: number;
     activeTurn: number | null;
     activeTab: TabType;
 
     provider?: LlmProvider;
     fastMode?: boolean;
     pendingRefreshTurn: number | null;
-    pendingFileRefresh?: { version: number; filename: string; turn?: number } | null;
 
     // UI selections per session
     selection: string | null;
-    attachment?: ChatAttachment;
+    attachment?: ChatAttachment | null;
     isPicking: boolean;
-
-
-    unsent?: UnsentData;
+    input?: string;
 
     group: number;
+    tokenUsage?: TokenUsage;
+}
+
+export interface Turn {
+    turn: number;
+    beginTime: string; // ISO Date
+    endTime?: string; // ISO Date, undefined/null = active/failed?
+    request: string;
+    response: string;
+    provider?: LlmProvider;
+    fastMode?: boolean;
+    selection?: { selector: string };
+    attachment?: ChatAttachment;
+    version?: number;
+}
+
+export interface TokenUsage {
+    prompt: number;
+    completion: number;
+    total: number;
+    request?: number;
+    capacity?: number;
 }

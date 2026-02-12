@@ -1,0 +1,18 @@
+import 'reflect-metadata';
+import { DataSource } from 'typeorm';
+import path from 'path';
+import './config/env';
+import { getDataDir } from './utils/pathUtils';
+
+const DATA_DIR = getDataDir();
+const DATABASE_FILE = path.join(DATA_DIR, 'database.sqlite');
+
+export const AppDataSource = new DataSource({
+    type: 'sqlite',
+    database: DATABASE_FILE,
+    synchronize: false, // Disable synchronize for migrations
+    logging: false,
+    entities: [path.join(__dirname, 'entities', '*.{ts,js}')],
+    subscribers: [],
+    migrations: [path.join(__dirname, 'migrations', '*.{ts,js}')],
+});

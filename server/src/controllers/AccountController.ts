@@ -24,24 +24,24 @@ export class AccountController {
     constructor(private accountService: AccountService) { }
 
     @Post('/login')
-    login(@Body() body: LoginRequest) {
+    async login(@Body() body: LoginRequest) {
         if (!body.login || !body.password) {
             throw new HttpError(400, 'Login and password are required');
         }
-        return this.accountService.login(body.login, body.password);
+        return await this.accountService.login(body.login, body.password);
     }
 
     @Post('/refresh')
-    refresh(@Body() body: RefreshRequest) {
+    async refresh(@Body() body: RefreshRequest) {
         if (!body.refreshToken) {
             throw new HttpError(400, 'Refresh token is required');
         }
-        return this.accountService.refresh(body.refreshToken);
+        return await this.accountService.refresh(body.refreshToken);
     }
 
     @Post('/change-password')
     @UseBefore(AuthMiddleware)
-    changePassword(@Body() body: ChangePasswordRequest, @Req() request: Request, @Res() response: Response) {
+    async changePassword(@Body() body: ChangePasswordRequest, @Req() request: Request, @Res() response: Response) {
         const user = (request as any).user;
         if (!user || !user.login) {
             throw new HttpError(401, 'Unauthorized');
@@ -52,8 +52,8 @@ export class AccountController {
         }
 
 
-        this.accountService.verifyPassword(user.login, body.oldPassword);
-        this.accountService.changePassword(user.login, body.newPassword);
+        await this.accountService.verifyPassword(user.login, body.oldPassword);
+        await this.accountService.changePassword(user.login, body.newPassword);
         return response.status(200).json({ message: 'Password changed successfully' });
     }
 }

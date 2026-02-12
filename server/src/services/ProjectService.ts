@@ -1,175 +1,130 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
-import { Project, LlmProvider } from '../types/chat';
-
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
+import { AppDataSource } from '../data-source';
+import { Project } from '../entities/Project'; // Entity
+import { LlmProvider } from '../types/chat';
 
 @Service()
 export class ProjectService {
-    private projects = new Map<string, Project>();
-
-    constructor() {
-        this.loadProjects();
+    private get projectRepository() {
+        return AppDataSource.getRepository(Project);
     }
 
-    private loadProjects() {
-        if (!fs.existsSync(PROJECTS_FILE)) {
-            return;
-        }
-        try {
-            const raw = fs.readFileSync(PROJECTS_FILE, 'utf-8');
-            const data = JSON.parse(raw);
-            if (Array.isArray(data)) {
-                for (const p of data) {
-                    // Migration: goal -> rulesAndGoal
-                    if ((p as any).goal && !p.rulesAndGoal) {
-                        p.rulesAndGoal = (p as any).goal;
-                        delete (p as any).goal;
-                    }
+    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string): Promise<Project> {
+        const project = new Project();
+        project.id = randomUUID();
+        project.accountId = accountId;
+        project.name = name || 'Untitled';
+        project.rulesAndGoal = rulesAndGoal;
+        project.imageGenerationPref = imageGenerationPref;
+        project.defaultProvider = defaultProvider;
+        project.modelRole = modelRole || 'You are an expert web developer';
+        project.sessionIds = [];
+        // createdAt/updatedAt handled by TypeOrm via decorators
 
-                    if (!(p as any).name) {
-                        (p as any).name = 'Untitled';
-                    }
-
-                    if (!p.modelRole) {
-                        p.modelRole = 'You are an expert web developer';
-                    }
-
-                    this.projects.set(p.id, {
-                        ...p,
-                        name: (p as any).name,
-                        createdAt: new Date(p.createdAt),
-                        updatedAt: new Date(p.updatedAt),
-                    });
-                }
-            }
-        } catch (error) {
-            console.error('Failed to load projects:', error);
-        }
+        return await this.projectRepository.save(project);
     }
 
-    private saveProjects() {
-        if (!fs.existsSync(DATA_DIR)) {
-            fs.mkdirSync(DATA_DIR, { recursive: true });
-        }
-        const data = Array.from(this.projects.values());
-        fs.writeFileSync(PROJECTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    }
-
-    createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string): Project {
-        const id = randomUUID();
-        const project: Project = {
-            id,
-            accountId,
-            name: name || 'Untitled',
-            rulesAndGoal,
-            imageGenerationPref,
-            defaultProvider,
-            modelRole: modelRole || 'You are an expert web developer',
-            sessionIds: [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        };
-        this.projects.set(id, project);
-        this.saveProjects();
-        return project;
-    }
-
-    getProject(id: string, currentUserId?: number): Project | undefined {
-        const project = this.projects.get(id);
+    async getProject(id: string, currentUserId?: number): Promise<Project | undefined> {
+        const project = await this.projectRepository.findOneBy({ id });
         if (!project) return undefined;
 
         // Lazy migration: if project has no owner, assign to current user
-        if (project.accountId === undefined && currentUserId !== undefined) {
+        if (project.accountId === null && currentUserId !== undefined) {
+            // accountId is potentially null in DB
+            // We can check if it is null or undefined
             project.accountId = currentUserId;
-            this.saveProjects();
+            await this.projectRepository.save(project);
         }
 
         // Access control: if project has owner, and it's not current user, deny access
-        // We throw generic 'not found' to avoid leaking existence, or explicit error?
-        // Let's return undefined to look like it doesn't exist for this user.
-        if (project.accountId !== undefined && currentUserId !== undefined && project.accountId !== currentUserId) {
+        if (project.accountId !== null && project.accountId !== undefined && currentUserId !== undefined && project.accountId !== currentUserId) {
             return undefined;
         }
 
         return project;
     }
 
-    getUserProjects(accountId: number): Project[] {
-        return Array.from(this.projects.values()).filter(p => p.accountId === accountId);
+    async getUserProjects(accountId: number): Promise<Project[]> {
+        return await this.projectRepository.findBy({ accountId });
     }
 
-    updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole'>>, currentUserId?: number): Project {
+    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole' | 'sessionIds'>>, currentUserId?: number): Promise<Project> {
         // Use getProject to handle access checks
-        const project = this.getProject(id, currentUserId);
+        const project = await this.getProject(id, currentUserId);
         if (!project) {
             throw new Error(`Project ${id} not found`);
         }
 
-        const updated: Project = {
-            ...project,
-            ...updates,
-            updatedAt: new Date(),
-        };
-        this.projects.set(id, updated);
-        this.saveProjects();
-        return updated;
+        // Apply updates
+        if (updates.rulesAndGoal !== undefined) project.rulesAndGoal = updates.rulesAndGoal;
+        if (updates.imageGenerationPref !== undefined) project.imageGenerationPref = updates.imageGenerationPref;
+        if (updates.defaultProvider !== undefined) project.defaultProvider = updates.defaultProvider;
+        if (updates.name !== undefined) project.name = updates.name;
+        if (updates.activeSessionId !== undefined) project.activeSessionId = updates.activeSessionId;
+        if (updates.modelRole !== undefined) project.modelRole = updates.modelRole;
+        if (updates.sessionIds !== undefined) project.sessionIds = updates.sessionIds;
+
+        project.updatedAt = new Date(); // Explicit update or let UpdateDateColumn handle it? 
+        // UpdateDateColumn updates on save, but setting it explicitly is fine too.
+
+        return await this.projectRepository.save(project);
     }
 
-    addSessionToProject(projectId: string, sessionId: string): void {
-        const project = this.projects.get(projectId);
-
+    async addSessionToProject(projectId: string, sessionId: string, afterSessionId?: string): Promise<void> {
+        const project = await this.projectRepository.findOneBy({ id: projectId });
         if (!project) {
             throw new Error(`Project ${projectId} not found`);
         }
 
         if (!project.sessionIds.includes(sessionId)) {
-            project.sessionIds.push(sessionId);
-            project.updatedAt = new Date();
-            this.saveProjects();
+            if (afterSessionId) {
+                const index = project.sessionIds.indexOf(afterSessionId);
+                if (index !== -1) {
+                    project.sessionIds.splice(index + 1, 0, sessionId);
+                } else {
+                    project.sessionIds.push(sessionId);
+                }
+            } else {
+                project.sessionIds.push(sessionId);
+            }
+            // We need to re-assign sessionIds to trigger change detection for simple-array/json sometimes? 
+            // TypeOrm simple-json usually detects deep changes if we save object. 
+            // But safe bet is:
+            project.sessionIds = [...project.sessionIds];
+            await this.projectRepository.save(project);
         }
     }
 
-    removeSessionFromProject(projectId: string, sessionId: string): void {
-        const project = this.projects.get(projectId);
+    async removeSessionFromProject(projectId: string, sessionId: string): Promise<void> {
+        const project = await this.projectRepository.findOneBy({ id: projectId });
         if (project) {
             project.sessionIds = project.sessionIds.filter(id => id !== sessionId);
-            project.updatedAt = new Date();
-            this.saveProjects();
+            await this.projectRepository.save(project);
         }
     }
 
-
-
-    getProjectSessions(projectId: string): string[] {
-        const project = this.projects.get(projectId);
+    async getProjectSessions(projectId: string): Promise<string[]> {
+        const project = await this.projectRepository.findOneBy({ id: projectId });
         return project ? [...project.sessionIds] : [];
     }
 
-    getNextSessionGroup(projectId: string): number {
-        const project = this.projects.get(projectId);
+    async getNextSessionGroup(projectId: string): Promise<number> {
+        const project = await this.projectRepository.findOneBy({ id: projectId });
         if (!project) {
             throw new Error(`Project ${projectId} not found`);
         }
 
         const lastGroup = project.lastAssignedSessionGroup;
-        // Start from 0 if undefined, otherwise increment and wrap around 12
-        const nextGroup = lastGroup === undefined ? 0 : (lastGroup + 1) % 12;
+        const nextGroup = lastGroup === undefined || lastGroup === null ? 0 : (lastGroup + 1) % 12;
 
         project.lastAssignedSessionGroup = nextGroup;
-        project.updatedAt = new Date();
-        this.saveProjects();
+        await this.projectRepository.save(project);
 
         return nextGroup;
     }
 
-    deleteProject(id: string): void {
-        if (this.projects.has(id)) {
-            this.projects.delete(id);
-            this.saveProjects();
-        }
+    async deleteProject(id: string): Promise<void> {
+        await this.projectRepository.delete(id);
     }
 }

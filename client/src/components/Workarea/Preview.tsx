@@ -44,6 +44,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     private thottledScrollHandler: (() => void) | null = null;
     private iframeRef: React.RefObject<HTMLIFrameElement | null>;
     private containerRef: React.RefObject<HTMLDivElement | null>;
+    private cleanupCustomScrollbar?: () => void;
 
     constructor(props: PreviewProps) {
         super(props);
@@ -168,6 +169,10 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         if (prevState.isMobile !== this.state.isMobile || prevState.deviceIndex !== this.state.deviceIndex) {
             this.calculateScale();
         }
+
+        if (prevState.isMobile !== this.state.isMobile) {
+            this.manageCustomScrollbar();
+        }
     }
 
     saveScrollPosition = (force: boolean = false) => {
@@ -237,6 +242,132 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.saveScrollPosition();
     }
 
+    manageCustomScrollbar = () => {
+        const iframe = this.iframeRef.current;
+        if (!iframe || !iframe.contentDocument || !iframe.contentWindow) return;
+
+        const doc = iframe.contentDocument;
+        const win = iframe.contentWindow;
+
+        const STYLE_ID = 'mobile-custom-scroll-style';
+        const BAR_ID = 'mobile-custom-scrollbar';
+
+        // Cleanup previous
+        if (this.cleanupCustomScrollbar) {
+            this.cleanupCustomScrollbar();
+            this.cleanupCustomScrollbar = undefined;
+        }
+
+        const existingStyle = doc.getElementById(STYLE_ID);
+        if (existingStyle) existingStyle.remove();
+
+        const existingBar = doc.getElementById(BAR_ID);
+        if (existingBar) existingBar.remove();
+
+        if (!this.state.isMobile) return;
+
+        // 1. Hide native scrollbar
+        const style = doc.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html { 
+                scrollbar-width: none !important; 
+                -ms-overflow-style: none !important; 
+            }
+            body {
+                scrollbar-width: none !important; 
+                -ms-overflow-style: none !important; 
+            }
+            ::-webkit-scrollbar { 
+                display: none !important; 
+                width: 0 !important; 
+                height: 0 !important; 
+            }
+        `;
+        doc.head.appendChild(style);
+
+        // 2. Inject Custom DOM Scrollbar
+        const bar = doc.createElement('div');
+        bar.id = BAR_ID;
+        Object.assign(bar.style, {
+            position: 'fixed',
+            right: '2px',
+            top: '4px',
+            bottom: '2px',
+            width: '5px',
+            zIndex: '2147483647', // Max z-index
+            pointerEvents: 'none',
+            display: 'none',
+        });
+
+        const thumb = doc.createElement('div');
+        Object.assign(thumb.style, {
+            position: 'absolute',
+            width: '100%',
+            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+            borderRadius: '10px',
+        });
+
+        bar.appendChild(thumb);
+        doc.body.appendChild(bar);
+
+        // 3. Logic to update position
+        let fadeTimeout: any;
+        const fadeOut = () => {
+            thumb.style.opacity = '0';
+        };
+
+        const update = () => {
+            try {
+                const h = win.innerHeight;
+                const sh = doc.documentElement.scrollHeight || doc.body.scrollHeight;
+                const st = win.scrollY || doc.documentElement.scrollTop || doc.body.scrollTop;
+
+                if (sh <= h) {
+                    bar.style.display = 'none';
+                    return;
+                }
+
+                bar.style.display = 'block';
+                thumb.style.opacity = '1';
+
+                // Calculate height and position using available height (h - 8px margin)
+                const availableHeight = h - 8;
+                const thumbHeight = Math.max((h / sh) * availableHeight, 30);
+                const maxTop = availableHeight - thumbHeight;
+                // scrollRatio 0..1
+                const maxScroll = sh - h;
+                const scrollRatio = maxScroll > 0 ? st / maxScroll : 0;
+
+                const top = scrollRatio * maxTop;
+
+                thumb.style.height = `${thumbHeight}px`;
+                thumb.style.transform = `translateY(${top}px)`;
+
+                // Auto-fade logic (mimic mobile)
+                clearTimeout(fadeTimeout);
+                fadeTimeout = setTimeout(fadeOut, 800);
+            } catch (e) { /* ignore cleanup errors */ }
+        };
+
+        win.addEventListener('scroll', update);
+        win.addEventListener('resize', update);
+        const observer = new MutationObserver(update);
+        observer.observe(doc.body, { childList: true, subtree: true, attributes: true });
+
+        // Initial update
+        update();
+
+        this.cleanupCustomScrollbar = () => {
+            try {
+                win.removeEventListener('scroll', update);
+                win.removeEventListener('resize', update);
+                observer.disconnect();
+                clearTimeout(fadeTimeout);
+            } catch (e) { }
+        };
+    };
+
     handleIframeLoad = () => {
         const { sessionId } = this.props;
         const iframe = this.iframeRef.current;
@@ -258,6 +389,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             }
         }
 
+        this.manageCustomScrollbar();
+
         if (this.props.onLoad) {
             this.props.onLoad();
         }
@@ -277,7 +410,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     handleNewWindow = () => {
         const { sessionId, version } = this.props;
         if (!sessionId) return;
-        const url = `/api/sessions/${sessionId}/${version}/files/index.html`;
+        const url = `${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/index.html`;
         window.open(url, '_blank');
     };
 
@@ -321,7 +454,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         const previewUrl =
             sessionId && typeof version === 'number'
-                ? `/api/sessions/${sessionId}/${version}/files/index.html`
+                ? `${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/index.html`
                 : 'about:blank';
 
         // Key logic: Combine identifying props to force remount of iframe when any changes
@@ -455,7 +588,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 ref={this.iframeRef}
                                 src={previewUrl}
                                 title="Preview"
-                                sandbox="allow-scripts allow-same-origin allow-modals"
+                                sandbox="allow-scripts allow-same-origin allow-modals allow-forms"
                                 onLoad={this.handleIframeLoad}
                                 style={{
                                     width: '100%',

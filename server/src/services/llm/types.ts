@@ -1,4 +1,6 @@
-import { ChatAttachment, SessionFiles, ChatMessage } from '../../types/chat';
+import { ChatAttachment, SessionFiles, ChatMessage, TokenUsage } from '../../types/chat';
+
+export { ChatAttachment, SessionFiles, ChatMessage, TokenUsage };
 
 export interface GeneratePageRequest {
     sessionId: string;
@@ -16,6 +18,19 @@ export interface GeneratePageRequest {
     subject?: string;
     onPatch?: (patch: { subject?: string }) => void;
     modelRole?: string;
+    abortSignal?: AbortSignal;
+    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string, agent: string }) => Promise<void>;
+    summary?: string; // Cumulative summary of previous conversation history (that might be excluded from 'conversation' list)
+}
+
+export interface SummarizeHistoryRequest {
+    sessionId: string;
+    conversation: ChatMessage[];
+    rulesAndGoal?: string;
+    modelRole?: string;
+    abortSignal?: AbortSignal;
+    previousSummary?: string; // The existing summary to be updated/extended
+    trackRequestTokenUsage?: (usage: { prompt: number, completion: number, total: number, model: string, agent: string }) => Promise<void>;
 }
 
 
@@ -29,4 +44,6 @@ export interface GeneratePageResult {
 
 export interface LlmClient {
     generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
+    summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
+    getCapacity(): number;
 }

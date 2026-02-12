@@ -9,9 +9,9 @@ import { ProviderSelector } from './ProviderSelector';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-import { MessageData, LlmProvider, ChatAttachment } from '../types';
-
-
+import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn, Session, UnsentData } from '../types';
+import { apiAuth } from '../utils/api';
+import { UiModal } from './UiModal';
 
 interface MessageProps {
     msg: MessageData;
@@ -29,6 +29,8 @@ interface MessageProps {
     isPending?: boolean;
     statusMessages?: string[];
     startTime?: number;
+    sessionId: string;
+    onImageLoad?: () => void;
 }
 
 const formatTime = (dateString?: string) => {
@@ -98,8 +100,8 @@ const areArraysEqual = (a?: any[], b?: any[]) => {
 
 class Message extends React.Component<MessageProps> {
     shouldComponentUpdate(nextProps: MessageProps) {
-        const { msg, sessionIds, statusMessages, ...otherProps } = this.props;
-        const { msg: nextMsg, sessionIds: nextSessionIds, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
+        const { msg, sessionIds, sessionId, statusMessages, ...otherProps } = this.props;
+        const { msg: nextMsg, sessionIds: nextSessionIds, sessionId: nextSessionId, statusMessages: nextStatusMessages, ...nextOtherProps } = nextProps;
 
         // 1. Primitive props check (shallow comparison of the rest)
         const keys = Object.keys(otherProps) as (keyof typeof otherProps)[];
@@ -109,10 +111,14 @@ class Message extends React.Component<MessageProps> {
         // Also check if nextProps has new keys (though unlikely with TS)
         if (Object.keys(nextOtherProps).length !== keys.length) return true;
 
+        if (sessionId !== nextSessionId) return true;
+
         // 2. Message content check
         if (msg.content !== nextMsg.content) return true;
         if (msg.role !== nextMsg.role) return true;
         if (msg.turn !== nextMsg.turn) return true;
+        if (msg.version !== nextMsg.version) return true;
+
         // Attachment check (reference or value if needed, simpler to ref check for now)
         if (msg.attachment !== nextMsg.attachment) return true;
         if (msg.selection?.selector !== nextMsg.selection?.selector) return true;
@@ -127,7 +133,7 @@ class Message extends React.Component<MessageProps> {
     render() {
         const {
             msg,
-            id,
+            sessionId,
             onSelectChip,
             onCloneTurn,
             onPreviewTurn,
@@ -151,9 +157,16 @@ class Message extends React.Component<MessageProps> {
             [styles.pending]: isPending,
         });
 
+        let statusList = statusMessages || [];
+        if (isPending) {
+            if (statusList.length === 0) {
+                statusList = ['Thinking...'];
+            }
+        }
+
         return (
             <div
-                id={id}
+                id={`msg-session-${sessionId}-turn-${msg.turn}`}
                 className={messageClass}
                 onClick={
                     isAssistant && onPreviewTurn
@@ -193,30 +206,26 @@ class Message extends React.Component<MessageProps> {
 
                     {/* Render Content */}
                     {isPending ? (
-                        statusMessages && statusMessages.length > 0 ? (
-                            (() => {
-                                const maxItems = 3;
-                                const start = Math.max(0, statusMessages.length - maxItems);
-                                const visibleMessages = statusMessages.slice(start);
-                                const startIndex = start + 1;
+                        (() => {
+                            const maxItems = 3;
+                            const start = Math.max(0, statusList.length - maxItems);
+                            const visibleMessages = statusList.slice(start);
+                            const startIndex = start + 1;
 
-                                return (
-                                    <ol start={startIndex} className={styles.statusList}>
-                                        {visibleMessages.map((msg, idx) => (
-                                            <li key={start + idx}>{msg}</li>
-                                        ))}
-                                    </ol>
-                                );
-                            })()
-                        ) : (
-                            <span className={styles.blinkingCursor}>▋</span>
-                        )
+                            return (
+                                <ol start={startIndex} className={styles.statusList}>
+                                    {visibleMessages.map((msg, idx) => (
+                                        <li key={start + idx}>{msg}</li>
+                                    ))}
+                                </ol>
+                            );
+                        })()
                     ) : (
-                        (msg.content || (!msg.attachment && isUser)) && (
+                        (msg.content || isAssistant || (!msg.attachment && isUser)) && (
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content, this.props.sessionIds)) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
                                 }}
                             />
                         )
@@ -226,14 +235,15 @@ class Message extends React.Component<MessageProps> {
                     {msg.attachment && (
                         <div className={styles.messageAttachments}>
                             <img
-                                src={msg.attachment.url}
+                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`}
                                 alt={msg.attachment.originalName || msg.attachment.filename}
                                 className={styles.messageThumbnail}
                                 title={msg.attachment.originalName || msg.attachment.filename}
+                                onLoad={this.props.onImageLoad}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (msg.attachment) {
-                                        window.open(msg.attachment.url, '_blank');
+                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`, '_blank');
                                     }
                                 }}
                             />
@@ -322,12 +332,8 @@ class Message extends React.Component<MessageProps> {
 }
 
 interface ChatProps {
-    messages: MessageData[];
-    onSend: (text: string) => void;
     status: string;
-    statusMessages?: string[]; // Renamed from statusMessage, now array
-    startTime?: number | null; // For timer
-    // New props for toolbar features
+    sessionId: string;
     onPickElement?: () => void;
     onCancelPick?: () => void;
     selection?: string | null;
@@ -336,24 +342,19 @@ interface ChatProps {
     onSelectChip?: (selector: string) => void;
     onCloneTurn?: (turn: number) => void;
     onPreviewTurn?: (turn: number) => void;
-    activeTurn?: number | null;
+    activeTurn: number | null;
+    lastTurn: number;
     disabled?: boolean;
-
     provider?: LlmProvider;
-    onProviderChange?: (provider: LlmProvider) => void;
-    onUndo?: () => Promise<{ restoredInput?: string } | void>;
-    onUpload?: (file: File) => Promise<ChatAttachment>;
-    onDeleteAttachment?: (attachment: ChatAttachment) => void;
     attachment?: ChatAttachment;
-    onAttachmentChange?: (attachment?: ChatAttachment) => void;
     unsentInput?: string;
-    onSaveUnsent?: (data: { input?: string | null }) => void;
     sessionIds?: string[];
     onSwitchSession?: (id: string) => void;
     fastMode?: boolean;
-    onFastModeChange?: (value: boolean) => void;
     sessionTitle?: string;
-
+    tokenUsage?: TokenUsage;
+    onUpdateSession: (updates: Partial<Session>) => void;
+    isVisible?: boolean;
 }
 
 interface ChatState {
@@ -362,68 +363,132 @@ interface ChatState {
     input: string;
     showUndoConfirmation: boolean;
     isUploading: boolean;
+    showSummaryModal: boolean;
+    summaryContent: string;
+    historyLoaded: boolean;
+    turns: Turn[];
+    statusMessages: string[];
+    startTime: number | null;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
-    private messagesEndRef: React.RefObject<HTMLDivElement | null>;
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
-    private isUserScroll = false;
     private richInputRef = React.createRef<RichInput>();
+    private lastSavedUnsent: UnsentData = {};
+    private messagesRef = React.createRef<HTMLDivElement>();
 
     constructor(props: ChatProps) {
         super(props);
+        this.fileInputRef = React.createRef();
         this.state = {
             isLoading: false,
             error: null,
-            input: '',
+            input: props.unsentInput || '',
             isUploading: false,
             showUndoConfirmation: false,
+            showSummaryModal: false,
+            summaryContent: '',
+            historyLoaded: false,
+
+            turns: [],
+            statusMessages: [],
+            startTime: null
         };
-        if (props.unsentInput) {
-            this.state = {
-                ...this.state,
-                input: props.unsentInput
-            };
-        }
-        this.messagesEndRef = React.createRef();
-        this.fileInputRef = React.createRef();
+
+        this.lastSavedUnsent = {
+            input: props.unsentInput || '',
+            attachment: props.attachment,
+            selection: props.selection
+        };
+    }
+
+    private isLastTurn(): boolean {
+        const { activeTurn, lastTurn } = this.props;
+        const effectiveTurn = activeTurn ?? lastTurn;
+        return effectiveTurn === lastTurn;
     }
 
     componentDidMount() {
-        if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
-            this.scrollToTurn(this.props.activeTurn);
-        } else {
-            this.scrollToBottom();
+        if (this.props.sessionId && this.props.isVisible && this.props.status !== 'pending') {
+            this.fetchTurns();
+        }
+
+        window.addEventListener('processed-chat-event', this.handleServerMessage as EventListener);
+    }
+
+    handleServerMessage = (event: CustomEvent) => {
+        const data = event.detail;
+        if (data.sessionId !== this.props.sessionId) return;
+
+        if (data.status === 'started') {
+            this.setState({
+                startTime: Date.now(),
+                statusMessages: []
+            });
+            this.props.onUpdateSession({ status: 'busy' });
+        } else if (data.status === 'generating') {
+            if (data.message) {
+                this.setState(prevState => ({
+                    statusMessages: [...prevState.statusMessages, data.message]
+                }));
+            }
+        } else if (data.status === 'completed') {
+            this.setState({
+                startTime: null,
+                statusMessages: []
+            });
+
+            const updates: Partial<Session> = { status: 'idle' };
+
+            if (data.details?.message) {
+                const assistantMsg = data.details.message;
+
+                this.setState(prevState => {
+                    const turns = [...prevState.turns];
+                    const index = turns.findIndex(t => t.turn === assistantMsg.turn);
+                    if (index !== -1) {
+                        turns[index] = { ...turns[index], ...assistantMsg, response: assistantMsg.content };
+                    }
+                    return { turns };
+                }, () => {
+                    this.syncVersion(null);
+                    updates.lastTurn = assistantMsg.turn;
+                    this.props.onUpdateSession(updates);
+                    // Scroll to the new message
+                    setTimeout(() => {
+                        this.scrollToActiveTurn('smooth', 'end');
+                    }, 100);
+                });
+            } else {
+                this.props.onUpdateSession(updates);
+            }
+        } else if (data.status === 'stopped') {
+            this.props.onUpdateSession({ status: 'idle' });
+        } else if (data.status === 'error') {
+            this.setState({ startTime: null });
+            if (data.message) {
+                this.setState(prevState => ({
+                    statusMessages: [...prevState.statusMessages, data.message]
+                }));
+            }
+            this.props.onUpdateSession({ status: 'error' });
         }
     }
 
-    componentDidUpdate(prevProps: ChatProps) {
-        const lastMsg = this.props.messages[this.props.messages.length - 1];
-        const prevLastMsg = prevProps.messages[prevProps.messages.length - 1];
-        const contentChanged = lastMsg?.content !== prevLastMsg?.content;
 
-        if (
-            prevProps.messages.length !== this.props.messages.length ||
-            prevProps.statusMessages?.length !== this.props.statusMessages?.length ||
-            prevProps.status !== this.props.status ||
-            contentChanged
-        ) {
-            const isAtBottom = this.props.activeTurn === null || this.props.activeTurn === undefined;
-            const isLatestTurnActive = lastMsg && typeof lastMsg.turn === 'number' && this.props.activeTurn === lastMsg.turn;
-
-            if (isAtBottom || isLatestTurnActive) {
-                this.scrollToBottom();
-            }
+    componentDidUpdate(prevProps: ChatProps, prevState: ChatState) {
+        if (prevProps.sessionId !== this.props.sessionId) {
+            this.setState({ historyLoaded: false, turns: [] });
+            this.fetchTurns();
+            return;
         }
 
-        if (prevProps.activeTurn !== this.props.activeTurn) {
-            if (this.isUserScroll) {
-                this.isUserScroll = false;
-            } else if (this.props.activeTurn !== null && this.props.activeTurn !== undefined) {
-                this.scrollToTurn(this.props.activeTurn);
-            } else {
-                this.scrollToBottom();
-            }
+        if (this.props.status === 'idle' && prevProps.status !== 'idle') {
+            this.fetchTurns();
+        }
+
+        if (!prevProps.isVisible && this.props.isVisible && !this.state.historyLoaded) {
+            this.fetchTurns();
         }
 
         if (prevProps.unsentInput !== this.props.unsentInput && this.props.unsentInput !== undefined) {
@@ -432,20 +497,60 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }
 
-        const justFinishedPicking = prevProps.isPicking && !this.props.isPicking;
-        const justClearedSelection = prevProps.selection && !this.props.selection;
-        const attachmentChanged = prevProps.attachment !== this.props.attachment;
-        const providerChanged = prevProps.provider !== this.props.provider;
-        const fastModeChanged = prevProps.fastMode !== this.props.fastMode;
+        if (prevProps.selection !== this.props.selection) {
+            this.handleSaveUnsent({ selection: this.props.selection });
+        }
 
-        if (justFinishedPicking || justClearedSelection || (attachmentChanged && !this.state.isUploading) || providerChanged || fastModeChanged) {
-            this.richInputRef.current?.focus();
+        if (prevProps.attachment !== this.props.attachment) {
+            this.handleSaveUnsent({ attachment: this.props.attachment });
+        }
+
+        const turnChanged = prevProps.activeTurn !== this.props.activeTurn;
+        const historyJustLoaded = !prevState.historyLoaded && this.state.historyLoaded;
+
+        if (turnChanged) {
+            this.scrollToActiveTurn('smooth', 'start');
+            this.syncVersion(this.props.activeTurn);
+        } else if (historyJustLoaded) {
+            this.scrollToActiveTurn('auto', 'start');
+            this.syncVersion(this.props.activeTurn);
         }
     }
 
-    componentWillUnmount() {
+    syncVersion = (activeTurnProp: number | null) => {
+        const targetTurn = activeTurnProp ?? this.props.lastTurn;
+        const turn = this.state.turns.find(t => t.turn === targetTurn);
+        const version = turn?.version ?? 0;
+
+        this.props.onUpdateSession({ currentVersion: version });
     }
 
+    scrollToActiveTurn = (behavior: ScrollBehavior = 'smooth', block: ScrollLogicalPosition = 'start', attempts = 0) => {
+        const effectiveTurn = this.props.activeTurn ?? this.props.lastTurn;
+
+        // Verify turn exists in data
+        const turnExists = this.state.turns.some(t => t.turn === effectiveTurn);
+        if (!turnExists && effectiveTurn !== 0) {
+            return;
+        }
+
+        const el = document.getElementById(`msg-session-${this.props.sessionId}-turn-${effectiveTurn}`);
+
+        // Check if element is visible (offsetParent is null if display: none or not in DOM tree)
+        const isVisible = el && el.offsetParent !== null;
+
+        if (el && isVisible) {
+            el.scrollIntoView({ behavior, block });
+        } else if (attempts < 10) {
+            // Element might exist but be hidden (e.g. inside a display:none container or before layout)
+            // Retry with exponential backoff or just rAF
+            setTimeout(() => this.scrollToActiveTurn(behavior, block, attempts + 1), 50 * (attempts + 1));
+        }
+    };
+
+    componentWillUnmount() {
+        window.removeEventListener('processed-chat-event', this.handleServerMessage as EventListener);
+    }
 
     handleUndo = () => {
         this.setState({ showUndoConfirmation: true });
@@ -453,37 +558,219 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     confirmUndo = async () => {
         this.setState({ showUndoConfirmation: false });
-        if (this.props.onUndo) {
-            const result = await this.props.onUndo();
-            if (result && typeof result.restoredInput === 'string') {
-                this.setState({ input: result.restoredInput });
-            }
+        const { sessionId } = this.props;
+        if (!sessionId) return;
+
+        // Optimistic update
+        const prevTurns = [...this.state.turns];
+        const lastTurnIndex = prevTurns.length - 1;
+        if (lastTurnIndex >= 0) {
+            const newTurns = prevTurns.slice(0, lastTurnIndex);
+            this.setState({ turns: newTurns });
+            const prevTurnNum = Math.max(0, this.props.lastTurn - 1);
+            this.props.onUpdateSession({
+                activeTurn: prevTurnNum,
+                lastTurn: prevTurnNum,
+            });
         }
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/undo`, { method: 'POST' });
+            if (!res.ok) throw new Error('Undo failed');
+            const data = await res.json();
+
+            if (data.success) {
+                // If successful, we arguably don't need to refetch if our optimistic update was correct.
+                // But we should sync the input/selection state.
+
+                if (data.restoredInput) {
+                    this.setState({ input: data.restoredInput });
+                }
+
+                if (data.restoredSelection) {
+                    this.props.onUpdateSession({ selection: data.restoredSelection });
+                }
+
+                if (data.restoredAttachment) {
+                    this.props.onUpdateSession({ attachment: data.restoredAttachment });
+                }
+
+                this.syncVersion(null);
+            } else {
+                // Revert optimistic update?
+                this.setState({ turns: prevTurns });
+                this.props.onUpdateSession({
+                    activeTurn: this.props.lastTurn, // Restore (though props might not have updated yet if we did it via onUpdateSession... this is tricky without controlled props)
+                });
+                // Actually, onUpdateSession updates parent state which flows back down.
+                // So we need to undo that.
+            }
+        } catch (error) {
+            console.error('Failed to undo', error);
+            // Revert optimistic update
+            this.setState({ turns: prevTurns });
+            // TODO: Signal error to user
+        }
+
+        this.richInputRef.current?.focus(true);
     };
 
     cancelUndo = () => {
         this.setState({ showUndoConfirmation: false });
     };
 
-    scrollToBottom = () => {
-        this.messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
+    public focus(toEnd: boolean = false) {
+        this.richInputRef.current?.focus(toEnd);
+    }
 
-    scrollToTurn = (turn: number) => {
-        // Use timeout to allow render to complete if necessary
-        setTimeout(() => {
-            const el = document.getElementById(`msg-turn-${turn}`);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    fetchTurns = async (beforeTurn?: number): Promise<{ count: number; hasMore: boolean }> => {
+        const id = this.props.sessionId;
+        if (!id) return { count: 0, hasMore: false };
+
+        this.setState({ isLoading: true });
+
+        try {
+            const url = `/api/sessions/${id}/turns` + (beforeTurn !== undefined ? `?before=${beforeTurn}` : '');
+            const res = await apiAuth.fetch(url);
+            if (!res.ok) throw new Error('Failed to fetch turns');
+            const data: { turns: Turn[] } = await res.json();
+            const newlyFetched = data.turns;
+
+            let finalTurns: Turn[];
+            if (beforeTurn !== undefined) {
+                finalTurns = [...newlyFetched, ...this.state.turns];
+                this.setState({ turns: finalTurns, historyLoaded: true, isLoading: false }, () => {
+                    this.syncVersion(this.props.activeTurn);
+                });
+            } else {
+                finalTurns = newlyFetched;
+                this.setState({ turns: finalTurns, historyLoaded: true, isLoading: false }, () => {
+                    this.syncVersion(this.props.activeTurn);
+                });
             }
-        }, 100);
+
+            return { count: newlyFetched.length, hasMore: newlyFetched.length > 0 };
+        } catch (e) {
+            console.error('Failed to fetch turns', e);
+            this.setState({ isLoading: false });
+            return { count: 0, hasMore: false };
+        }
     };
 
-    public submit = (text: string) => {
-        if (this.props.disabled) return;
-        this.props.onSend(text);
-        if (this.props.onAttachmentChange) {
-            this.props.onAttachmentChange(undefined);
+    handleSaveUnsent = async (data: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null, fastMode?: boolean }) => {
+        const { sessionId } = this.props;
+        if (!sessionId) return;
+
+        let hasChanges = false;
+        const keys = Object.keys(data) as (keyof typeof data)[];
+
+        for (const key of keys) {
+            const newValue = data[key];
+            const oldValue = this.lastSavedUnsent[key];
+
+            if (key === 'attachment') {
+                const newAtt = newValue as ChatAttachment | null | undefined;
+                const oldAtt = oldValue as ChatAttachment | null | undefined;
+                if (newAtt?.filename !== oldAtt?.filename) {
+                    hasChanges = true;
+                    break;
+                }
+            } else if (key === 'input') {
+                const newIn = ((newValue as string | null | undefined) || '').trim();
+                const oldIn = ((oldValue as string | null | undefined) || '').trim();
+                if (newIn !== oldIn) {
+                    hasChanges = true;
+                    break;
+                }
+            } else {
+                if (newValue !== oldValue) {
+                    hasChanges = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasChanges) return;
+
+        try {
+            await apiAuth.fetch(`/api/sessions/${sessionId}/unsent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            this.lastSavedUnsent = { ...this.lastSavedUnsent, ...data };
+        } catch (e) {
+            console.error('Failed to save unsent data', e);
+        }
+
+        if (data.input !== undefined) {
+            // Only update session if the input hasn't changed in the meantime (e.g. cleared by sendMessage)
+            const currentInput = (this.state.input || '').trim();
+            const savedInput = (data.input || '').trim();
+            if (currentInput === savedInput) {
+                this.props.onUpdateSession({ input: data.input || undefined });
+            }
+        }
+    };
+
+    sendMessage = async (text: string) => {
+        const { sessionId, provider, fastMode, selection, attachment } = this.props;
+        if (!sessionId) return;
+
+        const selectionData = selection ? { selector: selection } : undefined;
+        const nextTurn = this.props.lastTurn + 1;
+
+        const optimisticTurn: Turn = {
+            turn: nextTurn,
+            beginTime: new Date().toISOString(),
+            request: text,
+            response: '',
+            provider: provider,
+            fastMode: fastMode,
+            selection: selectionData,
+            attachment: attachment,
+            version: 0
+        };
+
+        const newTurns = [...this.state.turns, optimisticTurn];
+
+        this.setState({ turns: newTurns });
+
+        this.props.onUpdateSession({
+            status: 'busy',
+            selection: null,
+            activeTurn: nextTurn,
+            lastTurn: nextTurn,
+            attachment: undefined,
+            input: undefined
+        });
+
+        this.setState({ input: '' });
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    attachment,
+                    selection: selectionData,
+                    provider: provider,
+                    fastMode: fastMode,
+                }),
+            });
+
+            const data = await res.json();
+
+            this.props.onUpdateSession({
+                lastTurn: data.turn,
+                activeTurn: data.turn,
+            });
+
+        } catch (e) {
+            console.error('Failed to send message', e);
+            this.props.onUpdateSession({ status: 'error' });
         }
     };
 
@@ -492,17 +779,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         if (this.props.disabled) return;
 
         if (this.state.input.trim() || this.props.attachment) {
-            this.props.onSend(this.state.input);
-            this.setState({ input: '' });
-            // Clear attachment after sending
-            if (this.props.onAttachmentChange) {
-                this.props.onAttachmentChange(undefined);
-            }
+            this.sendMessage(this.state.input);
         }
-    };
-
-    handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        this.setState({ input: e.target.value });
     };
 
     handleRichInputChange = (value: string) => {
@@ -510,15 +788,30 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     };
 
     performUpload = async (file: File) => {
-        if (!this.props.onUpload) return;
+        const { sessionId } = this.props;
+        if (!sessionId) return;
 
         this.setState({ isUploading: true });
         try {
-            const attachment = await this.props.onUpload(file);
-            // Single file limit: Replace any existing
-            if (this.props.onAttachmentChange) {
-                this.props.onAttachmentChange(attachment);
-            }
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/uploads`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) throw new Error('Upload failed');
+            const data = await res.json();
+
+            const attachment: ChatAttachment = {
+                type: 'image',
+                filename: data.filename,
+                id: data.filename,
+                originalName: data.originalName
+            };
+
+            this.props.onUpdateSession({ attachment });
         } catch (error) {
             console.error('Upload failed', error);
         } finally {
@@ -533,7 +826,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         ) {
             const file = e.target.files[0];
             await this.performUpload(file);
-            // Reset input
             if (this.fileInputRef.current) {
                 this.fileInputRef.current.value = '';
             }
@@ -541,12 +833,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     };
 
     handlePaste = async (e: React.ClipboardEvent) => {
-        // Prioritize finding images in clipboard items (covers screenshots and files)
         const items = e.clipboardData.items;
 
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            // Check for image type (e.g., image/png, image/jpeg)
             if (item.type.indexOf('image') !== -1) {
                 const blob = item.getAsFile();
                 if (blob) {
@@ -557,7 +847,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }
 
-        // Fallback: Check for files array directly if items recursion didn't catch it
         if (e.clipboardData.files && e.clipboardData.files.length > 0) {
             const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith('image/'));
             if (file) {
@@ -574,27 +863,22 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             let filename = 'pasted-image.png';
 
             if (src.startsWith('data:')) {
-                // Data URI
                 const res = await fetch(src);
                 blob = await res.blob();
-                // extract ext from type?
                 const type = blob.type;
                 const ext = type.split('/')[1] || 'png';
                 filename = `pasted-image.${ext}`;
             } else {
-                // Public URL?
-                // Try to fetch (might fail due to CORS)
                 try {
                     const res = await fetch(src);
                     if (res.ok) {
                         blob = await res.blob();
                         const urlParts = src.split('/');
                         const lastPart = urlParts[urlParts.length - 1];
-                        if (lastPart) filename = lastPart.split('?')[0]; // simple attempt
+                        if (lastPart) filename = lastPart.split('?')[0];
                     }
                 } catch (e) {
                     console.warn('Failed to fetch pasted image src', src, e);
-                    // We silently fail upload, but image is stripped from text effectively.
                     return;
                 }
             }
@@ -608,17 +892,97 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
-    removeAttachment = () => {
-        if (this.props.attachment && this.props.onDeleteAttachment) {
-            this.props.onDeleteAttachment(this.props.attachment);
+    handleStop = async (e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
         }
-        if (this.props.onAttachmentChange) {
-            this.props.onAttachmentChange(undefined);
+
+        const { sessionId } = this.props;
+        if (!sessionId) return;
+
+        // Optimistic update: Remove the partial/pending turn
+        const prevTurns = [...this.state.turns];
+        const lastTurnIndex = prevTurns.length - 1;
+        let newTurns = prevTurns;
+
+        if (lastTurnIndex >= 0) {
+            newTurns = prevTurns.slice(0, lastTurnIndex);
+        }
+
+        this.setState({ turns: newTurns });
+
+        const prevTurnNum = Math.max(0, this.props.lastTurn - 1);
+        const prevSessionState = {
+            status: this.props.status,
+            activeTurn: this.props.activeTurn,
+            lastTurn: this.props.lastTurn
+        };
+
+        this.props.onUpdateSession({
+            status: 'idle',
+            activeTurn: prevTurnNum,
+            lastTurn: prevTurnNum
+        });
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
+            if (!res.ok) throw new Error('Stop failed');
+            const data = await res.json();
+
+            if (data.success) {
+                if (data.restoredInput) {
+                    this.setState({ input: data.restoredInput });
+                }
+
+                if (data.restoredSelection) {
+                    this.props.onUpdateSession({ selection: data.restoredSelection });
+                }
+
+                if (data.restoredAttachment) {
+                    this.props.onUpdateSession({ attachment: data.restoredAttachment });
+                }
+
+                this.syncVersion(null);
+            } else {
+                // Revert if server says failed
+                throw new Error('Stop returned success=false');
+            }
+        } catch (error) {
+            console.error('Failed to stop', error);
+            // Revert state
+            this.setState({ turns: prevTurns });
+            this.props.onUpdateSession(prevSessionState as Partial<Session>);
         }
     };
 
+    removeAttachment = async () => {
+        const { sessionId, attachment } = this.props;
+        if (attachment) {
+            // 1. Explicitly clear unsent state via the /unsent endpoint
+            this.handleSaveUnsent({ attachment: null });
+
+            // 2. Perform actual file deletion
+            if (sessionId) {
+                try {
+                    await apiAuth.fetch(`/api/sessions/${sessionId}/uploads/${attachment.filename}`, {
+                        method: 'DELETE'
+                    });
+                } catch (error) {
+                    console.error('Failed to delete attachment', error);
+                }
+            }
+        }
+        this.props.onUpdateSession({ attachment: undefined });
+    };
+
+    public submit = (text: string) => {
+        if (this.props.disabled) return;
+        this.sendMessage(text);
+        this.props.onUpdateSession({ attachment: undefined });
+    };
+
     handlePreviewTurn = (turn: number) => {
-        this.isUserScroll = true;
         if (this.props.onPreviewTurn) {
             this.props.onPreviewTurn(turn);
         }
@@ -626,7 +990,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     handleContainerClick = (e: React.MouseEvent) => {
         const target = e.target as HTMLElement;
-        // const interactiveTags = ['SELECT', 'BUTTON', 'INPUT', 'TEXTAREA', 'A'];
         const interactiveTags = ['SELECT'];
 
         let el: HTMLElement | null = target;
@@ -641,11 +1004,64 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.richInputRef.current?.focus();
     };
 
+
+
+    handleSessionTitleClick = async () => {
+        if (!this.props.sessionId) return;
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${this.props.sessionId}/summary`);
+            if (res.ok) {
+                const data = await res.json();
+                this.setState({
+                    summaryContent: data.summary || 'No summary available yet.',
+                    showSummaryModal: true
+                });
+            } else {
+                console.error('Failed to fetch summary');
+            }
+        } catch (e) {
+            console.error('Error fetching summary', e);
+        }
+    };
+
+    closeSummaryModal = () => {
+        this.setState({ showSummaryModal: false });
+    };
+
+    handleSummarySubmit = async () => {
+        const { sessionId } = this.props;
+        const { summaryContent } = this.state;
+        try {
+            await apiAuth.fetch(`/api/sessions/${sessionId}/summary`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ summary: summaryContent }),
+            });
+            this.props.onUpdateSession({ subject: summaryContent });
+            this.setState({ showSummaryModal: false });
+        } catch (e) {
+            console.error('Failed to update summary', e);
+        }
+    };
+
+    private imageLoadTimeout: ReturnType<typeof setTimeout> | null = null;
+    handleImageLoad = () => {
+        if (this.imageLoadTimeout) {
+            clearTimeout(this.imageLoadTimeout);
+        }
+        this.imageLoadTimeout = setTimeout(() => {
+            if (this.isLastTurn()) {
+                this.scrollToActiveTurn('auto', 'end');
+            } else {
+                this.scrollToActiveTurn('auto', 'start');
+            }
+        }, 100);
+    };
+
     render() {
         const {
-            messages,
             status,
-            statusMessages,
             onPickElement,
             onCancelPick,
             selection,
@@ -655,36 +1071,38 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             onPreviewTurn,
             disabled,
             provider,
-            onProviderChange = () => { },
-            // onUpload, // Accessed via this.props.onUpload
             attachment,
-            // Restore missing ones
             onClearSelection,
             onSelectChip,
             sessionIds,
             onSwitchSession,
-            sessionTitle
+            sessionTitle,
+
         } = this.props;
-        const { input, isUploading, isLoading } = this.state;
+        const { input, isUploading, isLoading, showSummaryModal, summaryContent, turns } = this.state;
         const isFormDisabled = status === 'busy' || disabled;
 
-        let effectiveActiveTurn = activeTurn;
-        if (
-            effectiveActiveTurn === null ||
-            effectiveActiveTurn === undefined
-        ) {
-            // Find last message with a turn
-            for (let i = messages.length - 1; i >= 0; i--) {
-                if (typeof messages[i].turn === 'number') {
-                    effectiveActiveTurn = messages[i].turn;
-                    break;
-                }
+        const messages: MessageData[] = [];
+        turns.forEach(t => {
+            messages.push({
+                role: 'user',
+                content: t.request,
+                turn: t.turn,
+                createdAt: t.beginTime,
+                selection: t.selection,
+                attachment: t.attachment
+            });
+            if (t.response || t.endTime) {
+                messages.push({
+                    role: 'assistant',
+                    content: t.response,
+                    turn: t.turn,
+                    version: t.version
+                });
             }
-        }
+        });
 
         let foundActive = false;
-
-        // Find the index of the last assistant message
         let lastAssistantIndex = -1;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (messages[i].role === 'assistant') {
@@ -693,82 +1111,102 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             }
         }
 
-        let latestTurn = 0;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            if (typeof messages[i].turn === 'number') {
-                latestTurn = messages[i].turn!;
-                break;
-            }
-        }
-
-        const isPendingActive = latestTurn === effectiveActiveTurn;
+        const latestTurn = this.props.lastTurn;
+        const isPendingActive = this.isLastTurn();
         const shouldPendingDim = foundActive && !isPendingActive;
 
         return (
             <div className={styles.chatPanel}>
                 <div className={styles.sessionHeader}>
-                    {sessionTitle || '...'}
+                    <span
+                        className={styles.sessionTitle}
+                        onClick={this.handleSessionTitleClick}
+                        title={sessionTitle}
+                    >
+                        {sessionTitle || '...'}
+                    </span>
+                    {(this.props.tokenUsage && this.props.tokenUsage.capacity) && (
+                        <div className={styles.tokenUsage}>
+                            <span>
+                                Context: {(((this.props.tokenUsage.request || this.props.tokenUsage.total) / this.props.tokenUsage.capacity) * 100).toFixed(1)}%
+                            </span>
+                            <div className={styles.tokenTooltip}>
+                                <div>Context: {(this.props.tokenUsage.request || this.props.tokenUsage.total).toLocaleString()} / {this.props.tokenUsage.capacity.toLocaleString()}</div>
+                                <hr style={{ margin: '4px 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                                <div>Prompt: {this.props.tokenUsage.prompt.toLocaleString()}</div>
+                                <div>Completion: {this.props.tokenUsage.completion.toLocaleString()}</div>
+                                <hr style={{ margin: '4px 0', borderColor: 'rgba(255,255,255,0.1)' }} />
+                                <div>Total: {this.props.tokenUsage.total.toLocaleString()}</div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-                <div className={styles.messages} id="messages">
-                    {messages.map((m, i) => {
-                        // Use strict equality for safely finding the match
-                        // Ensure ONLY assistant messages are marked active
-                        const isTurnMatch =
-                            m.role === 'assistant' &&
-                            typeof m.turn === 'number' &&
-                            m.turn === effectiveActiveTurn;
+                <div className={styles.messages}>
+                    <div ref={this.messagesRef} className={styles.messagesContent}>
+                        {isLoading && <div className={styles.spinner} />}
+                        <div>
+                            {messages.map((m, i) => {
+                                const effectiveActiveTurn = activeTurn ?? this.props.lastTurn;
+                                const isTurnMatch =
+                                    m.role === 'assistant' &&
+                                    typeof m.turn === 'number' &&
+                                    m.turn === effectiveActiveTurn;
 
-                        // Dimming logic
-                        if (isTurnMatch) foundActive = true;
-                        const shouldDim = foundActive && !isTurnMatch;
+                                if (isTurnMatch) foundActive = true;
+                                const shouldDim = foundActive && !isTurnMatch;
 
-                        return (
+                                return (
+                                    <Message
+                                        id={
+                                            m.role === 'assistant' && typeof m.turn === 'number'
+                                                ? `msg-turn-${m.turn}`
+                                                : undefined
+                                        }
+                                        key={i}
+                                        msg={m}
+                                        sessionIds={this.props.sessionIds}
+                                        sessionId={this.props.sessionId}
+                                        onSelectChip={onSelectChip}
+                                        onCloneTurn={onCloneTurn}
+                                        onPreviewTurn={onPreviewTurn}
+                                        isActiveTurn={effectiveActiveTurn === m.turn}
+                                        isDimmed={effectiveActiveTurn !== null && m.turn! > effectiveActiveTurn}
+                                        isLastAssistant={i === messages.length - 1 && m.role === 'assistant'}
+                                        status={status}
+                                        onUndo={this.handleUndo}
+                                        isPending={false}
+                                        statusMessages={this.state.statusMessages}
+                                        startTime={this.state.startTime ?? undefined}
+                                        onSwitchSession={onSwitchSession}
+                                    />
+                                );
+                            })}
+                        </div>
+                        {status === 'busy' && (
                             <Message
                                 id={
-                                    m.role === 'assistant' && typeof m.turn === 'number'
-                                        ? `msg-turn-${m.turn}`
+                                    latestTurn
+                                        ? `msg-turn-${latestTurn}`
                                         : undefined
                                 }
-                                key={i}
-                                msg={m}
-                                onSelectChip={onSelectChip}
-                                onCloneTurn={onCloneTurn}
-                                onPreviewTurn={this.handlePreviewTurn}
-                                isActiveTurn={isTurnMatch}
-                                isDimmed={shouldDim}
-                                isLastAssistant={i === lastAssistantIndex}
-                                onUndo={this.handleUndo}
+                                msg={{
+                                    role: 'assistant',
+                                    content: '',
+                                    turn: latestTurn,
+                                    version: 0,
+                                }}
+                                sessionId={this.props.sessionId}
+                                statusMessages={this.state.statusMessages}
+                                startTime={this.state.startTime || undefined}
+                                isPending={true}
+                                isActiveTurn={isPendingActive}
+                                isDimmed={shouldPendingDim}
+                                onPreviewTurn={onPreviewTurn}
                                 sessionIds={sessionIds}
                                 onSwitchSession={onSwitchSession}
                             />
-                        );
-                    })}
-                    {status === 'busy' && (
-                        <Message
-                            id={
-                                latestTurn
-                                    ? `msg-turn-${latestTurn}`
-                                    : undefined
-                            }
-                            msg={{
-                                role: 'assistant',
-                                content: '',
-                                turn: latestTurn,
-                                version: 0,
-                            }}
-                            statusMessages={statusMessages}
-                            startTime={this.props.startTime || undefined}
-                            isPending={true}
-                            isActiveTurn={isPendingActive}
-                            isDimmed={shouldPendingDim}
-                            // Mimic props required for interaction
-                            onPreviewTurn={onPreviewTurn}
-                            // Additional props
-                            sessionIds={sessionIds}
-                            onSwitchSession={onSwitchSession}
-                        />
-                    )}
-                    <div ref={this.messagesEndRef} />
+                        )}
+                    </div>
                 </div>
 
                 {status === 'error' ? (
@@ -776,11 +1214,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                         <div className={styles.errorContainer}>
                             <div className={styles.errorMessage}>
                                 <h3>An error occurred</h3>
-                                <p>{statusMessages && statusMessages.length > 0 ? statusMessages[statusMessages.length - 1] : 'Unknown error'}</p>
+                                <p>{this.state.statusMessages && this.state.statusMessages.length > 0 ? this.state.statusMessages[this.state.statusMessages.length - 1] : 'Unknown error'}</p>
                             </div>
                             <UiButton
                                 variant="secondary"
-                                onClick={this.props.onUndo}
+                                onClick={this.handleUndo}
                             >
                                 Undo last turn
                             </UiButton>
@@ -788,11 +1226,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     </div>
                 ) : (
                     <form className={styles.chatForm} onSubmit={this.handleSubmit}>
-
-                        {/* Unified Input Container */}
-                        <div className={styles.inputContainer} onClick={this.handleContainerClick}>
+                        <div className={classNames(styles.inputContainer, { [styles.busy]: status === 'busy' })} onClick={this.handleContainerClick}>
                             <div className={styles.selections}>
-                                {/* Element Picker (Top) */}
                                 {selection && (
                                     <div className={styles.pickerContainer}>
                                         <UiTarget onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
@@ -801,12 +1236,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     </div>
                                 )}
 
-                                {/* Attachment Preview */}
                                 {attachment && (
                                     <div className={styles.attachmentList}>
                                         <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
                                             <img
-                                                src={attachment.url}
+                                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${attachment.filename}`}
                                                 alt={attachment.originalName || attachment.filename}
                                                 className={styles.imagePreview}
                                                 title={attachment.originalName || attachment.filename}
@@ -816,7 +1250,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 )}
                             </div>
 
-                            {/* Rich Input */}
                             <RichInput
                                 ref={this.richInputRef}
                                 value={input}
@@ -829,9 +1262,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 className={styles.headlessInput}
                                 editorClassName={styles.headlessEditor}
                                 onBlur={() => {
-                                    if (this.props.onSaveUnsent) {
-                                        this.props.onSaveUnsent({ input: this.state.input });
-                                    }
+                                    this.handleSaveUnsent({ input: this.state.input });
                                 }}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -841,10 +1272,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 }}
                             />
 
-                            {/* Input Controls Footer */}
                             <div className={styles.inputControls}>
                                 <div className={styles.inputControlsLeft}>
-                                    {/* Pick Element Button */}
                                     <UiButton
                                         type="button"
                                         variant={isPicking ? 'ghost-active' : 'ghost'}
@@ -879,7 +1308,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         </svg>
                                     </UiButton>
 
-                                    {/* Upload Button */}
                                     <div>
                                         <input
                                             type="file"
@@ -915,20 +1343,25 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         </UiButton>
                                     </div>
 
-                                    {/* Mode Toggle */}
                                     <UiDropdown
                                         value={this.props.fastMode ? 'fast' : 'plan'}
                                         options={[
                                             { value: 'plan', label: 'Planning' },
                                             { value: 'fast', label: 'Fast mode' }
                                         ]}
-                                        onChange={(val) => this.props.onFastModeChange?.(val === 'fast')}
+                                        onChange={(val) => {
+                                            this.props.onUpdateSession({ fastMode: val === 'fast' });
+                                            this.handleSaveUnsent({ fastMode: val === 'fast' });
+                                        }}
                                         disabled={isFormDisabled}
                                         variant="ghost"
                                     />
                                     <ProviderSelector
                                         value={provider}
-                                        onChange={onProviderChange}
+                                        onChange={(p) => {
+                                            this.props.onUpdateSession({ provider: p });
+                                            this.handleSaveUnsent({ provider: p });
+                                        }}
                                         disabled={isFormDisabled || isLoading || isUploading}
                                         className={styles.imageToggle}
                                         variant="ghost"
@@ -936,34 +1369,70 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 </div>
 
                                 <div className={styles.inputControlsRight}>
-                                    {/* Send Button */}
-                                    <UiButton
-                                        type="submit"
-                                        variant="primary"
-                                        size="icon"
-                                        disabled={isFormDisabled || !input.trim()}
-                                        tabIndex={2}
-                                        onClick={this.handleSubmit}
-                                    >
-                                        <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
+                                    {status === 'busy' ? (
+                                        <UiButton
+                                            type="button"
+                                            variant="secondary"
+                                            size="icon"
+                                            onClick={this.handleStop}
+                                            title="Stop generation"
+                                            className={styles.stopButton}
                                         >
-                                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                        </svg>
-                                    </UiButton>
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                                stroke="currentColor"
+                                                strokeWidth="0"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+                                            </svg>
+                                        </UiButton>
+                                    ) : (
+                                        <UiButton
+                                            type="submit"
+                                            variant="primary"
+                                            size="icon"
+                                            disabled={isFormDisabled || !input.trim()}
+                                            tabIndex={2}
+                                            onClick={this.handleSubmit}
+                                        >
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            >
+                                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                            </svg>
+                                        </UiButton>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     </form>
                 )}
+
+                <UiModal
+                    isOpen={showSummaryModal}
+                    title={sessionTitle || 'Session Summary'}
+                    onClose={this.closeSummaryModal}
+                    actions={
+                        <UiButton onClick={this.closeSummaryModal}>Close</UiButton>
+                    }
+                >
+                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                        {summaryContent}
+                    </div>
+                </UiModal>
 
                 <ConfirmationModal
                     isOpen={this.state.showUndoConfirmation}

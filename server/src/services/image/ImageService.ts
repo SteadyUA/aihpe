@@ -1,9 +1,15 @@
 import { Service } from 'typedi';
 import path from 'node:path';
+import { getSessionsDir } from '../../utils/pathUtils';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { imageSize } from 'image-size';
 import { SessionFiles } from '../../types/chat';
+import { ImageServiceFactory } from './ImageServiceFactory';
+import { SessionImage } from '../../entities/SessionImage';
+import { AppDataSource } from '../../data-source';
+import { MoreThan, LessThanOrEqual } from 'typeorm';
+import { In } from 'typeorm';
 
 export interface ImageMetadata {
     filename: string;
@@ -15,100 +21,67 @@ export interface ImageMetadata {
     isUsed?: boolean;
 }
 
-@Service()
-export class ImageService {
-    private readonly modelId = 'gemini-2.5-flash-image';
+export interface TokenUsageData {
+    prompt: number;
+    completion: number;
+    total: number;
+    model: string;
+    agent: string;
+}
 
-    async generateAndSave(sessionId: string, description: string, version: number, targetFilename?: string): Promise<string> {
-        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-        if (!apiKey) {
-            throw new Error('GEMINI_API_KEY not configured');
+@Service({ factory: [ImageServiceFactory, 'create'] })
+export abstract class ImageService {
+    protected modelId = 'gemini-2.5-flash-image';
+    protected agentName = 'image';
+    protected readonly repository = AppDataSource.getRepository(SessionImage);
+
+    protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
+    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;
+    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }>;
+
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
+        const result = await this.generateRaw(description, abortSignal);
+        const base64Data = result.base64;
+
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
         }
 
-        console.log(`Generating image for session ${sessionId} version ${version} with description: ${description}`);
+        const versionDir = this.resolveVersionDir(sessionId, version);
+        this.ensureDirectory(versionDir);
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
-        const body = {
-            contents: [{
-                parts: [{ text: description }]
-            }]
-        };
+        const uuid = randomUUID();
+        const filename = targetFilename || `${uuid}.png`;
+        const filePath = path.join(versionDir, filename);
 
+        const buffer = Buffer.from(base64Data, 'base64');
+        fs.writeFileSync(filePath, buffer);
+
+        // Calculate dimensions
+        let width, height;
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API request failed with status ${response.status}: ${errorText}`);
-            }
-
-            const data = await response.json();
-
-            // Extract image from response
-            let base64Data: string | undefined;
-            if (data.candidates?.[0]?.content?.parts) {
-                const parts = data.candidates[0].content.parts;
-                const imagePart = parts.find((p: any) => p.inlineData);
-                if (imagePart) {
-                    base64Data = imagePart.inlineData.data;
-                }
-            }
-
-            if (!base64Data) {
-                throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
-            }
-
-            const versionDir = this.resolveVersionDir(sessionId, version);
-            this.ensureDirectory(versionDir);
-
-            const uuid = randomUUID();
-            const filename = targetFilename || `${uuid}.png`;
-            const filePath = path.join(versionDir, filename);
-
-            const buffer = Buffer.from(base64Data, 'base64');
-            fs.writeFileSync(filePath, buffer);
-
-            // Calculate dimensions
-            let width, height;
-            try {
-                const dimensions = imageSize(buffer);
-                width = dimensions.width;
-                height = dimensions.height;
-            } catch (e) {
-                console.warn('Failed to calculate image dimensions', e);
-            }
-
-            // Save metadata
-            this.saveMetadata(sessionId, version, {
-                filename,
-                description,
-                createdAt: new Date().toISOString(),
-                model: this.modelId,
-                width,
-                height,
-                isUsed: false, // Default to false until code uses it
-            });
-
-            return filename;
-        } catch (error) {
-            console.error('Failed to generate image:', error);
-            throw new Error(`Failed to generate image: ${error instanceof Error ? error.message : String(error)}`);
+            const dimensions = imageSize(buffer);
+            width = dimensions.width;
+            height = dimensions.height;
+        } catch (e) {
+            console.warn('Failed to calculate image dimensions', e);
         }
+
+        // Save metadata
+        await this.saveMetadata(sessionId, version, {
+            filename,
+            description,
+            createdAt: new Date().toISOString(),
+            model: this.modelId,
+            width,
+            height,
+            isUsed: false,
+        });
+
+        return filename;
     }
 
-
-    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number): Promise<string> {
-        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-        if (!apiKey) {
-            throw new Error('GEMINI_API_KEY not configured');
-        }
-
-        console.log(`Editing image ${filename} for session ${sessionId} source v${sourceVersion} -> target v${targetVersion} with prompt: ${prompt}`);
-
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
         // Resolve source file: check target version first (in case it was already modified in this turn)
         let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
         let sourcePath = path.join(sourceDir, filename);
@@ -124,102 +97,70 @@ export class ImageService {
         }
 
         const buffer = fs.readFileSync(sourcePath);
-        const base64Data = buffer.toString('base64');
         const mimeType = this.getMimeType(filename);
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
+        // Get current description
+        const info = await this.getImageInfo(sessionId, sourceVersion, filename);
+        const currentDescription = info?.description;
 
-        // Augment prompt to ask for description
-        const augmentedPrompt = `${prompt}\n\nAlso describe it in a single sentence so that I can use this description for alt-text or generating a similar image.`;
+        const result = await this.editRaw(buffer, mimeType, prompt, currentDescription, abortSignal);
+        const newBase64Data = result.base64;
+        const newDescription = result.description;
 
-        const body = {
-            contents: [{
-                parts: [
-                    { text: augmentedPrompt },
-                    {
-                        inlineData: {
-                            mimeType: mimeType,
-                            data: base64Data
-                        }
-                    }
-                ]
-            }],
-            generationConfig: {
-                responseModalities: ["TEXT", "IMAGE"]
-            }
-        };
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API request failed with status ${response.status}: ${errorText}`);
-            }
-
-            const data = await response.json();
-            console.log(data.candidates[0].content);
-
-            // Extract image and text from response
-            let newBase64Data: string | undefined;
-            let newDescription: string | undefined;
-
-            if (data.candidates?.[0]?.content?.parts) {
-                const parts = data.candidates[0].content.parts;
-
-                const imagePart = parts.find((p: any) => p.inlineData);
-                if (imagePart) {
-                    newBase64Data = imagePart.inlineData.data;
-                }
-
-                const textPart = parts.find((p: any) => p.text);
-                if (textPart) {
-                    newDescription = textPart.text;
-                }
-            }
-
-            if (!newBase64Data) {
-                throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
-            }
-
-            const versionDir = this.resolveVersionDir(sessionId, targetVersion);
-            this.ensureDirectory(versionDir);
-
-            // We overwrite the file in the target version location with the same filename
-            const savePath = path.join(versionDir, filename);
-            const newBuffer = Buffer.from(newBase64Data, 'base64');
-            fs.writeFileSync(savePath, newBuffer);
-
-            // Calculate dimensions of new image
-            let width, height;
-            try {
-                const dimensions = imageSize(newBuffer);
-                width = dimensions.width;
-                height = dimensions.height;
-            } catch (e) {
-                console.warn('Failed to calculate new image dimensions', e);
-            }
-
-            // Save metadata
-            this.saveMetadata(sessionId, targetVersion, {
-                filename,
-                description: newDescription || prompt, // Use generated description or fallback to prompt
-                createdAt: new Date().toISOString(),
-                model: this.modelId,
-                width,
-                height,
-                isUsed: true,
-            });
-
-            return filename;
-        } catch (error) {
-            console.error('Failed to edit image:', error);
-            throw new Error(`Failed to edit image: ${error instanceof Error ? error.message : String(error)}`);
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
         }
+
+        const versionDir = this.resolveVersionDir(sessionId, targetVersion);
+        this.ensureDirectory(versionDir);
+
+        // We overwrite the file in the target version location with the same filename
+        const savePath = path.join(versionDir, filename);
+        const newBuffer = Buffer.from(newBase64Data, 'base64');
+        fs.writeFileSync(savePath, newBuffer);
+
+        // Calculate dimensions of new image
+        let width, height;
+        try {
+            const dimensions = imageSize(newBuffer);
+            width = dimensions.width;
+            height = dimensions.height;
+        } catch (e) {
+            console.warn('Failed to calculate new image dimensions', e);
+        }
+
+        // Save metadata
+        await this.saveMetadata(sessionId, targetVersion, {
+            filename,
+            description: newDescription || prompt,
+            createdAt: new Date().toISOString(),
+            model: this.modelId,
+            width,
+            height,
+            isUsed: true,
+        });
+
+        return filename;
+    }
+
+    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
+        const versionDir = this.resolveVersionDir(sessionId, version);
+        const filePath = path.join(versionDir, filename);
+
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`Image file not found: ${filePath}`);
+        }
+
+        const buffer = fs.readFileSync(filePath);
+        const mimeType = this.getMimeType(filename);
+
+        const result = await this.describeRaw(buffer, mimeType, abortSignal);
+
+        if (result.usage && trackTokenUsage) {
+            await trackTokenUsage(result.usage);
+        }
+
+        return result.description;
     }
 
     async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {
@@ -262,70 +203,12 @@ export class ImageService {
             isUsed: false,
         };
 
-        this.saveMetadata(sessionId, version, metadata);
+        await this.saveMetadata(sessionId, version, metadata);
 
         return metadata;
     }
 
-    async describeImage(sessionId: string, version: number, filename: string): Promise<string> {
-        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-        if (!apiKey) {
-            throw new Error('GEMINI_API_KEY not configured');
-        }
-
-        const versionDir = this.resolveVersionDir(sessionId, version);
-        const filePath = path.join(versionDir, filename);
-
-        if (!fs.existsSync(filePath)) {
-            throw new Error(`Image file not found: ${filePath}`);
-        }
-
-        const buffer = fs.readFileSync(filePath);
-        const base64Image = buffer.toString('base64');
-        const mimeType = this.getMimeType(filename);
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
-
-        const body = {
-            contents: [{
-                parts: [
-                    // { text: 'Analyze this image. Describe it in detail so that I can use this description for alt-text or generating a similar image.' },
-                    { text: 'Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image.' },
-                    {
-                        inlineData: {
-                            mimeType: mimeType,
-                            data: base64Image
-                        }
-                    }
-                ]
-            }]
-        };
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API request failed with status ${response.status}: ${errorText}`);
-            }
-
-            const data = await response.json();
-
-            if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                return data.candidates[0].content.parts[0].text;
-            }
-
-            throw new Error('No description text found in response');
-
-        } catch (error) {
-            console.error('Failed to describe image:', error);
-            throw new Error(`Failed to describe image: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
+    // Shared Helper Methods
 
     private getMimeType(filename: string): string {
         const ext = path.extname(filename).toLowerCase();
@@ -341,117 +224,67 @@ export class ImageService {
     }
 
     async updateImageDescription(sessionId: string, version: number, filename: string, newDescription: string): Promise<void> {
-        const metadataList = this.loadMetadata(sessionId, version);
-        const imageIndex = metadataList.findIndex(img => img.filename === filename);
-
-        if (imageIndex === -1) {
+        const image = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (!image) {
             throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
         }
-
-        metadataList[imageIndex].description = newDescription;
-
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to save updated image description for ${sessionId} v${version}`, e);
-            throw new Error('Failed to save image metadata');
-        }
+        image.description = newDescription;
+        await this.repository.save(image);
     }
 
     async listImages(sessionId: string, version: number): Promise<ImageMetadata[]> {
-        const metadata = this.loadMetadata(sessionId, version);
-        return metadata;
+        const images = await this.repository.find({ where: { sessionId, version } });
+        return images.map(img => ({
+            filename: img.filename,
+            description: img.description,
+            createdAt: img.createdAt.toISOString(),
+            model: img.model,
+            width: img.width,
+            height: img.height,
+            isUsed: img.isUsed
+        }));
     }
 
     async getImageInfo(sessionId: string, version: number, filename: string): Promise<ImageMetadata | undefined> {
-        const metadata = this.loadMetadata(sessionId, version);
-        return metadata.find(img => img.filename === filename);
+        const img = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (!img) return undefined;
+        return {
+            filename: img.filename,
+            description: img.description,
+            createdAt: img.createdAt.toISOString(),
+            model: img.model,
+            width: img.width,
+            height: img.height,
+            isUsed: img.isUsed
+        };
     }
 
     async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
-        const metadata = this.loadMetadata(sessionId, version);
-        if (metadata.length === 0) return;
+        const images = await this.repository.find({ where: { sessionId, version } });
+        if (images.length === 0) return;
 
-        let hasChanges = false;
         const htmlContent = files['index.html'] || files['html'] || '';
         const cssContent = files['styles.css'] || files['css'] || '';
         const jsContent = files['script.js'] || files['js'] || '';
 
-        const updatedMetadata = metadata.map(img => {
-            // Check usage
+        const updates = [];
+        for (const img of images) {
             const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename) || jsContent.includes(img.filename);
-
             if (img.isUsed !== isUsed) {
-                hasChanges = true;
-                return { ...img, isUsed };
-            }
-            return img;
-        });
-
-        if (hasChanges) {
-            const metaPath = this.getMetadataPath(sessionId, version);
-            try {
-                fs.writeFileSync(metaPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
-            } catch (e) {
-                console.error(`Failed to save updated image usage for ${sessionId} v${version}`, e);
+                img.isUsed = isUsed;
+                updates.push(img);
             }
         }
-    }
 
-    private resolveVersionDir(sessionId: string, version: number): string {
-        const customRoot = process.env.SESSION_ROOT?.trim();
-        const root = customRoot ? path.resolve(customRoot) : path.resolve(process.cwd(), 'data', 'sessions');
-        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
-        return path.join(root, safeId, 'versions', String(safeVersion));
-    }
-
-    private ensureDirectory(dir: string): void {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-    }
-
-    private getMetadataPath(sessionId: string, version: number): string {
-        return path.join(this.resolveVersionDir(sessionId, version), 'images.json');
-    }
-
-    private loadMetadata(sessionId: string, version: number): ImageMetadata[] {
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            if (!fs.existsSync(metaPath)) {
-                return [];
-            }
-            const content = fs.readFileSync(metaPath, 'utf-8');
-            return JSON.parse(content) as ImageMetadata[];
-        } catch (e) {
-            console.error(`Failed to load image metadata for ${sessionId} v${version}`, e);
-            return [];
+        if (updates.length > 0) {
+            await this.repository.save(updates);
         }
     }
 
     async deleteImage(sessionId: string, version: number, filename: string): Promise<void> {
-        const metadataList = this.loadMetadata(sessionId, version);
-        const imageIndex = metadataList.findIndex(img => img.filename === filename);
-
-        if (imageIndex === -1) {
-            throw new Error(`Image ${filename} not found in session ${sessionId} version ${version}`);
-        }
-
-        const image = metadataList[imageIndex];
-        if (image.isUsed) {
+        const image = await this.repository.findOne({ where: { sessionId, version, filename } });
+        if (image && image.isUsed) {
             throw new Error(`Cannot delete used image ${filename}`);
-        }
-
-        // Remove from metadata
-        metadataList.splice(imageIndex, 1);
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(metadataList, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to update metadata after deleting ${filename}`, e);
-            throw new Error('Failed to update metadata');
         }
 
         // Delete file
@@ -463,23 +296,101 @@ export class ImageService {
             }
         } catch (e) {
             console.error(`Failed to delete image file ${filename}`, e);
-            // We removed it from metadata, so it's "deleted" logically. 
-            // We might want to warn but not fail entirely if file was missing/locked.
+        }
+
+        if (image) {
+            await this.repository.remove(image);
         }
     }
 
-    private saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): void {
-        let current = this.loadMetadata(sessionId, version);
-        // Remove existing entry if any to support updates
-        current = current.filter(item => item.filename !== newEntry.filename);
-        // Add new entry
-        current.push(newEntry);
+    protected resolveVersionDir(sessionId: string, version: number): string {
+        const root = getSessionsDir();
+        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
+        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
+        return path.join(root, safeId, 'versions', String(safeVersion));
+    }
 
-        const metaPath = this.getMetadataPath(sessionId, version);
-        try {
-            fs.writeFileSync(metaPath, JSON.stringify(current, null, 2), 'utf-8');
-        } catch (e) {
-            console.error(`Failed to save image metadata for ${sessionId} v${version}`, e);
+    async copyImagesToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
+        const sourceImages = await this.repository.find({ where: { sessionId, version: sourceVersion } });
+
+        for (const img of sourceImages) {
+            // Check if already exists in target (idempotency)
+            const exists = await this.repository.findOne({ where: { sessionId, version: targetVersion, filename: img.filename } });
+            if (exists) continue;
+
+            const newImg = new SessionImage();
+            newImg.sessionId = sessionId;
+            newImg.version = targetVersion;
+            newImg.filename = img.filename;
+            newImg.description = img.description;
+            newImg.createdAt = img.createdAt;
+            newImg.model = img.model;
+            newImg.width = img.width;
+            newImg.height = img.height;
+            newImg.isUsed = img.isUsed;
+
+            await this.repository.save(newImg);
+        }
+    }
+
+    async deleteImagesAfterVersion(sessionId: string, version: number): Promise<void> {
+        await this.repository.delete({
+            sessionId: sessionId,
+            version: MoreThan(version),
+        });
+    }
+
+    async deleteSessionImages(sessionId: string): Promise<void> {
+        await this.repository.delete({ sessionId });
+    }
+
+
+    protected ensureDirectory(dir: string): void {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    }
+
+    protected async saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): Promise<void> {
+        let image = await this.repository.findOne({ where: { sessionId, version, filename: newEntry.filename } });
+        if (!image) {
+            image = new SessionImage();
+            image.sessionId = sessionId;
+            image.version = version;
+            image.filename = newEntry.filename;
+        }
+
+        image.description = newEntry.description;
+        image.createdAt = new Date(newEntry.createdAt);
+        image.model = newEntry.model;
+        if (newEntry.width) image.width = newEntry.width;
+        if (newEntry.height) image.height = newEntry.height;
+        if (newEntry.isUsed !== undefined) image.isUsed = newEntry.isUsed;
+
+        await this.repository.save(image);
+    }
+
+    async copySessionImages(sourceId: string, targetId: string, maxVersion?: number): Promise<void> {
+        const whereClause: any = { sessionId: sourceId };
+        if (maxVersion !== undefined) {
+            whereClause.version = LessThanOrEqual(maxVersion);
+        }
+
+        const sourceImages = await this.repository.find({ where: whereClause });
+
+        for (const img of sourceImages) {
+            const newImg = new SessionImage();
+            newImg.sessionId = targetId;
+            newImg.version = img.version;
+            newImg.filename = img.filename;
+            newImg.description = img.description;
+            newImg.createdAt = img.createdAt;
+            newImg.model = img.model;
+            newImg.width = img.width;
+            newImg.height = img.height;
+            newImg.isUsed = img.isUsed;
+
+            await this.repository.save(newImg);
         }
     }
 }

@@ -4,8 +4,10 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { LanguageModel } from 'ai';
 import { LlmClient } from './types';
 import { AiSdkClient } from './AiSdkClient';
+import { OpenaiRawClient } from './OpenaiRawClient';
 import { ImageService } from '../image/ImageService';
-import { SessionStore } from '../session/SessionStore';
+import { FilesService } from '../session/FilesService';
+import { SessionService } from '../session/SessionService';
 import { LlmProvider } from '../../types/chat';
 
 @Service()
@@ -14,7 +16,10 @@ export class LlmFactory {
     private imageService!: ImageService;
 
     @Inject()
-    private sessionStore!: SessionStore;
+    private filesService!: FilesService;
+
+    @Inject()
+    private sessionService!: SessionService;
 
     getClient(provider: LlmProvider = 'openai'): LlmClient {
         let modelId = '';
@@ -29,22 +34,34 @@ export class LlmFactory {
         let model: LanguageModel | undefined;
         // Determine approximate context window
         let maxTokens = 128000;
-        if (modelId.includes('gemini-1.5-pro')) {
-            maxTokens = 2000000;
+        if (modelId.includes('gpt-5.1')) {
+            maxTokens = 400000;
+        } else if (modelId.includes('gemini-3-pro')) {
+            maxTokens = 1000000;
         } else if (modelId.includes('gemini-1.5-flash')) {
             maxTokens = 1000000;
         } else if (modelId.includes('claude-3-5')) {
             maxTokens = 200000;
-        } else if (
-            modelId.includes('gpt-4-turbo') ||
-            modelId.includes('gpt-4o')
-        ) {
+        } else if (modelId.includes('gpt-4')) {
             maxTokens = 128000;
         } else if (modelId.includes('gpt-3.5')) {
             maxTokens = 16000;
         }
 
-        if (isGemini) {
+        const litellmUrl = process.env.LITELLM_API_URL;
+        const litellmKey = process.env.LITELLM_API_KEY;
+
+        if (litellmUrl && litellmKey) {
+            return new OpenaiRawClient(
+                this.imageService,
+                this.filesService,
+                this.sessionService,
+                litellmUrl,
+                litellmKey,
+                modelId,
+                maxTokens
+            );
+        } else if (isGemini) {
             // Check for explicit GEMINI_API_KEY (custom) or standard GOOGLE_GENERATIVE_AI_API_KEY
             const apiKey =
                 process.env.GEMINI_API_KEY ||
@@ -71,7 +88,8 @@ export class LlmFactory {
 
         return new AiSdkClient(
             this.imageService,
-            this.sessionStore,
+            this.filesService,
+            this.sessionService,
             model,
             modelId,
             maxTokens,

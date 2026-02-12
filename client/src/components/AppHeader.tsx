@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styles from './AppHeader.module.css';
 import classNames from 'classnames';
+import { apiAuth } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
+import { useConnection } from '../contexts/ConnectionContext';
 
 interface AppHeaderProps {
-    isConnected: boolean;
     children: React.ReactNode;
-    onSettings?: () => void;
-    onSignOut?: () => void;
-    onProjects?: () => void;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({ isConnected, children, onSettings, onSignOut, onProjects }) => {
+export const AppHeader: React.FC<AppHeaderProps> = ({ children }) => {
+    const { isConnected } = useConnection();
+    const navigate = useNavigate();
+
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -86,7 +88,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ isConnected, children, onS
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setIsAppMenuOpen(false);
-                                onProjects?.();
+                                navigate('/projects');
                             }}
                         >
                             <svg
@@ -146,7 +148,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ isConnected, children, onS
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setIsMenuOpen(false);
-                                    onSettings?.();
+                                    navigate('/settings');
                                 }}
                             >
                                 <svg
@@ -169,7 +171,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ isConnected, children, onS
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setIsMenuOpen(false);
-                                    onSignOut?.();
+                                    apiAuth.logout();
                                 }}
                             >
                                 <svg

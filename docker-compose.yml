@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_BASE_PATH: "${APP_BASE_PATH}"
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - "./server/data:${DATA_DIR}"
+    restart: always
+    env_file:
+      - .env
