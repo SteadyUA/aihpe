@@ -67,19 +67,19 @@ git pull origin main
 
 # 2. Build new image
 echo "🔨 Building new image..."
-docker-compose build
+docker compose build
 
 # 3. Stop running containers to release SQLite lock
 echo "🛑 Stopping containers..."
-docker-compose down
+docker compose down
 
 # 4. Run migrations
 echo "🗄️  Running database migrations..."
-docker-compose run --rm app node node_modules/typeorm/cli.js migration:run -d dist/data-source.js
+docker compose run --rm app node node_modules/typeorm/cli.js migration:run -d dist/data-source.js
 
 # 5. Start application
 echo "🚀 Starting application..."
-docker-compose up -d
+docker compose up -d
 
 echo "✅ Deployment completed successfully!"
 ```
@@ -92,12 +92,12 @@ SQLite locks the database file during write operations. Running migrations while
 
 **Safe command to run pending migrations (when app is stopped):**
 ```bash
-docker-compose run --rm app node node_modules/typeorm/cli.js migration:run -d dist/data-source.js
+docker compose run --rm app node node_modules/typeorm/cli.js migration:run -d dist/data-source.js
 ```
 
 **Revert last migration:**
 ```bash
-docker-compose exec app node node_modules/typeorm/cli.js migration:revert -d dist/data-source.js
+docker compose exec app node node_modules/typeorm/cli.js migration:revert -d dist/data-source.js
 ```
 
 ### Creating New Migrations (Local Dev Environment)
@@ -116,15 +116,15 @@ Migrations should be created in your local development environment, not on the s
 
 **View logs:**
 ```bash
-docker-compose logs -f --tail=100
+docker compose logs -f --tail=100
 ```
 
 **Check container status:**
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 **Stop application:**
 ```bash
-docker-compose down
+docker compose down
 ```
