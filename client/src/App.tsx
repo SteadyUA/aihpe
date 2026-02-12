@@ -48,7 +48,7 @@ class App extends React.Component<RouterProps, AppState> {
     setupSse = () => {
         this.closeSse(); // Ensure clean start
 
-        this.evtSource = new EventSource(`${import.meta.env.BASE_URL}api/sse`);
+        this.evtSource = new EventSource(`${import.meta.env.BASE_URL}api/sse?token=${this.state.token}`);
 
         this.evtSource.onopen = () => {
             console.log('Global SSE Connected');

@@ -203,10 +203,6 @@ export class ChatController {
 
 
 
-    @Get('/api/sse')
-    stream(@Req() request: Request, @Res() response: Response): any {
-        this.sseService.addClient(request, response);
-    }
 
     @Post('/api/projects')
     @UseBefore(AuthMiddleware)

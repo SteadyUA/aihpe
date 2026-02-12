@@ -38,11 +38,13 @@ export class SseService {
     private nextClientId = 1;
 
     addClient(request: Request, response: Response): void {
-        response.setHeader('Content-Type', 'text/event-stream');
-        response.setHeader('Cache-Control', 'no-cache, no-transform');
-        response.setHeader('Connection', 'keep-alive');
-        response.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx buffering
-        response.flushHeaders?.();
+        if (!response.headersSent) {
+            response.setHeader('Content-Type', 'text/event-stream');
+            response.setHeader('Cache-Control', 'no-cache, no-transform');
+            response.setHeader('Connection', 'keep-alive');
+            response.setHeader('X-Accel-Buffering', 'no'); // Disable Nginx buffering
+            response.flushHeaders?.();
+        }
         response.write('retry: 5000\n\n');
 
         const client: SseClient = {

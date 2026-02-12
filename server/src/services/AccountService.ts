@@ -109,4 +109,22 @@ export class AccountService {
 
         return { accessToken: newAccessToken, refreshToken: newRefreshToken };
     }
+
+    async verifyToken(token: string): Promise<any> {
+        // Decode first without verification to find account
+        const decoded = jwt.decode(token) as any;
+        if (!decoded || !decoded.accountId) {
+            throw new Error('Invalid token structure');
+        }
+
+        // Fetch account to get the secret
+        const account = await this.accountRepository.findOneBy({ id: Number(decoded.accountId) });
+
+        if (!account) {
+            throw new Error('User not found');
+        }
+
+        // Verify using the account's secret
+        return jwt.verify(token, account.tokenSecret);
+    }
 }

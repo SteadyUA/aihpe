@@ -6,6 +6,7 @@ import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'typedi';
 import { ChatController } from './controllers/ChatController';
 import { AccountController } from './controllers/AccountController';
+import { SseController } from './controllers/SseController';
 
 useContainer(Container);
 
@@ -37,7 +38,7 @@ export function createApp(): express.Express {
 
     useExpressServer(app, {
         routePrefix: basePath,
-        controllers: [ChatController, AccountController],
+        controllers: [ChatController, AccountController, SseController],
         validation: {
             whitelist: true,
             forbidNonWhitelisted: true,
@@ -49,6 +50,9 @@ export function createApp(): express.Express {
     // SPA Fallback: Serve index.html for any unknown non-API routes
     if (process.env.NODE_ENV !== 'development') {
         app.get(/(.*)/, (req, res) => {
+            if (res.headersSent) {
+                return;
+            }
             if (req.path.startsWith(`${basePath}/api`)) {
                 // Let API 404s follow standard behavior or return JSON
                 res.status(404).json({ message: 'Not Found' });
