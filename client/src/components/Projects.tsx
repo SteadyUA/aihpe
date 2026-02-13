@@ -182,16 +182,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                 <ProjectCreationModal
                     isOpen={showCreationModal}
                     onCreate={async (rules, img, prov, name) => {
-                        // Adapter to match signature if needed, or update call
-                        // The restored method expects modelRole too?
-                        // The restored method: handleCreateProject(rules, img, prov, name, modelRole)
-                        // The Modal probably only sends 4 args? Let's check modal signature if it fails.
-                        // Assuming modal sends (rules, img, prov, name, role) or checks params.
-                        // I will cast or update signature match in a moment if needed. 
-                        // For now, let's look at the method definition in this file: 
-                        // handleCreateProject = async (rules, img, prov, name, modelRole)
-                        // I'll assume ProjectCreationModal sends 5 args or I need to provide a default.
-                        await this.handleCreateProject(rules, img, prov, name, 'Default Role'); // Mock role if missing?
+                        await this.handleCreateProject(rules, img, prov, name, '');
                     }}
                     onClose={this.toggleCreationModal}
                 />

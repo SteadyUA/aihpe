@@ -18,7 +18,7 @@ export class ProjectService {
         project.rulesAndGoal = rulesAndGoal;
         project.imageGenerationPref = imageGenerationPref;
         project.defaultProvider = defaultProvider;
-        project.modelRole = modelRole || 'You are an expert web developer';
+        project.modelRole = modelRole || '';
         project.sessionIds = [];
         // createdAt/updatedAt handled by TypeOrm via decorators
 

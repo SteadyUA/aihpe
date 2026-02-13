@@ -15,7 +15,7 @@ const DEFAULT_SESSION_SCRIPT = `(() => {
       return;
     }
 
-    const anchor = (event.target as HTMLElement)?.closest?.('a');
+    const anchor = (event.target)?.closest?.('a');
     if (!anchor || anchor.hasAttribute('download')) {
       return;
     }

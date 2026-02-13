@@ -37,7 +37,9 @@ export class SseController {
                 response.write(`event: auth-error\ndata: ${JSON.stringify({ message: 'Unauthorized' })}\n\n`);
 
                 // Close connection
-                response.end();
+                setTimeout(() => {
+                    response.end();
+                }, 1000);
                 return response;
             }
         }

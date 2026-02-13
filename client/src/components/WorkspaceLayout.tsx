@@ -46,6 +46,9 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
         if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
             const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
             this.props.syncProjectSessions(this.props.initialProjectSessions, sessionId);
+        } else {
+            // Auto-create if no sessions exist
+            this.props.createSession();
         }
     }
 
@@ -63,7 +66,15 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             if (this.props.initialProjectSessions && this.props.initialProjectSessions.length > 0) {
                 const sessionId = this.props.initialActiveSessionId || this.props.activeSessionId || this.props.router.searchParams.get('sessionId') || undefined;
                 this.props.syncProjectSessions(this.props.initialProjectSessions, sessionId);
+            } else {
+                // Auto-create if updated project has no sessions
+                this.props.createSession();
             }
+        }
+
+        // If all sessions were deleted, create a new one
+        if (prevProps.sessionOrder.length > 0 && this.props.sessionOrder.length === 0) {
+            this.props.createSession();
         }
     }
 
