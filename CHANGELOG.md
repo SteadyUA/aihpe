@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v3.1.0] - 2026-02-19
+
+### Added
+- **AI Integration**:
+  - Implemented page generation logic.
+  - Added history summarization with new LLM client architecture.
+- **Security**:
+  - Implemented robust authorization for SSE connections.
+
+### Fixed
+- **Chat**:
+  - Fixed image attachment uploading functionality.
+- **Infrastructure**:
+  - Fixed Nginx buffering issues causing delayed streaming responses.
+- **General**:
+  - Fixed project creation flow.
+  - Fixed initial JavaScript initialization errors.
+  - Fixed SSE reconnection logic.
+
 ## [v3.0.0] - 2026-02-12
 
 ### Added
