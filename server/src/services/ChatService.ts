@@ -258,8 +258,8 @@ export class ChatService {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
             let thoughtBuffer = '';
 
-            const client = this.llmFactory.getClient(currentMetadata.provider);
-            const generation = await client.generatePage({
+            const client = this.llmFactory.getPageGenClient(currentMetadata.provider);
+            const generation = await client.generate({
                 sessionId,
                 instructions: effectiveInstructions,
                 files: currentFiles,
@@ -274,7 +274,7 @@ export class ChatService {
                 subject: currentMetadata.subject,
                 abortSignal: controller.signal,
                 summary: currentMetadata.summary, // Pass cumulative summary
-                trackRequestTokenUsage: async (usage) => {
+                trackRequestTokenUsage: async (usage: any) => {
                     if (controller.signal.aborted) return;
                     await this.tokenUsageService.saveUsage({
                         projectId: currentMetadata.projectId,
@@ -287,13 +287,13 @@ export class ChatService {
                         total: usage.total,
                     });
                 },
-                onPatch: (patch) => {
+                onPatch: (patch: any) => {
                     this.sseService.emitSessionUpdate({
                         sessionId,
                         ...patch,
                     });
                 },
-                onProgress: (chunk) => {
+                onProgress: (chunk: string) => {
                     // Logic to handle both streaming thoughts and tool status updates
                     if (controller.signal.aborted) return;
 
@@ -315,7 +315,7 @@ export class ChatService {
                         }
                     }
                 },
-                onVariantRequest: async (instruction) => {
+                onVariantRequest: async (instruction: string) => {
                     this.notifyStatus(
                         sessionId,
                         'generating',
@@ -412,26 +412,14 @@ export class ChatService {
 
             if (generation.newMessages && generation.newMessages.length > 0) {
                 for (const msg of generation.newMessages) {
-                    // Optimized content for UI, full content for Context
-                    const uiContent = formatContentForUi(msg.content);
-
-                    // Create a clean message object to ensure all required fields are present
-                    const cleanMsg: ChatMessage = {
+                    await this.contextService.appendMessage(sessionId, {
                         role: msg.role,
                         content: msg.content,
                         createdAt: new Date(),
                         version: updatedMetadata.currentVersion,
                         selection: msg.selection,
                         turn: updatedMetadata.lastTurn ?? 0, // Use current turn (which was updated by user message)
-                    };
-
-                    // Filter logic: User always in, others only if non-empty string
-                    const shouldAddToHistory = msg.role === 'user' || uiContent.trim().length > 0;
-
-                    // Update lists
-                    if (shouldAddToHistory) {
-                        await this.contextService.appendMessage(sessionId, cleanMsg);
-                    }
+                    });
                 }
             }
 
@@ -822,6 +810,7 @@ export class ChatService {
 
         if (targetSummaryEnd <= previousSummaryTurn) {
             // console.log(`Skipping summarization for session ${sessionId}: target summary end ${targetSummaryEnd} <= previous summary turn ${previousSummaryTurn}`);
+            return;
         }
 
         // Collect messages to summarize: turns (previousSummaryTurn + 1) to targetSummaryEnd
@@ -832,6 +821,7 @@ export class ChatService {
 
         if (messagesToSummarize.length === 0 && !session.summary) {
             console.log(`Skipping summarization for session ${sessionId}: no messages to summarize.`);
+            return;
         }
 
         const project = await this.projectService.getProject(session.projectId);
@@ -840,15 +830,15 @@ export class ChatService {
 
         try {
             this.notifyStatus(sessionId, 'generating', `summarization...`);
-            const client = this.llmFactory.getClient(session.provider);
-            const summary = await client.summarizeHistory({
+            const client = this.llmFactory.getHistoryClient(session.provider);
+            const summary = await client.generate({
                 sessionId,
                 conversation: messagesToSummarize,
                 rulesAndGoal,
                 modelRole,
                 abortSignal: this.activeGenerations.get(sessionId)?.signal,
                 previousSummary: session.summary,
-                trackRequestTokenUsage: async (usage) => {
+                trackRequestTokenUsage: async (usage: any) => {
                     await this.tokenUsageService.saveUsage({
                         projectId: session.projectId,
                         sessionId: sessionId,

@@ -36,10 +36,12 @@ class App extends React.Component<RouterProps, AppState> {
     }
 
     componentDidUpdate(_prevProps: RouterProps, prevState: AppState) {
-        if (this.state.token && !prevState.token) {
-            this.setupSse();
-        } else if (!this.state.token && prevState.token) {
-            this.closeSse();
+        if (this.state.token !== prevState.token) {
+            if (this.state.token) {
+                this.setupSse();
+            } else {
+                this.closeSse();
+            }
         }
     }
 

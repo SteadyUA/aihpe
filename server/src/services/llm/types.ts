@@ -42,8 +42,25 @@ export interface GeneratePageResult {
     targetVersion?: number;
 }
 
-export interface LlmClient {
-    generatePage(request: GeneratePageRequest): Promise<GeneratePageResult>;
-    summarizeHistory(request: SummarizeHistoryRequest): Promise<string>;
+export interface LlmClient<TRequest = any, TResult = any> {
+    generate(request: TRequest): Promise<TResult>;
     getCapacity(): number;
+}
+
+export interface LlmTool<TContext = any> {
+    name: string;
+    description: string;
+    parameters: any;
+    execute: (args: any, context: TContext) => Promise<string>;
+}
+
+export interface LlmConfig<TRequest = any, TContext = any, TResult = any> {
+    systemPrompt: (request: TRequest) => string;
+    buildContext?: (request: TRequest) => TContext | Promise<TContext>;
+    tools?: (
+        request: TRequest,
+        context: TContext
+    ) => LlmTool<TContext>[];
+    processOutput?: (output: string, messages: ChatMessage[], context: TContext) => TResult | Promise<TResult>;
+    userMessage?: (request: TRequest) => string | any[];
 }

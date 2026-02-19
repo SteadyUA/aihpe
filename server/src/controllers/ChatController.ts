@@ -43,7 +43,7 @@ import { TurnService } from '../services/session/TurnService';
 import { TokenUsageService } from '../services/TokenUsageService';
 import { LlmFactory } from '../services/llm/LlmFactory';
 
-import { ChatAttachment, LlmProvider, UnsentData } from '../types/chat';
+import { ChatAttachment, LlmProvider, SessionMetadata, UnsentData } from '../types/chat';
 import { ImageService } from '../services/image/ImageService';
 import { UploadService } from '../services/image/UploadService';
 import { UnsentService } from '../services/session/UnsentService';
@@ -229,19 +229,15 @@ export class ChatController {
         }
 
         const sessionIds = await this.projectService.getProjectSessions(projectId);
-        const sessionDataList = [];
-        for (const id of sessionIds) {
+        const sessionPromises = sessionIds.map(async (id) => {
             const s = await this.sessionService.getMetadata(id);
             if (s && s.projectId === projectId) {
-                sessionDataList.push({
-                    sessionId: s.id,
-                    group: s.group,
-                    status: s.status,
-                    subject: s.subject,
-                    lastTurn: s.lastTurn ?? 0
-                });
+                return this.enrichSession(s);
             }
-        }
+            return null;
+        });
+
+        const sessions = (await Promise.all(sessionPromises)).filter((s): s is NonNullable<typeof s> => s !== null);
 
         return {
             id: project.id,
@@ -251,7 +247,34 @@ export class ChatController {
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
             modelRole: project.modelRole,
-            sessions: sessionDataList,
+            sessions,
+        };
+    }
+
+    private async enrichSession(snapshot: SessionMetadata) {
+        const usageSummary = await this.tokenUsageService.getSummary(snapshot.id, 'chat');
+        const client = this.llmFactory.getPageGenClient(snapshot.provider || 'openai');
+        const capacity = client.getCapacity();
+
+        const tokenUsage = {
+            ...usageSummary,
+            capacity
+        };
+
+        return {
+            id: snapshot.id,
+            updatedAt: snapshot.updatedAt.toISOString(),
+            group: snapshot.group,
+            currentVersion: snapshot.currentVersion,
+            lastTurn: snapshot.lastTurn ?? 0,
+            provider: snapshot.provider ?? 'openai',
+            fastMode: snapshot.fastMode ?? false,
+            subject: snapshot.subject,
+            tokenUsage,
+            unsent: await this.unsentService.getUnsent(snapshot.id),
+            status: snapshot.status,
+            errorMessage: snapshot.errorMessage,
+            projectId: snapshot.projectId,
         };
     }
 
@@ -471,6 +494,7 @@ export class ChatController {
 
                     resolve(
                         res.json({
+                            id: metadata.id,
                             filename: metadata.filename,
                             type: 'image',
                             originalName: metadata.originalName,
@@ -568,30 +592,7 @@ export class ChatController {
         if (!snapshot) {
             throw new NotFoundError('Session not found');
         }
-
-        // history removed
-        const usageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
-        const client = this.llmFactory.getClient(snapshot.provider || 'openai');
-        const tokenUsage = {
-            ...usageSummary,
-            capacity: client.getCapacity()
-        };
-
-        return {
-            id: snapshot.id,
-            updatedAt: snapshot.updatedAt.toISOString(),
-            group: snapshot.group,
-            currentVersion: snapshot.currentVersion,
-            lastTurn: snapshot.lastTurn ?? 0,
-            provider: snapshot.provider ?? 'openai',
-            fastMode: snapshot.fastMode ?? false,
-            subject: snapshot.subject,
-            tokenUsage,
-            unsent: await this.unsentService.getUnsent(sessionId),
-            status: snapshot.status,
-            errorMessage: snapshot.errorMessage,
-            projectId: snapshot.projectId,
-        };
+        return this.enrichSession(snapshot);
     }
 
     @Get('/api/sessions/:sessionId/turns')

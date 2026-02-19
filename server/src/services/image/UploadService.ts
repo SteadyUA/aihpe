@@ -8,6 +8,7 @@ import { getSessionsDir } from '../../utils/pathUtils';
 import { MoreThan } from 'typeorm';
 
 export interface UploadMetadata {
+    id: number;
     filename: string;
     originalName: string;
     mimeType: string;
@@ -86,6 +87,7 @@ export class UploadService {
         await this.repository.save(upload);
 
         return {
+            id: upload.id,
             filename: upload.filename,
             originalName: upload.originalName,
             mimeType: upload.mimeType,
@@ -98,6 +100,7 @@ export class UploadService {
         const upload = await this.repository.findOne({ where: { sessionId, filename } });
         if (!upload) return undefined;
         return {
+            id: upload.id,
             filename: upload.filename,
             originalName: upload.originalName,
             mimeType: upload.mimeType,

@@ -19,8 +19,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@ai-sdk/google": "^2.0.47",
-    "@ai-sdk/openai": "^2.0.87",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
     "ai": "^5.0.113",

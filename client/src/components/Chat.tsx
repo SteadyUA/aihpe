@@ -166,7 +166,7 @@ class Message extends React.Component<MessageProps> {
 
         return (
             <div
-                id={`msg-session-${sessionId}-turn-${msg.turn}`}
+                id={`msg-session-${sessionId}-turn-${msg.turn}-${msg.role}`}
                 className={messageClass}
                 onClick={
                     isAssistant && onPreviewTurn
@@ -483,9 +483,13 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             return;
         }
 
-        if (this.props.status === 'idle' && prevProps.status !== 'idle') {
-            this.fetchTurns();
-        }
+        // if (this.props.status === 'idle' && prevProps.status !== 'idle') {
+        //     if (this.skipNextFetch) {
+        //         this.skipNextFetch = false;
+        //     } else {
+        //         this.fetchTurns();
+        //     }
+        // }
 
         if (!prevProps.isVisible && this.props.isVisible && !this.state.historyLoaded) {
             this.fetchTurns();
@@ -501,6 +505,11 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             this.handleSaveUnsent({ selection: this.props.selection });
         }
 
+        const statusMessagesChanged = !areArraysEqual(prevState.statusMessages, this.state.statusMessages);
+        if (statusMessagesChanged && this.isLastTurn()) {
+            this.scrollToActiveTurn('smooth', 'nearest');
+        }
+
         if (prevProps.attachment !== this.props.attachment) {
             this.handleSaveUnsent({ attachment: this.props.attachment });
         }
@@ -509,10 +518,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         const historyJustLoaded = !prevState.historyLoaded && this.state.historyLoaded;
 
         if (turnChanged) {
-            this.scrollToActiveTurn('smooth', 'start');
+            this.scrollToActiveTurn('smooth', 'nearest');
             this.syncVersion(this.props.activeTurn);
         } else if (historyJustLoaded) {
-            this.scrollToActiveTurn('auto', 'start');
+            this.scrollToActiveTurn('auto', 'nearest');
             this.syncVersion(this.props.activeTurn);
         }
     }
@@ -534,7 +543,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             return;
         }
 
-        const el = document.getElementById(`msg-session-${this.props.sessionId}-turn-${effectiveTurn}`);
+        let el = document.getElementById(`msg-session-${this.props.sessionId}-turn-${effectiveTurn}-assistant`);
+        if (!el) {
+            el = document.getElementById(`msg-session-${this.props.sessionId}-turn-${effectiveTurn}-user`);
+        }
 
         // Check if element is visible (offsetParent is null if display: none or not in DOM tree)
         const isVisible = el && el.offsetParent !== null;
@@ -595,6 +607,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     this.props.onUpdateSession({ attachment: data.restoredAttachment });
                 }
 
+                this.props.onUpdateSession({ status: 'idle' });
                 this.syncVersion(null);
             } else {
                 // Revert optimistic update?
@@ -730,7 +743,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             fastMode: fastMode,
             selection: selectionData,
             attachment: attachment,
-            version: 0
+            version: (this.state.turns.find(t => t.turn === this.props.lastTurn)?.version || 0)
         };
 
         const newTurns = [...this.state.turns, optimisticTurn];
@@ -807,7 +820,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             const attachment: ChatAttachment = {
                 type: 'image',
                 filename: data.filename,
-                id: data.filename,
+                id: data.id ? data.id.toString() : undefined,
                 originalName: data.originalName
             };
 

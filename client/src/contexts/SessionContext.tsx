@@ -13,7 +13,7 @@ interface SessionContextType {
     sessionToDelete: string | null;
     notFoundSessionId: string | null;
 
-    fetchSession: (id: string, isCompletion?: boolean) => Promise<any>;
+    // fetchSession: (id: string, isCompletion?: boolean) => Promise<any>; // Removed
     createSession: () => Promise<void>;
     switchSession: (id: string) => void;
     updateSession: (id: string, updates: Partial<Session>) => void;
@@ -136,6 +136,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 const targetTurn = turnFromUrl ? parseInt(turnFromUrl, 10) : session.lastTurn;
                 const targetTab = tabFromUrl || 'preview';
 
+                // Session found in state, update activeTurn/tab if needed
                 if (session.activeTurn !== targetTurn || session.activeTab !== targetTab) {
                     this.updateSession(sessionIdQuery, { activeTurn: targetTurn, activeTab: targetTab });
                 }
@@ -145,19 +146,9 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                     }
                 });
             } else {
-                this.fetchSession(sessionIdQuery).then(data => {
-                    if (data && !data.notFound) {
-                        // Ensure it belongs to this project?
-                        // fetchSession check?
-                        this.setState({ activeSessionId: sessionIdQuery }, () => {
-                            this.setState(prev => {
-                                const newStable = prev.stableSessionIds.includes(sessionIdQuery) ? prev.stableSessionIds : [...prev.stableSessionIds, sessionIdQuery];
-                                const newOrder = prev.sessionOrder.includes(sessionIdQuery) ? prev.sessionOrder : [...prev.sessionOrder, sessionIdQuery];
-                                return { stableSessionIds: newStable, sessionOrder: newOrder };
-                            });
-                        });
-                    }
-                });
+                // Session not found in project sessions. 
+                // Since project load provides all sessions, this is likely a 404 or invalid ID.
+                this.setState({ notFoundSessionId: sessionIdQuery });
             }
         } else if (sessionIdQuery && sessionIdQuery === this.state.activeSessionId) {
             // Same session, but check if turn/tab changed (e.g. back/forward nav)
@@ -244,68 +235,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         }
     }
 
-    fetchSession = async (id: string, isCompletion: boolean = false) => {
-        try {
-            const res = await apiAuth.fetch(`/api/sessions/${id}`);
-            if (res.status === 404) {
-                this.setState({ notFoundSessionId: id });
-                return { notFound: true };
-            }
-            if (!res.ok) throw new Error('Failed to fetch session');
-
-            const data = await res.json();
-
-            // Validate project?
-            // if (data.projectId !== this.props.projectId) ... logic?
-
-            const lastTurn = data.lastTurn ?? 0;
-
-            this.setState((prevState) => {
-                const session = prevState.sessions[id];
-                const baseSession: Session = session || {
-                    id,
-                    projectId: data.projectId,
-                    status: 'idle',
-                    lastTurn: 0,
-                    activeTurn: null,
-                    activeTab: 'preview',
-                    selection: null,
-                    isPicking: false,
-                    group: data.group ?? 0,
-                    pendingRefreshTurn: null,
-                    input: undefined,
-                    subject: data.subject || '...',
-                };
-
-                return {
-                    sessions: {
-                        ...prevState.sessions,
-                        [id]: {
-                            ...baseSession,
-                            currentVersion: data.currentVersion,
-                            lastTurn: lastTurn,
-                            activeTurn: (baseSession.activeTurn !== null && baseSession.activeTurn > lastTurn) ? null : baseSession.activeTurn,
-                            projectId: data.projectId ?? baseSession.projectId,
-                            status: (data.status === 'started' || data.status === 'generating') ? 'busy' :
-                                (data.status === 'error') ? 'error' : 'idle',
-                            pendingRefreshTurn: isCompletion ? lastTurn : (session ? session.pendingRefreshTurn : null),
-                            input: data.unsent?.input || (session ? session.input : undefined),
-                            selection: (data.unsent?.selection) ?? (session ? session.selection : null),
-                            tokenUsage: data.tokenUsage ?? (session ? session.tokenUsage : undefined),
-                            attachment: (data.unsent?.attachment) ?? (session ? session.attachment : undefined),
-                            provider: (data.unsent?.provider) ?? data.provider ?? 'openai',
-                            fastMode: (data.unsent?.fastMode) ?? data.fastMode ?? false,
-                            subject: data.subject || '...',
-                        }
-                    }
-                };
-            });
-            return data;
-        } catch (error) {
-            console.error('Failed to fetch session', error);
-            return null;
-        }
-    };
+    // fetchSession removed as per requirement to stop using GET /api/sessions/:id
 
     handleSessionCreated = (sessionData: any, sourceSessionId?: string) => {
         this.setState((prevState) => {
@@ -367,11 +297,10 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             };
         });
 
-        // Trigger fetch to ensure full data (e.g. tokenUsage)
-        const status = sessionData.status ?? 'idle';
-        if (status !== 'pending') {
-            this.fetchSession(sessionData.id);
-        }
+        // Since we don't fetch session anymore, rely on creation data + defaults
+        // If we strictly follow "don't use GET /api/sessions/:id", we can't fetch.
+        // The SSE event (onSessionCreated) or POST response should ideally provide needed info.
+        // For now, we assume defaults are enough or data is provided.
     };
 
     createSession = async () => {
@@ -515,29 +444,43 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             const order: string[] = [];
             const fetchedIds = new Set<string>();
 
-            projectSessions.forEach(({ sessionId, group, subject, status: serverStatus, lastTurn }) => {
-                order.push(sessionId);
-                fetchedIds.add(sessionId);
+            projectSessions.forEach((s) => {
+                // Server now returns 'id', not 'sessionId'
+                const sId = s.id || s.sessionId;
+                if (!sId) return;
 
+                order.push(sId);
+                fetchedIds.add(sId);
+
+                const serverStatus = s.status;
                 const mappedStatus = (serverStatus === 'started' || serverStatus === 'generating') ? 'busy' :
                     (serverStatus === 'error') ? 'error' : 'idle';
 
-                const existing = prev.sessions[sessionId];
+                const existing = prev.sessions[sId];
 
-                sessionsMap[sessionId] = {
-                    id: sessionId,
-                    projectId: this.props.projectId || '',
+                // Create full session object using new enriched data from server
+                sessionsMap[sId] = {
+                    id: sId,
+                    projectId: this.props.projectId || s.projectId || '',
                     status: existing ? (mappedStatus === 'idle' ? (existing.status || 'idle') : mappedStatus) : mappedStatus,
-                    lastTurn: lastTurn ?? 0,
-                    activeTurn: lastTurn ?? 0, // Default active
+
+                    lastTurn: s.lastTurn ?? 0,
+                    activeTurn: existing ? (existing.activeTurn ?? s.lastTurn ?? 0) : (s.lastTurn ?? 0),
                     activeTab: existing?.activeTab || 'preview',
-                    selection: existing?.selection || null,
+                    selection: (s.unsent?.selection) ?? (existing ? existing.selection : null),
                     isPicking: existing?.isPicking || false,
                     pendingRefreshTurn: null,
-                    group: group ?? 0,
-                    provider: 'openai',
-                    subject: subject || (existing?.subject || '...'),
-                    input: existing?.input,
+
+                    group: s.group ?? 0,
+                    provider: (s.unsent?.provider) ?? s.provider ?? 'openai',
+                    fastMode: (s.unsent?.fastMode) ?? s.fastMode ?? false,
+                    subject: s.subject || '...', // Fallback to ... if no subject, but we don't rely on existing subject blindly if server sends one? Server sends undefined if none.
+
+                    input: s.unsent?.input || (existing ? existing.input : undefined),
+                    attachment: (s.unsent?.attachment) ?? (existing ? existing.attachment : undefined),
+
+                    tokenUsage: s.tokenUsage,
+                    currentVersion: s.currentVersion,
                 };
             });
 
@@ -559,7 +502,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         return (
             <SessionContext.Provider value={{
                 ...this.state,
-                fetchSession: this.fetchSession,
+                // fetchSession: this.fetchSession, // Removed
                 createSession: this.createSession,
                 switchSession: this.switchSession,
                 updateSession: this.updateSession,

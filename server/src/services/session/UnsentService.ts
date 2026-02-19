@@ -18,7 +18,7 @@ export class UnsentService {
         if (!record) return undefined;
 
         const data: UnsentData = {};
-        if (record.input !== null) data.input = record.input;
+        if (record.input !== '' && record.input !== null) data.input = record.input;
         if (record.provider !== null) data.provider = record.provider as any;
         if (record.fastMode !== null) data.fastMode = record.fastMode;
         if (record.selection !== null) data.selection = record.selection;

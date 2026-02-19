@@ -95,7 +95,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
         if (!sessionIdQuery) {
             // No session specified. Find active.
             const activeId = projectData.activeSessionId ||
-                (projectData.sessions && projectData.sessions.length > 0 ? projectData.sessions[0].sessionId : null);
+                (projectData.sessions && projectData.sessions.length > 0 ? (projectData.sessions[0].id || projectData.sessions[0].sessionId) : null);
 
             if (activeId) {
                 // Replace URL
