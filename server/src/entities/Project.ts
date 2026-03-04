@@ -38,6 +38,12 @@ export class Project {
     @Column({ nullable: true })
     activeSessionId?: string;
 
+    @Column({ default: 'ready' })
+    status!: 'initialization' | 'ready';
+
+    @Column({ nullable: true })
+    taskId?: string;
+
     @CreateDateColumn()
     createdAt!: Date;
 

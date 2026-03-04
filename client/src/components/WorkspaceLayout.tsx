@@ -22,7 +22,7 @@ interface WorkspaceLayoutProps extends SessionContextProps, RouterProps {
     initialActiveSessionId?: string | null;
 
     onUpdateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string, role: string) => Promise<void>;
-    onCreateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string) => Promise<void>;
+    onCreateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => Promise<void>;
 
     fetchProject: (id: string, sessionContextSync?: (sessions: any[], activeId?: string) => void) => Promise<void>;
 }
@@ -97,8 +97,8 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
     };
 
-    handleCreateProjectWrapper = async (rules: string, imgPref: string, provider: LlmProvider, name: string) => {
-        await this.props.onCreateProject(rules, imgPref, provider, name);
+    handleCreateProjectWrapper = async (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => {
+        await this.props.onCreateProject(rules, imgPref, provider, name, modelRole, file);
         this.setState({ showProjectCreation: false });
     }
 

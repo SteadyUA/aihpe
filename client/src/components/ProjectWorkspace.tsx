@@ -5,6 +5,7 @@ import { SessionProvider } from '../contexts/SessionContext';
 import { apiAuth } from '../utils/api';
 import { LlmProvider } from '../types';
 import { withRouter, RouterProps } from './withRouter';
+import { ProjectInitialization } from './ProjectInitialization';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface ProjectWorkspaceProps extends RouterProps {
@@ -19,6 +20,8 @@ interface ProjectWorkspaceState {
     projectModelRole: string;
     projectSessions: any[];
     activeSessionId?: string | null;
+    projectStatus?: 'initialization' | 'ready';
+    projectTaskId?: string;
 }
 
 class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWorkspaceState> {
@@ -32,7 +35,9 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             projectDefaultProvider: 'openai',
             projectModelRole: '',
             projectSessions: [],
-            activeSessionId: null
+            activeSessionId: null,
+            projectStatus: 'ready',
+            projectTaskId: undefined,
         };
     }
 
@@ -73,7 +78,9 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                 projectDefaultProvider: data.defaultProvider,
                 projectModelRole: data.modelRole,
                 projectSessions: data.sessions || [],
-                activeSessionId: data.activeSessionId
+                activeSessionId: data.activeSessionId,
+                projectStatus: data.status,
+                projectTaskId: data.taskId,
             }, () => {
                 if (sessionContextSync && data.sessions) {
                     sessionContextSync(data.sessions, data.activeSessionId);
@@ -106,27 +113,38 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
         }
     };
 
-    handleCreateProject = async (rules: string, imgPref: string, provider: LlmProvider, name: string) => {
+    handleCreateProject = async (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => {
         try {
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('rulesAndGoal', rules);
+            formData.append('imageGenerationPref', imgPref);
+            formData.append('defaultProvider', provider);
+            formData.append('modelRole', modelRole);
+            if (file) {
+                formData.append('file', file);
+            }
+
             const response = await apiAuth.fetch('/api/projects', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    rulesAndGoal: rules,
-                    imageGenerationPref: imgPref,
-                    defaultProvider: provider
-                }),
+                body: formData,
             });
             if (!response.ok) throw new Error('Failed to create project');
             const project = await response.json();
+
             this.setState({
                 projectId: project.id,
                 projectName: project.name,
                 projectRulesAndGoal: project.rulesAndGoal,
                 projectImageGenerationPref: project.imageGenerationPref,
                 projectDefaultProvider: project.defaultProvider,
-                projectModelRole: project.modelRole
+                projectModelRole: project.modelRole,
+                projectStatus: project.status,
+                projectTaskId: project.taskId,
+                activeSessionId: project.activeSessionId,
+                projectSessions: project.sessions || []
+            }, () => {
+                this.normalizeUrl(project);
             });
         } catch (e) {
             console.error('Failed to create project', e);
@@ -167,10 +185,22 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
     render() {
         const {
             projectId, projectName, projectRulesAndGoal,
-            projectImageGenerationPref, projectDefaultProvider, projectModelRole
+            projectImageGenerationPref, projectDefaultProvider, projectModelRole,
+            projectStatus, projectTaskId
         } = this.state;
 
+        console.log("RENDER ProjectWorkspace", { projectId, projectStatus, projectTaskId });
+
         if (!projectId) return <div>Loading Workspace...</div>;
+
+        if (projectStatus === 'initialization' && projectTaskId) {
+            return (
+                <ProjectInitialization
+                    taskId={projectTaskId}
+                    onComplete={() => this.fetchProject(projectId)}
+                />
+            );
+        }
 
         return (
             <SessionProvider projectId={projectId} initialActiveSessionId={this.state.activeSessionId}>

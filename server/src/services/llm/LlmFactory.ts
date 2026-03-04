@@ -104,6 +104,53 @@ export class LlmFactory {
         );
     }
 
+<<<<<<< Updated upstream
+=======
+    getHtmlPlanClient(workingDirectory: string, taskId: string, provider: LlmProvider = 'openai'): LlmClient<any, string> {
+        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+
+        const config: LlmConfig<any, any, string> = {
+            systemPrompt: () => HtmlPlanPrompt,
+            buildContext: async (request: any) => ({ workingDirectory, taskId, abortController: request.abortController }),
+            // Give planner only basic analyze and add_tasks tools
+            tools: (req, ctx) => createHtmlConversionTools()(req, ctx).filter(t =>
+                ['list_files', 'add_jobs'].includes(t.name)
+            ),
+            processOutput: async (output) => output,
+            userMessage: (request) => request.instruction || 'Analyze and create an optimization plan.'
+        };
+
+        return new OpenaiRawClient(
+            config,
+            litellmUrl,
+            litellmKey,
+            modelId,
+            maxTokens
+        );
+    }
+
+    getHtmlExecutionClient(workingDirectory: string, taskId: string, currentTask: string, provider: LlmProvider = 'openai'): LlmClient<any, string> {
+        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+
+        const config: LlmConfig<any, any, string> = {
+            systemPrompt: () => HtmlExecutionPrompt,
+            buildContext: async (request: any) => ({ workingDirectory, taskId, abortController: request.abortController }),
+            // Give execution agent all tools except add_tasks
+            tools: (req, ctx) => createHtmlConversionTools()(req, ctx).filter(t => t.name !== 'add_jobs'),
+            processOutput: async (output) => output,
+            userMessage: () => `Execute this task: ${currentTask}`
+        };
+
+        return new OpenaiRawClient(
+            config,
+            litellmUrl,
+            litellmKey,
+            modelId,
+            maxTokens
+        );
+    }
+
+>>>>>>> Stashed changes
     private getConfig(provider: LlmProvider) {
         let modelId = '';
         if (provider === 'google') {

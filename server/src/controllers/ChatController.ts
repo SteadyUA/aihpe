@@ -17,6 +17,7 @@ import { Request, Response } from 'express';
 import multer from 'multer';
 import archiver from 'archiver';
 import crypto from 'crypto';
+import os from 'os';
 import {
     IsArray,
     IsIn,
@@ -47,7 +48,10 @@ import { ChatAttachment, LlmProvider, SessionMetadata, UnsentData } from '../typ
 import { ImageService } from '../services/image/ImageService';
 import { UploadService } from '../services/image/UploadService';
 import { UnsentService } from '../services/session/UnsentService';
+import { HtmlImportService } from '../services/HtmlImportService';
 import { getSessionsDir } from '../utils/pathUtils';
+import { AppDataSource } from '../data-source';
+import { Task } from '../entities/Task';
 
 class AttachmentRequest {
     @IsString()
@@ -193,6 +197,7 @@ export class ChatController {
         private readonly sessionService: SessionService,
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
+        private readonly htmlImportService: HtmlImportService,
     ) {
         console.log('ChatController initialized');
     }
@@ -206,9 +211,58 @@ export class ChatController {
 
     @Post('/api/projects')
     @UseBefore(AuthMiddleware)
-    async createProject(@Body() body: CreateProjectRequest, @Req() request: Request) {
-        const accountId = (request as any).user?.accountId;
-        return await this.projectService.createProject(body.rulesAndGoal, body.imageGenerationPref, body.defaultProvider, body.name, accountId, body.modelRole);
+    async createProject(@Req() request: Request, @Res() response: Response) {
+        const upload = multer({ dest: os.tmpdir() }).single('file');
+
+        return new Promise((resolve) => {
+            upload(request, response, async (err) => {
+                if (err) {
+                    console.error('Project creation file upload failed', err);
+                    return resolve(response.status(500).json({ message: 'File upload failed' }));
+                }
+
+                try {
+                    const body = request.body;
+                    const accountId = (request as any).user?.accountId;
+                    const file = request.file;
+
+                    const status = file ? 'initialization' : 'ready';
+                    const taskId = file ? crypto.randomUUID() : undefined;
+
+                    const project = await this.projectService.createProject(
+                        body.rulesAndGoal || '',
+                        body.imageGenerationPref,
+                        body.defaultProvider,
+                        body.name,
+                        accountId,
+                        body.modelRole,
+                        status,
+                        taskId
+                    );
+
+                    if (file && taskId) {
+                        // Create pending task entity before sending response to avoid 404 on immediate poll
+                        const taskRepo = AppDataSource.getRepository(Task);
+                        const newTask = taskRepo.create({
+                            id: taskId,
+                            status: 'pending',
+                            steps: []
+                        });
+                        await taskRepo.save(newTask);
+
+                        // Start background import
+                        this.htmlImportService.importArchive(project.id, file.path, taskId).catch((e: any) => {
+                            console.error('Failed to start HTML import', e);
+                        });
+                    }
+
+                    resolve(response.status(201).json(project));
+                } catch (e: any) {
+                    console.error('Failed to create project', e);
+                    resolve(response.status(500).json({ message: e.message || 'Failed to create project' }));
+                }
+            });
+        });
     }
 
     @Get('/api/projects')
@@ -247,6 +301,8 @@ export class ChatController {
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
             modelRole: project.modelRole,
+            status: project.status,
+            taskId: project.taskId,
             sessions,
         };
     }

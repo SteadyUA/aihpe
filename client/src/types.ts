@@ -28,6 +28,8 @@ export interface Project {
     sessionIds: string[];
     activeSessionId?: string;
     modelRole?: string;
+    status?: 'initialization' | 'ready';
+    taskId?: string;
     createdAt: string;
     updatedAt: string;
 }

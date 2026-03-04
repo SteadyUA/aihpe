@@ -7,6 +7,7 @@ import { Container } from 'typedi';
 import { ChatController } from './controllers/ChatController';
 import { AccountController } from './controllers/AccountController';
 import { SseController } from './controllers/SseController';
+import { TaskController } from './controllers/TaskController';
 
 useContainer(Container);
 
@@ -38,7 +39,7 @@ export function createApp(): express.Express {
 
     useExpressServer(app, {
         routePrefix: basePath,
-        controllers: [ChatController, AccountController, SseController],
+        controllers: [ChatController, AccountController, SseController, TaskController],
         validation: {
             whitelist: true,
             forbidNonWhitelisted: true,

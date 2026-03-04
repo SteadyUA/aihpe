@@ -8,7 +8,7 @@ import { LLM_PROVIDERS } from '../constants';
 
 interface ProjectCreationModalProps {
     isOpen: boolean;
-    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string, modelRole: string) => Promise<void>;
+    onCreate: (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: LlmProvider, name: string, modelRole: string, file?: File) => Promise<void>;
     onClose?: () => void;
 }
 
@@ -18,14 +18,21 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
     const [imageGenerationPref, setImageGenerationPref] = useState('');
     const [defaultProvider, setDefaultProvider] = useState<LlmProvider>('openai');
     const [modelRole, setModelRole] = useState('');
+    const [file, setFile] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
 
     const handleCreate = async () => {
         setIsCreating(true);
         try {
-            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider, name, modelRole);
+            await onCreate(rulesAndGoal, imageGenerationPref, defaultProvider, name, modelRole, file || undefined);
         } finally {
             setIsCreating(false);
+        }
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setFile(e.target.files[0]);
         }
     };
 
@@ -63,6 +70,18 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
                     placeholder="Enter project name"
                     autoFocus
                 />
+            </div>
+            <div className={styles.field}>
+                <label className={styles.label}>HTML Archive (ZIP)</label>
+                <input
+                    type="file"
+                    className={styles.input}
+                    accept=".zip"
+                    onChange={handleFileChange}
+                />
+                <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '4px' }}>
+                    Optional: Upload an archive containing index.html, styles, and images.
+                </div>
             </div>
             <div className={styles.field}>
                 <label className={styles.label}>Rules and Goal</label>

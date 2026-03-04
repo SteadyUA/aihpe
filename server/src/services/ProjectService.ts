@@ -10,7 +10,7 @@ export class ProjectService {
         return AppDataSource.getRepository(Project);
     }
 
-    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string): Promise<Project> {
+    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string, status: 'initialization' | 'ready' = 'ready', taskId?: string): Promise<Project> {
         const project = new Project();
         project.id = randomUUID();
         project.accountId = accountId;
@@ -20,9 +20,23 @@ export class ProjectService {
         project.defaultProvider = defaultProvider;
         project.modelRole = modelRole || '';
         project.sessionIds = [];
+        project.status = status;
+        project.taskId = taskId;
         // createdAt/updatedAt handled by TypeOrm via decorators
 
         return await this.projectRepository.save(project);
+    }
+
+    async updateProjectStatus(projectId: string, status: 'initialization' | 'ready', taskId?: string): Promise<void> {
+        const project = await this.projectRepository.findOneBy({ id: projectId });
+        if (!project) {
+            throw new Error(`Project ${projectId} not found`);
+        }
+        project.status = status;
+        if (taskId !== undefined) {
+            project.taskId = taskId;
+        }
+        await this.projectRepository.save(project);
     }
 
     async getProject(id: string, currentUserId?: number): Promise<Project | undefined> {

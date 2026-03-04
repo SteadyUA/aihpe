@@ -163,14 +163,16 @@ export abstract class ImageService {
         return result.description;
     }
 
-    async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File): Promise<ImageMetadata> {
+    async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File, preserveFilename = false): Promise<ImageMetadata> {
         const versionDir = this.resolveVersionDir(sessionId, version);
-        this.ensureDirectory(versionDir);
 
         const uuid = randomUUID();
         const ext = path.extname(file.originalname);
-        const filename = `${uuid}${ext}`;
+        const filename = preserveFilename ? file.originalname : `${uuid}${ext}`;
         const filePath = path.join(versionDir, filename);
+
+        // Ensure the directory for the file exists in case the filename contains subpaths
+        this.ensureDirectory(path.dirname(filePath));
 
         // Copy file from temp location or write buffer
         if (file.path) {

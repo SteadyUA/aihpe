@@ -64,18 +64,21 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         this.props.onSelectProject(projectId, lastSessionId);
     };
 
-    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: string, name: string, modelRole: string) => {
+    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: string, name: string, modelRole: string, file?: File) => {
         try {
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('rulesAndGoal', rulesAndGoal);
+            formData.append('imageGenerationPref', imageGenerationPref);
+            formData.append('defaultProvider', defaultProvider);
+            formData.append('modelRole', modelRole);
+            if (file) {
+                formData.append('file', file);
+            }
+
             const res = await apiAuth.fetch('/api/projects', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name,
-                    rulesAndGoal,
-                    imageGenerationPref,
-                    defaultProvider,
-                    modelRole
-                }),
+                body: formData,
             });
 
             if (!res.ok) {
@@ -165,7 +168,32 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                 <div className={styles.projectName}>{project.name}</div>
                                 <div className={styles.projectRules}>{project.rulesAndGoal}</div>
                                 <div className={styles.projectFooter}>
-                                    <span>{project.sessionIds?.length || 0} Sessions</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span>{project.sessionIds?.length || 0} Sessions</span>
+                                        {project.status === 'initialization' && (
+                                            <span style={{
+                                                padding: '2px 6px',
+                                                borderRadius: '12px',
+                                                backgroundColor: 'rgba(24, 144, 255, 0.1)',
+                                                color: '#1890ff',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '4px'
+                                            }}>
+                                                <div style={{
+                                                    width: '8px',
+                                                    height: '8px',
+                                                    borderRadius: '50%',
+                                                    border: '2px solid #1890ff',
+                                                    borderTopColor: 'transparent',
+                                                    animation: 'spin 1s linear infinite'
+                                                }} />
+                                                Initializing...
+                                            </span>
+                                        )}
+                                    </div>
                                     <button
                                         className={styles.deleteButton}
                                         onClick={(e) => this.handleRequestDelete(e, project)}
@@ -181,8 +209,8 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
 
                 <ProjectCreationModal
                     isOpen={showCreationModal}
-                    onCreate={async (rules, img, prov, name) => {
-                        await this.handleCreateProject(rules, img, prov, name, '');
+                    onCreate={async (rules, img, prov, name, role, file) => {
+                        await this.handleCreateProject(rules, img, prov, name, role, file);
                     }}
                     onClose={this.toggleCreationModal}
                 />
