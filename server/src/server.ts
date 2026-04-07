@@ -1,9 +1,8 @@
 import './config/env';
 import { createApp } from './app';
 import { Container } from 'typedi';
-import { SseService } from './services/SseService';
-import { ChatService } from './services/ChatService';
 import { AppDataSource } from './data-source';
+import { bootstrapBus, EventBus, AppStartedEvent, AppStoppingEvent } from './utils/bus';
 
 const port = Number(process.env.PORT ?? 5000);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -15,6 +14,10 @@ AppDataSource.initialize()
         console.log('📦 Data Source has been initialized!');
         app.listen(port, host, () => {
             console.log(`🚀 Server listening on http://${host}:${port}`);
+
+            bootstrapBus();
+            const bus = Container.get(EventBus);
+            bus.publish(AppStartedEvent());
         });
     })
     .catch((err) => {
@@ -25,12 +28,8 @@ async function shutdown(signal: string) {
     console.log(`Received ${signal}. Starting graceful shutdown...`);
 
     try {
-        const sseService = Container.get(SseService);
-        sseService.emitServerStop();
-        console.log('Broadcasted server-stop event');
-
-        const chatService = Container.get(ChatService);
-        await chatService.stopAll();
+        const bus = Container.get(EventBus);
+        await bus.publishAndWait(AppStoppingEvent());
     } catch (error) {
         console.error('Failed during graceful shutdown tasks', error);
     }

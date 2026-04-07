@@ -4,10 +4,8 @@ import express from 'express';
 import cors from 'cors';
 import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'typedi';
-import { ChatController } from './controllers/ChatController';
-import { AccountController } from './controllers/AccountController';
-import { SseController } from './controllers/SseController';
-import { TaskController } from './controllers/TaskController';
+import { CustomErrorHandler } from './middlewares/CustomErrorHandler';
+import { ResponseValidationInterceptor } from './interceptors/ResponseValidationInterceptor';
 
 useContainer(Container);
 
@@ -18,7 +16,6 @@ export function createApp(): express.Express {
 
     app.set('etag', false);
     app.use(cors());
-    // app.use(express.json());
     app.use(express.text());
 
     // Disable caching for API routes
@@ -39,13 +36,19 @@ export function createApp(): express.Express {
 
     useExpressServer(app, {
         routePrefix: basePath,
-        controllers: [ChatController, AccountController, SseController, TaskController],
+        controllers: [__dirname + '/controllers/*.[tj]s'],
+        middlewares: [CustomErrorHandler],
+        defaultErrorHandler: false,
         validation: {
             whitelist: true,
             forbidNonWhitelisted: true,
             validationError: { target: false },
         },
         classTransformer: true,
+        interceptors: [ResponseValidationInterceptor],
+        currentUserChecker: async (action) => {
+            return action.request.user;
+        }
     });
 
     // SPA Fallback: Serve index.html for any unknown non-API routes
