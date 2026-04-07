@@ -70,6 +70,24 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
 
             const data = await res.json();
 
+            let sessionsData = [];
+            try {
+                const sessionsRes = await apiAuth.fetch(`/api/sessions?projectId=${id}`);
+                if (sessionsRes.ok) {
+                    const unsortedSessions = await sessionsRes.json();
+                    
+                    if (data.sessionIds && Array.isArray(data.sessionIds)) {
+                        sessionsData = data.sessionIds
+                            .map((sessionId: string) => unsortedSessions.find((s: any) => s.id === sessionId))
+                            .filter(Boolean);
+                    } else {
+                        sessionsData = unsortedSessions;
+                    }
+                }
+            } catch (sessionErr) {
+                console.error('Failed to fetch project sessions', sessionErr);
+            }
+
             this.setState({
                 projectId: id,
                 projectName: data.name || 'Untitled',
@@ -77,15 +95,15 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                 projectImageGenerationPref: data.imageGenerationPref,
                 projectDefaultProvider: data.defaultProvider,
                 projectModelRole: data.modelRole,
-                projectSessions: data.sessions || [],
+                projectSessions: sessionsData,
                 activeSessionId: data.activeSessionId,
                 projectStatus: data.status,
                 projectTaskId: data.taskId,
             }, () => {
-                if (sessionContextSync && data.sessions) {
-                    sessionContextSync(data.sessions, data.activeSessionId);
+                if (sessionContextSync && sessionsData) {
+                    sessionContextSync(sessionsData, data.activeSessionId);
                 }
-                this.normalizeUrl(data);
+                this.normalizeUrl({ ...data, sessions: sessionsData });
             });
 
         } catch (e) {

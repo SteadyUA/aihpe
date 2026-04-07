@@ -68,9 +68,15 @@ class App extends React.Component<RouterProps, AppState> {
         this.evtSource.onerror = (err: any) => {
             console.error('Global SSE Error', err);
             this.setState({ isConnected: false });
-            this.closeSse();
-            // Generic error - just retry after delay
-            this.retryTimeout = setTimeout(() => this.setupSse(), 2000);
+
+            // If the browser natively closed the connection (e.g. fatal network error),
+            // it will not auto-reconnect. We must trigger a manual reconnect.
+            // Otherwise, let the browser's EventSource handle reconnection naturally.
+            if (this.evtSource && this.evtSource.readyState === EventSource.CLOSED) {
+                console.log('SSE connection closed permanently. Scheduling manual reconnect...');
+                this.closeSse();
+                this.retryTimeout = setTimeout(() => this.setupSse(), 2000);
+            }
         };
 
         // Handle specific auth error event from server
@@ -95,6 +101,16 @@ class App extends React.Component<RouterProps, AppState> {
         this.evtSource.addEventListener('session-created', (e: any) => {
             const data = JSON.parse(e.data);
             window.dispatchEvent(new CustomEvent('app:session-created', { detail: data }));
+        });
+
+        this.evtSource.addEventListener('turn-completed', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:turn-completed', { detail: data }));
+        });
+
+        this.evtSource.addEventListener('token-usage', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:token-usage', { detail: data }));
         });
 
         this.evtSource.addEventListener('session-update', (event: any) => {

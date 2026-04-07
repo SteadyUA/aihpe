@@ -19,7 +19,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
 
         try {
             const baseUrl = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-            const res = await fetch(`${baseUrl}api/account/login`, {
+            const res = await fetch(`${baseUrl}api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ login, password }),

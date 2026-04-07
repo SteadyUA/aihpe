@@ -83,6 +83,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         this.handleUrlCheck();
         window.addEventListener('app:session-created', this.onSessionCreated);
         window.addEventListener('app:session-update', this.onSessionUpdate);
+        window.addEventListener('app:token-usage', this.onTokenUsage);
         // window.addEventListener('app:chat-status', ...); // Chat specific handling if needed here or in child
     }
 
@@ -93,6 +94,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
     componentWillUnmount() {
         window.removeEventListener('app:session-created', this.onSessionCreated);
         window.removeEventListener('app:session-update', this.onSessionUpdate);
+        window.removeEventListener('app:token-usage', this.onTokenUsage);
     }
 
     onSessionCreated = (e: Event) => {
@@ -113,6 +115,25 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                         [payload.sessionId]: {
                             ...session,
                             subject: payload.subject ?? session.subject
+                        }
+                    }
+                };
+            });
+        }
+    }
+
+    onTokenUsage = (e: Event) => {
+        const payload = (e as CustomEvent).detail;
+        if (payload.sessionId && payload.tokenUsage) {
+            this.setState((prevState) => {
+                const session = prevState.sessions[payload.sessionId];
+                if (!session) return null;
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [payload.sessionId]: {
+                            ...session,
+                            tokenUsage: payload.tokenUsage
                         }
                     }
                 };

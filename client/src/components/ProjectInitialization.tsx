@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiAuth } from '../utils/api';
 import { MainLayout } from './MainLayout';
+import { UiButton } from './UiButton';
 import styles from './Projects.module.css';
 
 interface Job {
@@ -30,6 +31,7 @@ interface ProjectInitializationProps {
 export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ taskId, projectName, onComplete }) => {
     const [task, setTask] = useState<Task | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [retryCount, setRetryCount] = useState<number>(0);
 
     useEffect(() => {
         let interval: any;
@@ -59,7 +61,20 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         interval = setInterval(fetchTaskStatus, 2000);
 
         return () => clearInterval(interval);
-    }, [taskId, onComplete]);
+    }, [taskId, onComplete, retryCount]);
+
+    const handleRetry = async () => {
+        try {
+            setTask(null);
+            setError(null);
+            const res = await apiAuth.fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+            if (!res.ok) throw new Error('Failed to restart task');
+            setRetryCount(prev => prev + 1);
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message);
+        }
+    };
 
     const headerContent = (
         <div style={{ marginLeft: '1rem', display: 'flex', alignItems: 'center' }}>
@@ -86,6 +101,13 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                 <div className={styles.container} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                     <h2 style={{ color: '#ff4d4f' }}>Initialization Failed</h2>
                     <p>{error}</p>
+                    <UiButton 
+                        variant="primary" 
+                        onClick={handleRetry} 
+                        style={{ marginTop: '1rem' }}
+                    >
+                        Retry
+                    </UiButton>
                 </div>
             </MainLayout>
         );

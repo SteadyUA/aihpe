@@ -36,6 +36,9 @@ interface PreviewState {
     deviceIndex: number;
     scale: number;
     reloadCount: number;
+    hasMultiStep: boolean;
+    currentStep: number;
+    maxStep: number;
 }
 
 export class Preview extends React.Component<PreviewProps, PreviewState> {
@@ -56,6 +59,9 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             deviceIndex: storedDeviceIndex ? parseInt(storedDeviceIndex, 10) : 0,
             scale: 1,
             reloadCount: 0,
+            hasMultiStep: false,
+            currentStep: 0,
+            maxStep: 0,
         };
         this.iframeRef = React.createRef();
         this.containerRef = React.createRef();
@@ -70,6 +76,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     componentWillUnmount() {
         this.saveScrollPosition();
         this.cleanupScrollListener();
+        this.stopPolling();
         if (this.resizeObserver) {
             this.resizeObserver.disconnect();
         }
@@ -306,6 +313,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             width: '100%',
             backgroundColor: 'rgba(0, 0, 0, 0.3)',
             borderRadius: '10px',
+            outline: '1px solid rgba(255, 255, 255, 0.3)',
         });
 
         bar.appendChild(thumb);
@@ -368,6 +376,74 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         };
     };
 
+    private pollingInterval: any = null;
+
+    stopPolling = () => {
+        if (this.pollingInterval) {
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+        }
+    };
+
+    startPolling = () => {
+        this.stopPolling();
+        this.pollingInterval = setInterval(this.checkMultiStep, 500);
+    };
+
+    checkMultiStep = () => {
+        const iframe = this.iframeRef.current;
+        if (!iframe || !iframe.contentWindow) return;
+
+        try {
+            const win = iframe.contentWindow as any;
+            const regform = win.regform;
+
+            if (regform && regform.multiStep) {
+                const { currentStepIndex, maxStep } = regform.multiStep;
+                if (
+                    !this.state.hasMultiStep ||
+                    this.state.currentStep !== currentStepIndex ||
+                    this.state.maxStep !== maxStep
+                ) {
+                    this.setState({
+                        hasMultiStep: true,
+                        currentStep: currentStepIndex,
+                        maxStep: maxStep,
+                    });
+                }
+            } else if (this.state.hasMultiStep) {
+                this.setState({ hasMultiStep: false });
+            }
+        } catch (e) {
+            // Ignore cross-origin or other errors
+            console.error('[Preview] Error checking multiStep:', e);
+        }
+    };
+
+    handlePrev = () => {
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+            try {
+                const win = iframe.contentWindow as any;
+                if (win.regform?.multiStep?.prev) {
+                    win.regform.multiStep.prev();
+                }
+            } catch (e) { }
+        }
+    };
+
+    handleNext = () => {
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+            try {
+                const win = iframe.contentWindow as any;
+                if (win.regform?.multiStep?.next) {
+                    win.regform.multiStep.next();
+                }
+            } catch (e) { }
+        }
+    };
+
     handleIframeLoad = () => {
         const { sessionId } = this.props;
         const iframe = this.iframeRef.current;
@@ -390,6 +466,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
 
         this.manageCustomScrollbar();
+        this.startPolling();
 
         if (this.props.onLoad) {
             this.props.onLoad();
@@ -449,7 +526,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
     render() {
         const { sessionId, version, active, reloadTrigger } = this.props;
-        const { isMobile, deviceIndex, scale, reloadCount } = this.state;
+        const { isMobile, deviceIndex, scale, reloadCount, hasMultiStep, currentStep, maxStep } = this.state;
         const device = DEVICES[deviceIndex];
 
         const previewUrl =
@@ -522,6 +599,53 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                         label: `${d.name} (${d.width}×${d.height})`
                                     }))}
                                 />
+                            )}
+                            {hasMultiStep && (
+                                <div className={styles.stepper}>
+                                    <UiButton
+                                        variant="secondary"
+                                        size="icon"
+                                        onClick={this.handlePrev}
+                                        disabled={currentStep === 0}
+                                        title="Previous Step"
+                                    >
+                                        <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        >
+                                            <polyline points="15 18 9 12 15 6"></polyline>
+                                        </svg>
+                                    </UiButton>
+                                    <span className={styles.stepInfo}>
+                                        {currentStep + 1} / {maxStep}
+                                    </span>
+                                    <UiButton
+                                        variant="secondary"
+                                        size="icon"
+                                        onClick={this.handleNext}
+                                        disabled={currentStep === maxStep - 1}
+                                        title="Next Step"
+                                    >
+                                        <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        >
+                                            <polyline points="9 18 15 12 9 6"></polyline>
+                                        </svg>
+                                    </UiButton>
+                                </div>
                             )}
                         </>
                     }

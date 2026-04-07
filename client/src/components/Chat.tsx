@@ -414,6 +414,31 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
 
         window.addEventListener('processed-chat-event', this.handleServerMessage as EventListener);
+        window.addEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
+    }
+
+    handleTurnCompleted = (event: CustomEvent) => {
+        const data = event.detail;
+        if (data.sessionId !== this.props.sessionId) return;
+        
+        const assistantMsg = data.message;
+        if (!assistantMsg) return;
+
+        this.setState(prevState => {
+            const turns = [...prevState.turns];
+            const index = turns.findIndex(t => t.turn === assistantMsg.turn);
+            if (index !== -1) {
+                turns[index] = { ...turns[index], ...assistantMsg, response: assistantMsg.content };
+            }
+            return { turns };
+        }, () => {
+            this.syncVersion(null);
+            this.props.onUpdateSession({ lastTurn: assistantMsg.turn });
+            // Scroll to the new message
+            setTimeout(() => {
+                this.scrollToActiveTurn('smooth', 'end');
+            }, 100);
+        });
     }
 
     handleServerMessage = (event: CustomEvent) => {
@@ -439,29 +464,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             });
 
             const updates: Partial<Session> = { status: 'idle' };
-
-            if (data.details?.message) {
-                const assistantMsg = data.details.message;
-
-                this.setState(prevState => {
-                    const turns = [...prevState.turns];
-                    const index = turns.findIndex(t => t.turn === assistantMsg.turn);
-                    if (index !== -1) {
-                        turns[index] = { ...turns[index], ...assistantMsg, response: assistantMsg.content };
-                    }
-                    return { turns };
-                }, () => {
-                    this.syncVersion(null);
-                    updates.lastTurn = assistantMsg.turn;
-                    this.props.onUpdateSession(updates);
-                    // Scroll to the new message
-                    setTimeout(() => {
-                        this.scrollToActiveTurn('smooth', 'end');
-                    }, 100);
-                });
-            } else {
-                this.props.onUpdateSession(updates);
-            }
+            this.props.onUpdateSession(updates);
         } else if (data.status === 'stopped') {
             this.props.onUpdateSession({ status: 'idle' });
         } else if (data.status === 'error') {
@@ -562,6 +565,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
     componentWillUnmount() {
         window.removeEventListener('processed-chat-event', this.handleServerMessage as EventListener);
+        window.removeEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
     }
 
     handleUndo = () => {

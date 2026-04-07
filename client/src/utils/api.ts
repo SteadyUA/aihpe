@@ -33,7 +33,7 @@ export const apiAuth = {
                         }
 
                         const baseUrl = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-                        const refreshRes = await fetch(`${baseUrl}api/account/refresh`, {
+                        const refreshRes = await fetch(`${baseUrl}api/auth/refresh`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ refreshToken })
