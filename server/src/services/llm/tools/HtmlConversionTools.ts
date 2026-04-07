@@ -93,6 +93,7 @@ export function createHtmlConversionTools(): (
                     }
                 }
             },
+
             {
                 name: 'list_files',
                 description: 'List all files in the working directory recursively.',

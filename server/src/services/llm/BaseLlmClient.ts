@@ -10,14 +10,9 @@ export abstract class BaseLlmClient<TRequest = any, TResult = any> implements Ll
 
     constructor(
         protected readonly config: LlmConfig<TRequest, any, TResult>,
-        protected readonly maxContextTokens: number = 128000,
     ) { }
 
     abstract generate(request: TRequest): Promise<TResult>;
-
-    getCapacity(): number {
-        return this.maxContextTokens;
-    }
 
     protected formatError(error: unknown): string {
         if (typeof error === 'string') {

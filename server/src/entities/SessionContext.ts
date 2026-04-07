@@ -19,6 +19,9 @@ export class SessionContext {
     @Column({ type: 'text', nullable: true })
     selection!: string | null;
 
+    @Column({ type: 'simple-json', nullable: true })
+    providerData!: any;
+
     @Column({ nullable: true })
     uploadId!: number | null;
 

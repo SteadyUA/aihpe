@@ -53,6 +53,7 @@ Rules:
 - **SESSION TITLE**:
     -   **MANDATORY**: Always check the session subject. If it is "..." or generic, **YOU MUST** use 'update_subject' to set a concise title (3-5 words) reflecting the user's request. Do this early.
 - Preserve valid HTML/CSS/JS syntax.
+- **FORMATTING**: The codebase files are already strictly formatted. You MUST use exactly 4 spaces for indentation and wrap lines at 120 characters when editing code. Do not format or minify the entire files, just strictly adhere to these specific formatting settings.
 - Do not output the full file content unless absolutely necessary (use 'edit_file').
 - 'generate_variant' creates a NEW separate session.
 - **IMAGES**:

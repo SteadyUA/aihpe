@@ -14,6 +14,7 @@ export interface ChatMessage {
     version: number;
     turn: number;
     createdAt: Date;
+    providerData?: Record<string, any>;
 }
 
 export type LlmProvider = 'openai' | 'google';

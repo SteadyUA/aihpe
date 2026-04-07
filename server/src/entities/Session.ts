@@ -1,6 +1,5 @@
-import { Entity, PrimaryColumn, Column, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Project } from './Project';
-import { LlmProvider, SessionStatus } from '../types/chat';
 
 @Entity()
 export class Session {

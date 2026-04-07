@@ -8,6 +8,9 @@ import { LlmProvider } from '../../types/chat';
 import { buildPageGenPrompt } from './prompts/PageGenPrompt';
 import { createPageGenTools, PageGenContext } from './tools/PageGenTools';
 import { getHistorySummaryPrompt, getHistorySummaryUserInstruction } from './prompts/HistorySummaryPrompt';
+import { HtmlPlanPrompt } from './prompts/HtmlPlanPrompt';
+import { HtmlExecutionPrompt } from './prompts/HtmlExecutionPrompt';
+import { createHtmlConversionTools } from './tools/HtmlConversionTools';
 
 @Service()
 export class LlmFactory {
@@ -21,7 +24,7 @@ export class LlmFactory {
     private sessionService!: SessionService;
 
     getPageGenClient(provider: LlmProvider = 'openai'): LlmClient<GeneratePageRequest, GeneratePageResult> {
-        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+        const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
 
         // Closure to manage targetVersion state for this client instance
         // In the original BaseLlmClient, targetVersion was an instance property.
@@ -80,13 +83,12 @@ export class LlmFactory {
             config,
             litellmUrl,
             litellmKey,
-            modelId,
-            maxTokens
+            modelId
         );
     }
 
     getHistoryClient(provider: LlmProvider = 'openai'): LlmClient<SummarizeHistoryRequest, string> {
-        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+        const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
 
         const config: LlmConfig<SummarizeHistoryRequest, any, string> = {
             systemPrompt: (request) => getHistorySummaryPrompt(request.previousSummary),
@@ -99,15 +101,12 @@ export class LlmFactory {
             config,
             litellmUrl,
             litellmKey,
-            modelId,
-            maxTokens
+            modelId
         );
     }
 
-<<<<<<< Updated upstream
-=======
     getHtmlPlanClient(workingDirectory: string, taskId: string, provider: LlmProvider = 'openai'): LlmClient<any, string> {
-        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+        const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
 
         const config: LlmConfig<any, any, string> = {
             systemPrompt: () => HtmlPlanPrompt,
@@ -124,13 +123,12 @@ export class LlmFactory {
             config,
             litellmUrl,
             litellmKey,
-            modelId,
-            maxTokens
+            modelId
         );
     }
 
     getHtmlExecutionClient(workingDirectory: string, taskId: string, currentTask: string, provider: LlmProvider = 'openai'): LlmClient<any, string> {
-        const { modelId, litellmUrl, litellmKey, maxTokens } = this.getConfig(provider);
+        const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
 
         const config: LlmConfig<any, any, string> = {
             systemPrompt: () => HtmlExecutionPrompt,
@@ -145,12 +143,10 @@ export class LlmFactory {
             config,
             litellmUrl,
             litellmKey,
-            modelId,
-            maxTokens
+            modelId
         );
     }
 
->>>>>>> Stashed changes
     private getConfig(provider: LlmProvider) {
         let modelId = '';
         if (provider === 'google') {
@@ -163,15 +159,6 @@ export class LlmFactory {
             throw new Error(`Model ID not configured for provider ${provider}`);
         }
 
-        let maxTokens = 128000;
-        if (modelId.includes('gpt-5.1') || modelId.includes('gemini-')) {
-            maxTokens = 1000000;
-        } else if (modelId.includes('claude-3-5')) {
-            maxTokens = 200000;
-        } else if (modelId.includes('gpt-3.5')) {
-            maxTokens = 16000;
-        }
-
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -179,6 +166,6 @@ export class LlmFactory {
             throw new Error('LITELLM_API_URL and LITELLM_API_KEY must be set');
         }
 
-        return { modelId, litellmUrl, litellmKey, maxTokens };
+        return { modelId, litellmUrl, litellmKey };
     }
 }

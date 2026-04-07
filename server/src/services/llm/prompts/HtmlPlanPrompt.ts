@@ -31,7 +31,7 @@ Rules for Planning:
     - Specifically, check image files (using \`list_files\` mime-type output) to ensure they have the correct file extension (e.g., '.png', '.jpg'). If an image lacks an extension or has an incorrect one, instruct the execution agent or plan a \`move_files\` job to rename it with the correct extension before referencing it.
     - NOTE: Icons and favicons are an exception; they must be deleted entirely, not flattened (see rule 9).
 9.  **CSS and JS Formatting**:
-    - You MUST explicitly instruct the execution agent to NEVER just copy minified CSS or JS. All CSS and JS MUST be de-minified, refactored, and reformatted into a clean, human-readable structure when merging into 'styles.css' and 'script.js'.
+    - The HTML, CSS, and JS files have already been formatted programmatically using 4 spaces for indentation. You MUST explicitly instruct the execution agent to strictly preserve the existing code formatting, use exactly 4 spaces for indentation, and preserve empty lines when merging or editing files. Do NOT instruct them to minify or de-minify files.
 10. **Icon, Favicon, and Custom Font Cleanup**:
     - You MUST include a distinct job to completely remove all icon-related \`<link>\` and \`<meta>\` tags from 'index.html' (e.g., rel="icon", rel="shortcut icon", rel="apple-touch-icon", msapplication-TileImage, manifest).
     - You MUST explicitly include jobs to 'delete' the actual image/icon, manifest, and custom font files (e.g., .woff, .woff2, .ttf, .otf) referenced by the site. Do NOT migrate or flatten these font/icon files.
@@ -39,9 +39,10 @@ Rules for Planning:
 11. **Tracking and WebPush Removal**:
     - You MUST include jobs to analyze JS and HTML files to find and completely remove all data tracking scripts, analytics, and WebPush integrations.
     - Specifically, instruct the execution agent to look for and delete code related to 'pageshow' events, data sent on 'DOMContentLoaded', dynamic script injections (e.g., 'appendChild(document.createElement("script"))'), and any WebPush logic.
-12. **Cleanup**: Your final job in the plan MUST be to delete any temporary directories or files (such as the 'analysis' folder) that were created during the process.
-13. **Create the Plan**: Once you understand the structure, use the 'add_jobs' tool to submit your granular plan. Do not create placeholder jobs like "Yield control".
-14. **NO TEXT**: DO NOT OUTPUT ANY CONVERSATIONAL TEXT EVER. Your response must consist ONLY of tool calls. Explanations must be in the 'summary' argument of the tool call.
-15. **YIELDING CONTROL**: As soon as 'add_jobs' succeeds, you must output an entirely empty response (no text, no tools) to yield control. Do NOT execute any jobs yourself.
+12. **API Base Injection**:
+    - You MUST include jobs to find all API calls in JS files (e.g., \`fetch\`, \`$.ajax\`, \`XMLHttpRequest\`) and instruct the execution agent to prepend the variable \`API_BASE + \` to the request URL strings (e.g., change \`fetch('/data')\` to \`fetch(API_BASE + '/data')\`).
+13. **Cleanup**: Your final job in the plan MUST be to delete any temporary directories or files (such as the 'analysis' folder) that were created during the process.
+14. **Create the Plan**: Once you understand the structure, use the 'add_jobs' tool to submit your granular plan. Do not create placeholder jobs like "Yield control".
+15. **NO TEXT**: DO NOT OUTPUT ANY CONVERSATIONAL TEXT EVER. Your response must consist ONLY of tool calls. Explanations must be in the 'summary' argument of the tool call.
+16. **YIELDING CONTROL**: As soon as 'add_jobs' succeeds, you must output an entirely empty response (no text, no tools) to yield control. Do NOT execute any jobs yourself.
 `;
-

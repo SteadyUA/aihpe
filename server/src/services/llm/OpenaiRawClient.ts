@@ -1,3 +1,4 @@
+import { Controller } from 'routing-controllers';
 import { BaseLlmClient, FALLBACK_RESPONSE } from './BaseLlmClient';
 import { LlmConfig, ChatMessage } from './types';
 
@@ -10,9 +11,8 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
         url: string,
         apiKey: string,
         private readonly modelId: string,
-        maxContextTokens: number = 128000,
     ) {
-        super(config, maxContextTokens);
+        super(config);
         this.baseUrl = url.replace(/\/$/, '');
         this.apiKey = apiKey;
     }
@@ -29,79 +29,8 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
         if (this.config.buildContext) {
             context = await this.config.buildContext(request);
         } else {
-            // Default to request as context if no buildContext provided, or empty object
-            // But types might not match. WE should probably mandate buildContext if TContext is not TRequest
             context = {} as TContext;
         }
-
-        // We need a way to build messages from request.
-        // The original code had `buildMessages` which was specific to GeneratePageRequest.
-        // We should probably rely on `request` structure if we want to be generic, or have a `buildMessages` in config?
-        // But `generate` is the unified method. 
-        // Let's assume TRequest has some common structure OR we add `buildMessages` to config?
-        // For now, I will keep `buildMessages` but it needs to know about `TRequest`.
-        // Actually, TRequest is either GeneratePageRequest or SummarizeHistoryRequest.
-        // They both have `conversation`.
-        // Let's make `buildMessages` part of config? Or just check type?
-        // Checking type is ugly.
-        // Let's assume `config` handles message construction?
-        // No, the prompt generation is in config.
-
-        // Wait, the User Request was "нужные методы оформить как методы конфигурации в LlmFactory".
-        // This implies logic like `buildMessages` might distinct per task.
-        // However, `buildMessages` logic is largely about formatting ChatMessage[] to OpenAI format.
-        // That is common.
-        // What differs is the initial system prompt (handled by config) and the user instruction (handled by config/request).
-
-        // Let's look at `SummarizeHistoryRequest`. It creates specific messages.
-        // Let's look at `GeneratePageRequest`. It creates specific messages.
-
-        // To be truly generic, `buildMessages` should be consistent or configurable.
-        // I will add `buildMessages` to `LlmConfig`? 
-        // Or I can keep a protected `buildMessages` here that tries to adapt, but strict typing is better.
-
-        // Let's fallback to: `buildMessages` is internal helper, but we need to know how to extract conversation.
-        // Let's assume TRequest extends { conversation: ChatMessage[] } (or similar).
-        // But GeneratePageRequest has `instructions`, `files`, etc.
-        // SummarizeHistoryRequest has `previousSummary`.
-
-        // Revised plan: Move `buildMessages` logic into the Config or a Strategy?
-        // The `systemPrompt` is already in config.
-        // The `userMessage` construction differs.
-
-        // Let's add `buildMessages` to `LlmConfig`.
-        // `buildMessages: (request: TRequest, systemPrompt: string, context: TContext) => any[]`
-
-        // But wait, the `OpenaiRawClient` logic for tool handling is complex and generic-ish (it iterates tools).
-        // Only the message construction at the start is specific.
-
-        // I will implement `generate` to use a `messages` builder if present in config, or default to a simple one?
-        // Actually, for this step, I will assume the `LlmConfig` has been updated to include `buildMessages`? 
-        // I missed that in the `types.ts` update. I should verify.
-        // I did NOT add `buildMessages` to `types.ts`.
-
-        // ERROR: I need to update `types.ts` to include `buildMessages` in `LlmConfig` if I want to delegate it.
-        // OR I can hardcode the difference based on properties (duck typing).
-
-        // Duck typing:
-        // if 'instructions' in request -> PageGen
-        // if 'previousSummary' in request -> Summarize
-
-        // That's acceptable for now to avoid another round of type matching, but ideally Config is better.
-        // Let's try to do it via Config if possible, but I can't change `types.ts` in this specific tool call (it's for OpenaiRawClient).
-        // I will use Duck Typing or assume `request` has common shape for conversation.
-
-        // Actually, I can update `types.ts` in a separate step if I want. 
-        // But for now, I'll put the specific logic here or rely on the `config` to handle the prompt construction entirely?
-        // No, `systemPrompt` just returns string.
-
-        // Let's look at `summarizeHistory`:
-        // It sends [System, ...History, UserInstruction].
-        // `generatePage`:
-        // Sends [System, ...History, UserInstruction+Attachment, (Tools)].
-
-        // I will implement `buildMessages` that takes the `systemPrompt` and `request`.
-        // I will cast request to `any` to check fields.
 
         const messages = this.buildMessages(request, systemPrompt);
 
@@ -123,17 +52,6 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                 implementations[t.name] = (args: any) => t.execute(args, context);
             });
         }
-
-        // OpenAI Call
-        // ... (stream handling) ...
-        // This logic is mostly same as before but uses `tools` and `messages`.
-
-        // We need to return `TResult`.
-        // For PageGen, it returns `GeneratePageResult`.
-        // For Summarize, it returns `string`.
-
-        // I need `processOutput` in Config to convert the final text/messages to TResult.
-        // I added `processOutput` to `LlmConfig` in previous step? Yes.
 
         return this.executeRequest(request, messages, tools, implementations, context);
     }
@@ -176,10 +94,15 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                         messages.push({
                             role: 'assistant',
                             content: textPart ? textPart.text : null,
-                            tool_calls: toolCalls.length > 0 ? toolCalls : undefined
+                            tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+                            ...(entry.providerData || {})
                         });
                     } else {
-                        messages.push({ role: 'assistant', content: entry.content });
+                        messages.push({
+                            role: 'assistant',
+                            content: entry.content,
+                            ...(entry.providerData || {})
+                        });
                     }
                 } else if (entry.role === 'tool') {
                     if (Array.isArray(entry.content)) {
@@ -216,7 +139,7 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
     ): Promise<TResult> {
         let currentMessages = [...messages];
         let steps = 0;
-        const maxSteps = 30;
+        const maxSteps = request.maxSteps === null ? Number.MAX_SAFE_INTEGER : (request.maxSteps ?? 30);
         let fullText = '';
         const collectedNewMessages: any[] = [];
         let stop = false;
@@ -246,16 +169,43 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                     body.tools = tools;
                 }
 
-                const response = await fetch(`${this.baseUrl}/chat/completions`, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify(body),
-                    signal: request.abortSignal
-                });
+                let response: Response | null = null;
+                let attempt = 0;
+                const maxAttempts = 10;
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+                while (attempt < maxAttempts) {
+                    try {
+                        response = await fetch(`${this.baseUrl}/chat/completions`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(body),
+                            signal: request.abortSignal
+                        });
+
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            // Retry on 5xx or 429 errors
+                            if (response.status === 429 || response.status >= 500) {
+                                throw new Error(`OpenAI API temporary error: ${response.status} ${response.statusText} - ${errorText}`);
+                            }
+                            // Don't retry on 400s (except 429)
+                            throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+                        }
+
+                        break; // Success
+                    } catch (e: any) {
+                        attempt++;
+                        // If it's a 4xx error (other than 429), or max attempts reached, or aborted, throw immediately
+                        if (request.abortSignal?.aborted || attempt >= maxAttempts || (e.message.includes('OpenAI API error') && !e.message.includes('temporary error'))) {
+                            throw e;
+                        }
+                        console.warn(`OpenaiRawClient network/API error (attempt ${attempt}/${maxAttempts}): ${e.message}. Retrying in ${attempt * 2}s...`);
+                        await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+                    }
+                }
+
+                if (!response) {
+                    throw new Error('Failed to fetch response after retries');
                 }
 
                 if (!response.body) {
@@ -272,6 +222,7 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                 let finishReason: string | null = null;
                 let usageSent = false;
                 let currentStepUsage = { prompt: 0, completion: 0, total: 0 };
+                let currentProviderData: Record<string, any> = {};
 
                 try {
                     while (true) {
@@ -293,13 +244,23 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
 
                                     if (chunk.choices && chunk.choices.length > 0) {
                                         const delta = chunk.choices[0].delta;
-                                        // console.log(delta);
                                         const finish = chunk.choices[0].finish_reason;
 
                                         if (delta.content) {
                                             stepText += delta.content;
                                             if (request.onProgress) {
                                                 request.onProgress(delta.content);
+                                            }
+                                        }
+
+                                        // Capture additional provider-specific fields like reasoning_content, refusal, etc.
+                                        for (const [key, val] of Object.entries(delta)) {
+                                            if (key !== 'content' && key !== 'tool_calls' && key !== 'role' && val !== null && val !== undefined) {
+                                                if (typeof val === 'string') {
+                                                    currentProviderData[key] = (currentProviderData[key] || '') + val;
+                                                } else {
+                                                    currentProviderData[key] = val; // Overwrite non-string metadata
+                                                }
                                             }
                                         }
 
@@ -459,6 +420,7 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                 const assistantMessage: any = {
                     role: 'assistant',
                     content: stepText || null,
+                    providerData: Object.keys(currentProviderData).length > 0 ? currentProviderData : undefined
                 };
 
                 const toolCallsFound = Object.values(toolCallsBuffer).map(tc => ({
@@ -482,8 +444,6 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
 
                 currentMessages.push(assistantMessage);
                 collectedNewMessages.push(assistantMessage);
-
-                // console.log(`OpenaiRawClient: Step finished...`); 
 
                 if (!stop && validToolCalls.length > 0) {
                     for (const toolCall of validToolCalls) {
@@ -512,7 +472,7 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
 
                         if (request.onProgress) {
                             const label = args.summary || `Tool call: ${name}`;
-                            request.onProgress(`${label}\n`);
+                            request.onProgress(`${label}\n`, name);
                         }
 
                         const toolMessage = {
@@ -555,13 +515,13 @@ export class OpenaiRawClient<TRequest = any, TContext = any, TResult = any> exte
                 } else if (content === null) {
                     content = '';
                 }
-
                 return {
                     role: m.role as any,
                     content: content,
                     createdAt: new Date(),
                     version: request.currentVersion || 0,
-                    turn: 0
+                    turn: 0,
+                    providerData: m.providerData || undefined
                 };
             });
 

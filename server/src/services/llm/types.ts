@@ -10,7 +10,7 @@ export interface GeneratePageRequest {
     attachment?: ChatAttachment;
     allowVariants?: boolean;
     currentVersion: number;
-    onProgress?: (chunk: string) => void;
+    onProgress?: (chunk: string, toolName?: string) => void;
     rulesAndGoal?: string;
     imageGenerationPref?: string;
     onVariantRequest?: (instruction: string) => Promise<string>;
@@ -44,7 +44,6 @@ export interface GeneratePageResult {
 
 export interface LlmClient<TRequest = any, TResult = any> {
     generate(request: TRequest): Promise<TResult>;
-    getCapacity(): number;
 }
 
 export interface LlmTool<TContext = any> {
