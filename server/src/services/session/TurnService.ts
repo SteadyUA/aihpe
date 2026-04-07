@@ -2,11 +2,20 @@ import { Service } from 'typedi';
 import { Repository } from 'typeorm';
 import { SessionTurn } from '../../entities/SessionTurn';
 import { AppDataSource } from '../../data-source';
-import { Turn, LlmProvider, ChatAttachment } from '../../types/chat';
+import { Turn, LlmProvider, ChatAttachment, ChatMessage } from '../../types/chat';
+import { EventBus } from '../../utils/bus';
+
+export const TurnCompletedEvent = EventBus.createEvent<{
+    sessionId: string;
+    turn: number;
+    message: ChatMessage;
+}>('turn.completed');
 
 @Service()
 export class TurnService {
     private readonly turnRepository = AppDataSource.getRepository(SessionTurn);
+
+    constructor(private readonly eventBus: EventBus) {}
 
     public async loadTurns(sessionId: string): Promise<Turn[]> {
         const entries = await this.turnRepository.find({
@@ -100,5 +109,21 @@ export class TurnService {
         // Add other fields if needed, but these are the main ones updated during generation
 
         await this.turnRepository.save(turnEntry);
+
+        if (update.response !== undefined) {
+            const message: ChatMessage = {
+                role: 'assistant',
+                content: turnEntry.response,
+                createdAt: turnEntry.endTime || new Date(),
+                version: turnEntry.version,
+                turn: turnEntry.turn,
+            };
+
+            this.eventBus.publish(TurnCompletedEvent({
+                sessionId,
+                turn: turnNumber,
+                message,
+            }));
+        }
     }
 }

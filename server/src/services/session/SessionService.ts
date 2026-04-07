@@ -1,10 +1,7 @@
 import { Service } from 'typedi';
-import { Repository } from 'typeorm';
 import { Session } from '../../entities/Session';
 import { AppDataSource } from '../../data-source';
-import { ChatMessage, LlmProvider, SessionMetadata, SessionStatus, Turn } from '../../types/chat';
-
-// SessionMetadata is now defined in types/chat.ts
+import { LlmProvider, SessionMetadata, SessionStatus } from '../../types/chat';
 
 @Service()
 export class SessionService {
@@ -16,6 +13,34 @@ export class SessionService {
         const group = this.nextGroupIndex;
         this.nextGroupIndex = (this.nextGroupIndex + 1) % 10;
         return group;
+    }
+
+    public getNextId(): string {
+        return crypto.randomUUID();
+    }
+
+    public async getSessionsByProjectId(projectId: string): Promise<SessionMetadata[]> {
+        const entities = await this.sessionRepository.find({ where: { projectId } });
+
+        return entities.map(entity => {
+            const metadata: SessionMetadata = {
+                id: entity.sessionId,
+                projectId: entity.projectId || '',
+                updatedAt: entity.updatedAt || new Date(),
+                group: entity.group || 0,
+                currentVersion: entity.currentVersion || 0,
+                lastTurn: entity.lastTurn || 0,
+                provider: (entity.provider as LlmProvider) || 'openai',
+                fastMode: entity.fastMode || false,
+                status: (entity.status as SessionStatus) || 'idle',
+                errorMessage: entity.errorMessage || undefined,
+                subject: entity.subject || undefined,
+                summary: entity.summary || undefined,
+                summaryTurn: entity.summaryTurn || undefined,
+            };
+            this.sessions.set(metadata.id, metadata);
+            return metadata;
+        });
     }
 
     public async getMetadata(sessionId: string): Promise<SessionMetadata | undefined> {
@@ -66,7 +91,10 @@ export class SessionService {
         await this.sessionRepository.save(entity);
     }
 
-    public async updateMetadata(sessionId: string, update: Partial<SessionMetadata>): Promise<SessionMetadata> {
+    public async updateMetadata(
+        sessionId: string,
+        update: Partial<SessionMetadata>
+    ): Promise<SessionMetadata> {
         const existing = await this.getMetadata(sessionId);
         if (!existing) {
             throw new Error(`Session ${sessionId} not found`);
@@ -79,6 +107,7 @@ export class SessionService {
         };
 
         await this.saveMetadata(updated);
+
         return updated;
     }
 

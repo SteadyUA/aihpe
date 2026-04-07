@@ -12,7 +12,6 @@ export interface ChatStatusPayload {
     sessionId: string;
     status: ChatStatus;
     message?: string;
-    details?: unknown;
     timestamp?: string;
 }
 
@@ -83,12 +82,25 @@ export class SseService {
         this.broadcast('session-created', enriched);
     }
 
+    emitTurnCompleted(payload: any): void {
+        const enriched = {
+            ...payload,
+            timestamp: payload.timestamp ?? new Date().toISOString(),
+        };
+        this.broadcast('turn-completed', enriched);
+    }
+
+    emitTokenUsage(payload: any): void {
+        const enriched = {
+            ...payload,
+            timestamp: payload.timestamp ?? new Date().toISOString(),
+        };
+        this.broadcast('token-usage', enriched);
+    }
 
     emitServerStop(): void {
         this.broadcast('server-stop', { timestamp: new Date().toISOString() });
     }
-
-
 
     emitSessionUpdate(payload: { sessionId: string; subject?: string }): void {
         this.broadcast('session-update', {

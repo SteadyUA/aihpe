@@ -2,14 +2,14 @@ import { Controller, Get, Req, Res, QueryParam, UnauthorizedError } from 'routin
 import { Service } from 'typedi';
 import { Request, Response } from 'express';
 import { SseService } from '../services/SseService';
-import { AccountService } from '../services/AccountService';
+import { AuthService } from '../services/AuthService';
 
 @Service()
 @Controller() // Use @Controller instead of @JsonController to avoid auto-json serialization
 export class SseController {
     constructor(
         private readonly sseService: SseService,
-        private readonly accountService: AccountService
+        private readonly authService: AuthService
     ) {
         console.log('SseController initialized');
     }
@@ -21,11 +21,11 @@ export class SseController {
                 throw new UnauthorizedError('Token required');
             }
 
-            await this.accountService.verifyToken(token);
+            await this.authService.verifyToken(token);
 
             this.sseService.addClient(request, response);
-        } catch (error) {
-            console.error('Error in SSE stream:', error);
+        } catch (error: any) {
+            console.error('Error in SSE stream:', error.message);
             if (!response.headersSent) {
                 // Return 200 OK with SSE headers even for auth error
                 response.setHeader('Content-Type', 'text/event-stream');

@@ -1,6 +1,6 @@
 import { Service } from 'typedi';
 import { ChatAttachment, ChatMessage, LlmProvider, SessionMetadata, SessionStatus, Turn } from '../types/chat';
-import { ChatStatus, SseService } from './SseService';
+import { ChatStatus } from './SseService';
 import { FilesService, EMPTY_FILES } from './session/FilesService';
 import { SessionService } from './session/SessionService';
 import { ContextService } from './session/ContextService';
@@ -9,13 +9,31 @@ import { LlmFactory } from './llm/LlmFactory';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
 import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
-import fs from 'fs';
-import path from 'path';
-import { getSessionsDir } from '../utils/pathUtils';
-import { TokenUsageService } from './TokenUsageService';
+import { TokenUsageService } from './llm/TokenUsageService';
 import { UnsentService } from './session/UnsentService';
-import { randomUUID } from 'node:crypto';
 import { UploadService } from './image/UploadService';
+import { EventBus } from '../utils/bus';
+
+export const SessionCreatedEvent = EventBus.createEvent<{
+    sessionId: string;
+    projectId: string;
+    group: number;
+    sourceSessionId?: string;
+    lastTurn?: number;
+}>('SESSION_CREATED');
+
+export const SessionDeletedEvent = EventBus.createEvent<{
+    sessionId: string;
+    projectId: string;
+}>('SESSION_DELETED');
+
+export const SessionPatchEvent = EventBus.createEvent<any>('SESSION_PATCH');
+
+export const SessionStatusChangedEvent = EventBus.createEvent<{
+    sessionId: string;
+    status: ChatStatus;
+    message?: string;
+}>('SESSION_STATUS_CHANGED');
 
 @Service()
 export class ChatService {
@@ -24,13 +42,13 @@ export class ChatService {
         private readonly sessionService: SessionService,
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
-        private readonly sseService: SseService,
         private readonly llmFactory: LlmFactory,
         private readonly imageService: ImageService,
         private readonly projectService: ProjectService,
         private readonly tokenUsageService: TokenUsageService,
         private readonly unsentService: UnsentService,
         private readonly uploadService: UploadService,
+        private readonly eventBus: EventBus,
     ) { }
 
     private activeGenerations = new Map<string, AbortController>();
@@ -44,7 +62,6 @@ export class ChatService {
         fastMode?: boolean,
     ): Promise<{
         turn: number;
-        // session: SessionData; // Removed session from return type
         promptData?: {
             message: string;
             attachment?: ChatAttachment;
@@ -73,7 +90,6 @@ export class ChatService {
             );
             return {
                 turn: metadata?.lastTurn ?? 0,
-                // session, // Removed session from return type
                 skipped: true,
             };
         }
@@ -87,7 +103,7 @@ export class ChatService {
         const currentMetadata = await this.sessionService.getMetadata(sessionId);
         if (!currentMetadata) throw new Error(`Session ${sessionId} not found`);
 
-        // 1. Append user message immediately
+        // Append user message immediately
         const userContentForHistory = this.composeUserContent(
             trimmed,
             normalizedAttachment,
@@ -97,16 +113,6 @@ export class ChatService {
         const currentTurn = currentMetadata.lastTurn ?? 0;
 
         const newTurn = currentTurn + 1;
-
-        const userMessageEntry: ChatMessage = {
-            role: 'user',
-            content: userContentForHistory,
-            createdAt: now,
-            selection,
-            version: currentMetadata.currentVersion,
-            turn: newTurn,
-            attachment: normalizedAttachment,
-        };
 
         const contextEntry: ChatMessage = {
             role: 'user',
@@ -288,10 +294,10 @@ export class ChatService {
                     });
                 },
                 onPatch: (patch: any) => {
-                    this.sseService.emitSessionUpdate({
+                    this.eventBus.publish(SessionPatchEvent({
                         sessionId,
                         ...patch,
-                    });
+                    }));
                 },
                 onProgress: (chunk: string) => {
                     // Logic to handle both streaming thoughts and tool status updates
@@ -327,8 +333,8 @@ export class ChatService {
                     if (!sessionMetadata) throw new Error(`Session ${sessionId} not found`);
 
                     const targetTurn = Math.max(0, turn - 1);
-                    const variantId = randomUUID();
-                    const variantGroup = Math.floor(Math.random() * 32);
+                    const variantId = this.sessionService.getNextId();
+                    const variantGroup = this.sessionService.getNextGroup();
 
                     const newSession = await this.performCloneSession(variantId, sessionId, targetTurn);
 
@@ -346,13 +352,13 @@ export class ChatService {
                     }
 
                     // Emit creation event
-                    this.sseService.emitSessionCreated({
+                    this.eventBus.publish(SessionCreatedEvent({
                         sourceSessionId: sessionId,
-                        id: newSession.id,
+                        sessionId: newSession.id,
                         group: variantGroup,
                         projectId: sessionMetadata.projectId,
                         lastTurn: targetTurn,
-                    });
+                    }));
 
                     this.addUserMessage(
                         newSession.id,
@@ -400,11 +406,8 @@ export class ChatService {
 
             // Token usage is now tracked per-request via trackRequestTokenUsage callback
 
-            const usageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
-            const currentUsageSummary = {
-                ...usageSummary,
-                capacity: client.getCapacity()
-            };
+            // TokenUsageSummary no longer includes capacity here. It's handled in saveUsage.
+            const currentUsageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
 
             // Re-fetch strict session state
             const updatedMetadata = await this.sessionService.getMetadata(sessionId);
@@ -419,6 +422,7 @@ export class ChatService {
                         version: updatedMetadata.currentVersion,
                         selection: msg.selection,
                         turn: updatedMetadata.lastTurn ?? 0, // Use current turn (which was updated by user message)
+                        providerData: msg.providerData,
                     });
                 }
             }
@@ -486,10 +490,6 @@ export class ChatService {
                 sessionId,
                 'completed',
                 'Request completed.',
-                {
-                    message: assistantMessage,
-                    tokenUsage: currentUsageSummary, // Pass usage to SSE
-                },
             );
 
 
@@ -513,10 +513,8 @@ export class ChatService {
                 sessionId,
                 'error',
                 description,
-                description,
             );
 
-            // Update the failed turn
             // Update the failed turn
             const finalMetadataError = await this.sessionService.getMetadata(sessionId);
             if (!finalMetadataError) throw new Error(`Session ${sessionId} not found`);
@@ -535,19 +533,22 @@ export class ChatService {
         }
     }
 
-    async stopGeneration(sessionId: string): Promise<{
-        success: boolean;
-        restoredInput?: string;
-        restoredSelection?: string;
-        restoredAttachment?: ChatAttachment;
-        previousTurn?: number;
-    }> {
-        // 1. Abort active generation
+    private abortGeneration(sessionId: string) {
         const controller = this.activeGenerations.get(sessionId);
         if (controller) {
             controller.abort();
             this.activeGenerations.delete(sessionId);
         }
+    }
+
+    async stopGeneration(sessionId: string): Promise<{
+        restoredInput?: string;
+        restoredSelection?: string;
+        restoredAttachment?: ChatAttachment;
+        previousTurn: number;
+    }> {
+        // 1. Abort active generation
+        this.abortGeneration(sessionId);
 
         // 2. Undo last turn (cleanup)
         // This removes the user message and any partial state if persisted (though generatePage usually doesn't persist until done)
@@ -584,38 +585,30 @@ export class ChatService {
         return this.activeGenerations.has(sessionId);
     }
 
-
     private async notifyStatus(
         sessionId: string,
         status: ChatStatus,
         message?: string,
-        details?: any,
     ): Promise<void> {
-        this.sseService.emitChatStatus({
-            sessionId,
-            status,
-            message,
-            details,
-        });
-
-        // Map ChatStatus to SessionStatus for persistence
-        // ChatStatus: 'started' | 'generating' | 'completed' | 'error' | 'skipped'
-        // SessionStatus: ChatStatus | 'idle'
 
         let newStatus: SessionStatus = status;
         if (status === 'completed' || status === 'skipped') {
             newStatus = 'idle';
-        } else if (status === 'started' || status === 'generating') {
-            // Keep as is, or map to 'busy'?
-            // Client uses 'busy' for 'started'.
-            // But we defined SessionStatus = ChatStatus | 'idle'. 
-            // So we store 'started'/'generating'. Client should handle 'started' as busy.
         }
 
-        await this.sessionService.updateMetadata(sessionId, {
-            status: newStatus,
-            errorMessage: status === 'error' ? message : undefined,
-        });
+        await this.sessionService.updateMetadata(
+            sessionId,
+            {
+                status: newStatus,
+                errorMessage: status === 'error' ? message : undefined,
+            }
+        );
+
+        this.eventBus.publish(SessionStatusChangedEvent({
+            sessionId,
+            status,
+            message,
+        }));
     }
 
     private describeError(error: unknown): string {
@@ -681,12 +674,9 @@ export class ChatService {
         if (attachment.type === 'image' && attachment.filename) {
             // Verify existence but do NOT read content
             try {
-                const sessionRoot = getSessionsDir();
-                const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
-                const uploadDir = path.join(sessionRoot, safeId, 'uploads');
-                const filePath = path.join(uploadDir, attachment.filename);
+                const filePath = this.uploadService.getExistsFilePath(sessionId, attachment.filename);
 
-                if (fs.existsSync(filePath)) {
+                if (filePath) {
                     // Just keep metadata. formatted for storage.
                     return {
                         type: 'image',
@@ -710,7 +700,7 @@ export class ChatService {
 
         const publicHost = process.env.PUBLIC_HOST?.replace(/\/+$/, ''); // Remove trailing slash
 
-        if (attachment.type === 'image') {
+        if (attachment.type === 'image' && attachment.filename) {
             const copy = { ...attachment };
 
             if (publicHost) {
@@ -718,23 +708,17 @@ export class ChatService {
                 // URL format: /api/sessions/:sessionId/uploads/:filename
                 // We need to construct absolute URL
                 const relativeUrl = `/api/sessions/${sessionId}/uploads/${attachment.filename}`;
-                copy.dataUrl = `${publicHost}${relativeUrl}`;
+                const basePath = process.env.APP_BASE_PATH || '';
+                copy.dataUrl = `${publicHost}${basePath}${relativeUrl}`;
             } else {
                 // Fallback to Base64
                 try {
-                    const sessionRoot = getSessionsDir();
-                    const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
-                    const uploadDir = path.join(sessionRoot, safeId, 'uploads');
-                    const filePath = path.join(uploadDir, attachment.filename);
+                    const buffer = await this.uploadService.getFileBuffer(sessionId, attachment.filename);
 
-                    if (fs.existsSync(filePath)) {
-                        const buffer = await fs.promises.readFile(filePath);
+                    if (buffer) {
                         const base64 = buffer.toString('base64');
-                        const ext = path.extname(attachment.filename).toLowerCase();
-                        let mimeType = 'image/png';
-                        if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-                        else if (ext === '.webp') mimeType = 'image/webp';
-                        else if (ext === '.gif') mimeType = 'image/gif';
+                        const metadata = await this.uploadService.getUpload(sessionId, attachment.filename);
+                        const mimeType = metadata?.mimeType || 'image/png';
 
                         copy.dataUrl = `data:${mimeType};base64,${base64}`;
                     }
@@ -809,7 +793,6 @@ export class ChatService {
         const previousSummaryTurn = session.summaryTurn ?? 0;
 
         if (targetSummaryEnd <= previousSummaryTurn) {
-            // console.log(`Skipping summarization for session ${sessionId}: target summary end ${targetSummaryEnd} <= previous summary turn ${previousSummaryTurn}`);
             return;
         }
 
@@ -820,7 +803,6 @@ export class ChatService {
         );
 
         if (messagesToSummarize.length === 0 && !session.summary) {
-            console.log(`Skipping summarization for session ${sessionId}: no messages to summarize.`);
             return;
         }
 
@@ -898,8 +880,13 @@ export class ChatService {
         console.log(`Finished rebuilding summary for session ${sessionId}`);
     }
 
-
-    public async createSession(sessionId: string, projectId: string, group?: number): Promise<SessionMetadata> {
+    public async createSession(
+        sessionId: string,
+        projectId: string,
+        group?: number,
+        provider: LlmProvider = 'openai',
+        sourceSessionId: string = 'system'
+    ): Promise<SessionMetadata> {
         const now = new Date();
         const metadata: SessionMetadata = {
             id: sessionId,
@@ -908,7 +895,7 @@ export class ChatService {
             group: group ?? this.sessionService.getNextGroup(),
             currentVersion: 0,
             lastTurn: 0,
-            provider: 'openai',
+            provider,
             fastMode: false,
             status: 'idle',
             subject: '...',
@@ -918,6 +905,14 @@ export class ChatService {
         await this.contextService.saveContext(sessionId, []);
         await this.turnService.saveTurns(sessionId, []);
         this.filesService.persistVersionFiles(sessionId, 0, EMPTY_FILES);
+
+        this.eventBus.publish(SessionCreatedEvent({
+            sessionId,
+            projectId,
+            group: metadata.group,
+            sourceSessionId,
+            lastTurn: metadata.lastTurn,
+        }));
 
         return metadata;
     }
@@ -1007,15 +1002,24 @@ export class ChatService {
         await this.contextService.saveContext(targetId, contextSnapshot);
         await this.turnService.saveTurns(targetId, turnsSnapshot);
 
+        if (sourceMetadata.projectId) {
+            this.eventBus.publish(SessionCreatedEvent({
+                sessionId: targetId,
+                projectId: sourceMetadata.projectId,
+                group: newMetadata.group,
+                sourceSessionId: sourceId,
+                lastTurn: newMetadata.lastTurn,
+            }));
+        }
+
         return newMetadata;
     }
 
     public async undoLastTurn(sessionId: string): Promise<{
-        success: boolean;
         restoredInput?: string;
         restoredSelection?: string;
         restoredAttachment?: ChatAttachment;
-        previousTurn?: number;
+        previousTurn: number;
     }> {
         const sessionMetadata = await this.sessionService.getMetadata(sessionId);
         if (!sessionMetadata) throw new Error(`Session ${sessionId} not found`);
@@ -1023,7 +1027,7 @@ export class ChatService {
         const currentTurn = sessionMetadata.lastTurn ?? 0;
 
         if (currentTurn <= 0) {
-            return { success: false, previousTurn: 0 };
+            return { previousTurn: 0 };
         }
 
         // We need turns to know what to remove
@@ -1036,7 +1040,7 @@ export class ChatService {
                 lastTurn: currentTurn - 1,
                 updatedAt: new Date(),
             });
-            return { success: true, previousTurn: currentTurn - 1 };
+            return { previousTurn: currentTurn - 1 };
         }
 
         const restoredInput = turnToRemove.request;
@@ -1082,7 +1086,6 @@ export class ChatService {
         }
 
         return {
-            success: true,
             restoredInput,
             restoredSelection,
             restoredAttachment,
@@ -1091,6 +1094,13 @@ export class ChatService {
     }
 
     public async deleteSession(sessionId: string): Promise<void> {
+        const session = await this.sessionService.getMetadata(sessionId);
+        if (!session) {
+            return;
+        }
+
+        this.abortGeneration(sessionId);
+
         this.sessionService.deleteFromCache(sessionId);
         this.filesService.deleteSessionDir(sessionId);
 
@@ -1102,6 +1112,18 @@ export class ChatService {
             this.unsentService.deleteUnsent(sessionId).catch(e => console.error(`Failed to delete unsent`, e)),
             this.uploadService.deleteSessionUploads(sessionId).catch(e => console.error(`Failed to delete uploads`, e)),
         ]);
+
+        this.eventBus.publish(SessionDeletedEvent({
+            sessionId,
+            projectId: session.projectId
+        }));
+    }
+
+    public async deleteProjectSessions(projectId: string): Promise<void> {
+        const sessions = await this.sessionService.getSessionsByProjectId(projectId);
+        for (const session of sessions) {
+            await this.deleteSession(session.id);
+        }
     }
 
 }

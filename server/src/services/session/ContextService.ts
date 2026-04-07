@@ -27,7 +27,8 @@ export class ContextService {
             } as ChatAttachment : undefined,
             version: entry.version,
             turn: entry.turn,
-            createdAt: entry.createdAt
+            createdAt: entry.createdAt,
+            providerData: entry.providerData || undefined
         }));
     }
 
@@ -45,6 +46,7 @@ export class ContextService {
             entity.version = msg.version;
             entity.turn = msg.turn;
             entity.createdAt = msg.createdAt;
+            entity.providerData = msg.providerData || null;
             return entity;
         });
 
@@ -67,6 +69,7 @@ export class ContextService {
         entity.version = message.version;
         entity.turn = message.turn;
         entity.createdAt = message.createdAt;
+        entity.providerData = message.providerData || null;
 
         await this.contextRepository.save(entity);
     }
