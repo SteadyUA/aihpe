@@ -1,11 +1,7 @@
 import crypto from 'node:crypto';
-import jwt from 'jsonwebtoken';
 import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Account } from '../entities/Account';
-
-const ACCESS_TOKEN_EXPIRATION = '1h'; // 1 hour
-const REFRESH_TOKEN_EXPIRATION = '7d'; // 7 days
 
 @Service()
 export class AccountService {
@@ -65,7 +61,7 @@ export class AccountService {
         await this.accountRepository.save(account);
     }
 
-    async login(login: string, password: string): Promise<{ accessToken: string; refreshToken: string }> {
+    async validateCredentials(login: string, password: string): Promise<Account> {
         const account = await this.accountRepository.findOneBy({ login });
         if (!account) {
             throw new Error('Invalid login or password');
@@ -76,55 +72,11 @@ export class AccountService {
             throw new Error('Invalid login or password');
         }
 
-        // Generate tokens
-        const accessToken = jwt.sign({ accountId: account.id, login: account.login }, account.tokenSecret, { expiresIn: ACCESS_TOKEN_EXPIRATION });
-        const refreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, account.tokenSecret, { expiresIn: REFRESH_TOKEN_EXPIRATION });
-
-        return { accessToken, refreshToken };
+        return account;
     }
 
-    async refresh(incomingRefreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
-        // Decode without verifying to get accountId
-        const payload = jwt.decode(incomingRefreshToken) as any;
-
-        if (!payload || payload.type !== 'refresh' || !payload.accountId) {
-            throw new Error('Invalid token type');
-        }
-
-        const account = await this.accountRepository.findOneBy({ id: Number(payload.accountId) });
-        if (!account) {
-            throw new Error('Account not found');
-        }
-
-        // Verify with account-specific secret
-        try {
-            jwt.verify(incomingRefreshToken, account.tokenSecret);
-        } catch (e) {
-            throw new Error('Invalid or expired refresh token');
-        }
-
-        // Rotate tokens
-        const newAccessToken = jwt.sign({ accountId: account.id, login: account.login }, account.tokenSecret, { expiresIn: ACCESS_TOKEN_EXPIRATION });
-        const newRefreshToken = jwt.sign({ accountId: account.id, type: 'refresh' }, account.tokenSecret, { expiresIn: REFRESH_TOKEN_EXPIRATION });
-
-        return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    async findById(id: number): Promise<Account | null> {
+        return this.accountRepository.findOneBy({ id });
     }
 
-    async verifyToken(token: string): Promise<any> {
-        // Decode first without verification to find account
-        const decoded = jwt.decode(token) as any;
-        if (!decoded || !decoded.accountId) {
-            throw new Error('Invalid token structure');
-        }
-
-        // Fetch account to get the secret
-        const account = await this.accountRepository.findOneBy({ id: Number(decoded.accountId) });
-
-        if (!account) {
-            throw new Error('User not found');
-        }
-
-        // Verify using the account's secret
-        return jwt.verify(token, account.tokenSecret);
-    }
 }

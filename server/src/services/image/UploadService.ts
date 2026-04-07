@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { AppDataSource } from '../../data-source';
 import { SessionUpload } from '../../entities/SessionUpload';
 import { getSessionsDir } from '../../utils/pathUtils';
-import { MoreThan } from 'typeorm';
 
 export interface UploadMetadata {
     id: number;
@@ -109,22 +108,39 @@ export class UploadService {
         };
     }
 
+    getExistsFilePath(sessionId: string, filename: string): string | null {
+        const uploadDir = this.resolveUploadDir(sessionId);
+        const safeFilename = path.basename(filename);
+        const filePath = path.join(uploadDir, safeFilename);
+        if (!fs.existsSync(filePath)) {
+            return null;
+        }
+
+        return filePath;
+    }
+
     async deleteUpload(sessionId: string, filename: string): Promise<void> {
         const upload = await this.repository.findOne({ where: { sessionId, filename } });
 
         // Delete from disk
-        const uploadDir = this.resolveUploadDir(sessionId);
-        const filePath = path.join(uploadDir, filename);
-        try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        } catch (e) {
-            console.error(`Failed to delete upload file ${filename}`, e);
+        const filePath = this.getExistsFilePath(sessionId, filename);
+        if (filePath) {
+            fs.unlinkSync(filePath);
         }
 
         if (upload) {
             await this.repository.remove(upload);
+        }
+    }
+
+    async getFileBuffer(sessionId: string, filename: string): Promise<Buffer | null> {
+        const filePath = this.getExistsFilePath(sessionId, filename);
+        if (!filePath) return null;
+        try {
+            return await fs.promises.readFile(filePath);
+        } catch (e) {
+            console.error(`Failed to read file buffer for ${filename}`, e);
+            return null;
         }
     }
 

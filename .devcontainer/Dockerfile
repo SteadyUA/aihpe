@@ -1,7 +1,4 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:1-20-bullseye
-# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get -y install --no-install-recommends socat netcat-openbsd iputils-ping dnsutils procps curl iproute2 git openssh-client vim less \
-#     && curl -fsSL https://get.docker.com | sh
 
 # Script to fix the Antigravity server path discrepancy dynamically
 RUN echo '#!/bin/bash\n\

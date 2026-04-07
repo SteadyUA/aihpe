@@ -3,9 +3,18 @@ import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Project } from '../entities/Project'; // Entity
 import { LlmProvider } from '../types/chat';
+import { EventBus } from '../utils/bus';
+
+export const ProjectDeletedEvent = EventBus.createEvent<{
+    projectId: string;
+}>('PROJECT_DELETED');
 
 @Service()
 export class ProjectService {
+    constructor(
+        private readonly eventBus: EventBus,
+    ) { }
+
     private get projectRepository() {
         return AppDataSource.getRepository(Project);
     }
@@ -39,23 +48,16 @@ export class ProjectService {
         await this.projectRepository.save(project);
     }
 
-    async getProject(id: string, currentUserId?: number): Promise<Project | undefined> {
+    async getProject(id: string): Promise<Project | undefined> {
         const project = await this.projectRepository.findOneBy({ id });
         if (!project) return undefined;
 
-        // Lazy migration: if project has no owner, assign to current user
-        if (project.accountId === null && currentUserId !== undefined) {
-            // accountId is potentially null in DB
-            // We can check if it is null or undefined
-            project.accountId = currentUserId;
-            await this.projectRepository.save(project);
-        }
+        return project;
+    }
 
-        // Access control: if project has owner, and it's not current user, deny access
-        if (project.accountId !== null && project.accountId !== undefined && currentUserId !== undefined && project.accountId !== currentUserId) {
-            return undefined;
-        }
-
+    async getProjectByTaskId(taskId: string): Promise<Project | undefined> {
+        const project = await this.projectRepository.findOneBy({ taskId });
+        if (!project) return undefined;
         return project;
     }
 
@@ -63,9 +65,9 @@ export class ProjectService {
         return await this.projectRepository.findBy({ accountId });
     }
 
-    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole' | 'sessionIds'>>, currentUserId?: number): Promise<Project> {
+    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole' | 'sessionIds'>>): Promise<Project> {
         // Use getProject to handle access checks
-        const project = await this.getProject(id, currentUserId);
+        const project = await this.getProject(id);
         if (!project) {
             throw new Error(`Project ${id} not found`);
         }
@@ -118,11 +120,6 @@ export class ProjectService {
         }
     }
 
-    async getProjectSessions(projectId: string): Promise<string[]> {
-        const project = await this.projectRepository.findOneBy({ id: projectId });
-        return project ? [...project.sessionIds] : [];
-    }
-
     async getNextSessionGroup(projectId: string): Promise<number> {
         const project = await this.projectRepository.findOneBy({ id: projectId });
         if (!project) {
@@ -140,5 +137,8 @@ export class ProjectService {
 
     async deleteProject(id: string): Promise<void> {
         await this.projectRepository.delete(id);
+        this.eventBus.publish(ProjectDeletedEvent({
+            projectId: id
+        }));
     }
 }

@@ -47,6 +47,9 @@ RUN npm install -g npm@latest
 # and we are now installing as a standalone app, so the lockfile needs to be updated.
 RUN npm install --omit=dev && npm prune --production && npm cache clean --force
 
+# Install file utility for mime type detection
+RUN apk add --no-cache file
+
 # Copy built artifacts from builder
 COPY --from=builder /app/server/dist ./dist
 # We need to copy the static files again if they are inside dist, or ensure dist/public is correct

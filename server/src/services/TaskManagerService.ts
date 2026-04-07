@@ -7,18 +7,32 @@ import { getDataDir } from '../utils/pathUtils';
 
 @Service()
 export class TaskManagerService {
+    private get taskRepository() {
+        return AppDataSource.getRepository(Task);
+    }
 
-    private async getTask(taskId: string): Promise<Task | null> {
+    public getNextId(): string {
+        return crypto.randomUUID();
+    }
+
+    async createTask(id: string): Promise<Task> {
+        const newTask = this.taskRepository.create({
+            id,
+            status: 'pending',
+            steps: []
+        });
+        return await this.taskRepository.save(newTask);
+    }
+
+    async getTask(taskId: string): Promise<Task | null> {
         if (!AppDataSource.isInitialized) {
             await AppDataSource.initialize();
         }
-        const repo = AppDataSource.getRepository(Task);
-        return await repo.findOne({ where: { id: taskId } });
+        return await this.taskRepository.findOneBy({ id: taskId });
     }
 
-    private async saveTask(task: Task) {
-        const repo = AppDataSource.getRepository(Task);
-        await repo.save(task);
+    async saveTask(task: Task): Promise<Task> {
+        return await this.taskRepository.save(task);
     }
 
     async updateStatus(taskId: string, status: 'pending' | 'planning' | 'executing' | 'completed' | 'failed', errorMessage?: string): Promise<void> {
@@ -45,8 +59,7 @@ export class TaskManagerService {
         }
 
         // Delete from database
-        const repo = AppDataSource.getRepository(Task);
-        await repo.delete(taskId);
+        await this.taskRepository.delete(taskId);
         return true;
     }
 
@@ -146,3 +159,4 @@ export class TaskManagerService {
         return (task.steps || []).length > 0;
     }
 }
+
