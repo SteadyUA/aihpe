@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { TaskStatus } from '../types/chat';
 
 export interface Job {
     description: string;
@@ -16,8 +17,8 @@ export class Task {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
 
-    @Column({ type: 'varchar', default: 'pending' })
-    status!: 'pending' | 'planning' | 'executing' | 'completed' | 'failed';
+    @Column({ type: 'varchar', default: TaskStatus.PENDING })
+    status!: TaskStatus;
 
     @Column({ type: 'text', nullable: true })
     errorMessage?: string | null;

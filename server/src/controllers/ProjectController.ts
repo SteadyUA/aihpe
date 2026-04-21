@@ -20,7 +20,7 @@ import { Service } from 'typedi';
 import { ProjectService } from '../services/ProjectService';
 import { HtmlImportService } from '../services/HtmlImportService';
 import { TaskManagerService } from '../services/TaskManagerService';
-import { LlmProvider } from '../types/chat';
+import { LlmProvider, ProjectStatus } from '../types/chat';
 import { Project } from '../entities/Project';
 
 class ProjectResponse {
@@ -128,7 +128,7 @@ export class ProjectController {
         @UploadedFile('file', { options: { dest: os.tmpdir() } }) file?: Express.Multer.File
     ): Promise<ProjectResponse> {
         const accountId = user?.accountId;
-        const status = file ? 'initialization' : 'ready';
+        const status = file ? ProjectStatus.INITIALIZATION : ProjectStatus.READY;
         const taskId = file ? this.taskManagerService.getNextId() : undefined;
 
         const project = await this.projectService.createProject(

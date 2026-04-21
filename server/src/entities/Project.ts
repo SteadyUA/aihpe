@@ -1,6 +1,6 @@
 
 import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-import { LlmProvider } from '../types/chat';
+import { LlmProvider, ProjectStatus } from '../types/chat';
 
 @Entity()
 export class Project {
@@ -38,8 +38,8 @@ export class Project {
     @Column({ nullable: true })
     activeSessionId?: string;
 
-    @Column({ default: 'ready' })
-    status!: 'initialization' | 'ready';
+    @Column({ type: 'varchar', default: ProjectStatus.READY })
+    status!: ProjectStatus;
 
     @Column({ nullable: true })
     taskId?: string;

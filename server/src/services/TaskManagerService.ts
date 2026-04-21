@@ -1,6 +1,7 @@
 import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Task, Job, Step } from '../entities/Task';
+import { TaskStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getDataDir } from '../utils/pathUtils';
@@ -18,7 +19,7 @@ export class TaskManagerService {
     async createTask(id: string): Promise<Task> {
         const newTask = this.taskRepository.create({
             id,
-            status: 'pending',
+            status: TaskStatus.PENDING,
             steps: []
         });
         return await this.taskRepository.save(newTask);
@@ -35,7 +36,7 @@ export class TaskManagerService {
         return await this.taskRepository.save(task);
     }
 
-    async updateStatus(taskId: string, status: 'pending' | 'planning' | 'executing' | 'completed' | 'failed', errorMessage?: string): Promise<void> {
+    async updateStatus(taskId: string, status: TaskStatus, errorMessage?: string): Promise<void> {
         const task = await this.getTask(taskId);
         if (task) {
             task.status = status;

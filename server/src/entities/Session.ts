@@ -1,6 +1,8 @@
 import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Project } from './Project';
 
+import { SessionStatus } from '../types/chat';
+
 @Entity()
 export class Session {
     @PrimaryColumn()
@@ -26,7 +28,7 @@ export class Session {
     provider!: string;
 
     @Column({ type: 'varchar' })
-    status!: string;
+    status!: SessionStatus;
 
     @Column({ type: 'boolean' })
     fastMode!: boolean;

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Project } from '../entities/Project'; // Entity
-import { LlmProvider } from '../types/chat';
+import { LlmProvider, ProjectStatus } from '../types/chat';
 import { EventBus } from '../utils/bus';
 
 export const ProjectDeletedEvent = EventBus.createEvent<{
@@ -19,7 +19,7 @@ export class ProjectService {
         return AppDataSource.getRepository(Project);
     }
 
-    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string, status: 'initialization' | 'ready' = 'ready', taskId?: string): Promise<Project> {
+    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string, status: ProjectStatus = ProjectStatus.READY, taskId?: string): Promise<Project> {
         const project = new Project();
         project.id = randomUUID();
         project.accountId = accountId;
@@ -36,7 +36,7 @@ export class ProjectService {
         return await this.projectRepository.save(project);
     }
 
-    async updateProjectStatus(projectId: string, status: 'initialization' | 'ready', taskId?: string): Promise<void> {
+    async updateProjectStatus(projectId: string, status: ProjectStatus, taskId?: string): Promise<void> {
         const project = await this.projectRepository.findOneBy({ id: projectId });
         if (!project) {
             throw new Error(`Project ${projectId} not found`);

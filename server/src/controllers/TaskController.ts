@@ -2,6 +2,7 @@ import { Get, Post, JsonController, Param, UseBefore, NotFoundError, HttpCode, B
 import { Service } from 'typedi';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { TaskManagerService } from '../services/TaskManagerService';
+import { TaskStatus } from '../types/chat';
 import { HtmlImportService } from '../services/HtmlImportService';
 import { IsString, IsArray, IsBoolean, ValidateNested, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -92,7 +93,7 @@ export class TaskController {
         if (!task) {
             throw new NotFoundError('Task not found');
         }
-        if (task.status !== 'failed') {
+        if (task.status !== TaskStatus.FAILED) {
             throw new BadRequestError('Only failed tasks can be retried');
         }
 
