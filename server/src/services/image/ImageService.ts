@@ -1,15 +1,23 @@
 import { Service } from 'typedi';
 import path from 'node:path';
-import { getSessionsDir } from '../../utils/pathUtils';
-import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { imageSize } from 'image-size';
-import { SessionFiles } from '../../types/chat';
 import { ImageServiceFactory } from './ImageServiceFactory';
 import { SessionImage } from '../../entities/SessionImage';
 import { AppDataSource } from '../../data-source';
+import { FilesService } from '../session/FilesService';
 import { MoreThan, LessThanOrEqual } from 'typeorm';
-import { In } from 'typeorm';
+import { Inject } from 'typedi';
+import { EventBus } from '../../utils/bus';
+
+export const ImageTokenUsedEvent = EventBus.createEvent<{
+    sessionId: string;
+    agent: string;
+    model: string;
+    prompt: number;
+    completion: number;
+    total: number;
+}>('IMAGE_TOKEN_USED');
 
 export interface ImageMetadata {
     filename: string;
@@ -35,27 +43,35 @@ export abstract class ImageService {
     protected agentName = 'image';
     protected readonly repository = AppDataSource.getRepository(SessionImage);
 
+    @Inject()
+    protected readonly eventBus!: EventBus;
+
+    constructor(protected readonly filesService: FilesService) { }
+
     protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
     protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;
     protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }>;
 
-    async generateAndSave(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
+    async generateAndSave(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined): Promise<string> {
         const result = await this.generateRaw(description, abortSignal);
         const base64Data = result.base64;
 
-        if (result.usage && trackTokenUsage) {
-            await trackTokenUsage(result.usage);
+        if (result.usage) {
+            this.eventBus.publish(ImageTokenUsedEvent({
+                sessionId,
+                agent: result.usage.agent,
+                model: result.usage.model,
+                prompt: result.usage.prompt,
+                completion: result.usage.completion,
+                total: result.usage.total,
+            }));
         }
-
-        const versionDir = this.resolveVersionDir(sessionId, version);
-        this.ensureDirectory(versionDir);
 
         const uuid = randomUUID();
         const filename = targetFilename || `${uuid}.png`;
-        const filePath = path.join(versionDir, filename);
 
         const buffer = Buffer.from(base64Data, 'base64');
-        fs.writeFileSync(filePath, buffer);
+        this.filesService.writeVersionFile(sessionId, version, filename, buffer);
 
         // Calculate dimensions
         let width, height;
@@ -81,22 +97,17 @@ export abstract class ImageService {
         return filename;
     }
 
-    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal: AbortSignal | undefined, trackTokenUsage: ((usage: TokenUsageData) => Promise<void>) | undefined): Promise<string> {
-        // Resolve source file: check target version first (in case it was already modified in this turn)
-        let sourceDir = this.resolveVersionDir(sessionId, targetVersion);
-        let sourcePath = path.join(sourceDir, filename);
-
-        if (!fs.existsSync(sourcePath)) {
+    async editAndSave(sessionId: string, filename: string, prompt: string, sourceVersion: number, targetVersion: number, abortSignal: AbortSignal | undefined): Promise<string> {
+        let versionToRead = targetVersion;
+        if (!this.filesService.versionFileExists(sessionId, targetVersion, filename)) {
             // Fallback to source version
-            sourceDir = this.resolveVersionDir(sessionId, sourceVersion);
-            sourcePath = path.join(sourceDir, filename);
+            versionToRead = sourceVersion;
         }
 
-        if (!fs.existsSync(sourcePath)) {
+        const buffer = this.filesService.readVersionFileBuffer(sessionId, versionToRead, filename);
+        if (!buffer) {
             throw new Error(`Source image not found: ${filename}`);
         }
-
-        const buffer = fs.readFileSync(sourcePath);
         const mimeType = this.getMimeType(filename);
 
         // Get current description
@@ -107,17 +118,20 @@ export abstract class ImageService {
         const newBase64Data = result.base64;
         const newDescription = result.description;
 
-        if (result.usage && trackTokenUsage) {
-            await trackTokenUsage(result.usage);
+        if (result.usage) {
+            this.eventBus.publish(ImageTokenUsedEvent({
+                sessionId,
+                agent: result.usage.agent,
+                model: result.usage.model,
+                prompt: result.usage.prompt,
+                completion: result.usage.completion,
+                total: result.usage.total,
+            }));
         }
 
-        const versionDir = this.resolveVersionDir(sessionId, targetVersion);
-        this.ensureDirectory(versionDir);
-
         // We overwrite the file in the target version location with the same filename
-        const savePath = path.join(versionDir, filename);
         const newBuffer = Buffer.from(newBase64Data, 'base64');
-        fs.writeFileSync(savePath, newBuffer);
+        this.filesService.writeVersionFile(sessionId, targetVersion, filename, newBuffer);
 
         // Calculate dimensions of new image
         let width, height;
@@ -143,44 +157,40 @@ export abstract class ImageService {
         return filename;
     }
 
-    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal, trackTokenUsage?: (usage: TokenUsageData) => Promise<void>): Promise<string> {
-        const versionDir = this.resolveVersionDir(sessionId, version);
-        const filePath = path.join(versionDir, filename);
+    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal): Promise<string> {
+        const buffer = this.filesService.readVersionFileBuffer(sessionId, version, filename);
 
-        if (!fs.existsSync(filePath)) {
-            throw new Error(`Image file not found: ${filePath}`);
+        if (!buffer) {
+            throw new Error(`Image file not found: ${filename}`);
         }
-
-        const buffer = fs.readFileSync(filePath);
         const mimeType = this.getMimeType(filename);
 
         const result = await this.describeRaw(buffer, mimeType, abortSignal);
 
-        if (result.usage && trackTokenUsage) {
-            await trackTokenUsage(result.usage);
+        if (result.usage) {
+            this.eventBus.publish(ImageTokenUsedEvent({
+                sessionId,
+                agent: result.usage.agent,
+                model: result.usage.model,
+                prompt: result.usage.prompt,
+                completion: result.usage.completion,
+                total: result.usage.total,
+            }));
         }
 
         return result.description;
     }
 
     async saveUploadedImage(sessionId: string, version: number, file: Express.Multer.File, preserveFilename = false): Promise<ImageMetadata> {
-        const versionDir = this.resolveVersionDir(sessionId, version);
-
         const uuid = randomUUID();
         const ext = path.extname(file.originalname);
         const filename = preserveFilename ? file.originalname : `${uuid}${ext}`;
-        const filePath = path.join(versionDir, filename);
-
-        // Ensure the directory for the file exists in case the filename contains subpaths
-        this.ensureDirectory(path.dirname(filePath));
 
         // Copy file from temp location or write buffer
         if (file.path) {
-            fs.copyFileSync(file.path, filePath);
-            // Optionally remove temp file if we are responsible for it.
-            // Multer usually cleans up if configured for diskStorage / temp
+            this.filesService.copyFileToVersion(sessionId, version, filename, file.path);
         } else if (file.buffer) {
-            fs.writeFileSync(filePath, file.buffer);
+            this.filesService.writeVersionFile(sessionId, version, filename, file.buffer);
         } else {
             throw new Error('No file content found');
         }
@@ -188,9 +198,12 @@ export abstract class ImageService {
         // Calculate dimensions
         let width, height;
         try {
-            const dimensions = imageSize(fs.readFileSync(filePath));
-            width = dimensions.width;
-            height = dimensions.height;
+            const buffer = this.filesService.readVersionFileBuffer(sessionId, version, filename);
+            if (buffer) {
+                const dimensions = imageSize(buffer);
+                width = dimensions.width;
+                height = dimensions.height;
+            }
         } catch (e) {
             console.warn('Failed to calculate image dimensions', e);
         }
@@ -261,17 +274,17 @@ export abstract class ImageService {
         };
     }
 
-    async updateImagesUsage(sessionId: string, version: number, files: SessionFiles): Promise<void> {
+    async updateImagesUsage(sessionId: string, version: number): Promise<void> {
         const images = await this.repository.find({ where: { sessionId, version } });
         if (images.length === 0) return;
 
-        const htmlContent = files['index.html'] || files['html'] || '';
-        const cssContent = files['styles.css'] || files['css'] || '';
-        const jsContent = files['script.js'] || files['js'] || '';
+        const htmlContent = this.filesService.readVersionFile(sessionId, version, 'index.html');
+        const cssContent = this.filesService.readVersionFile(sessionId, version, 'styles.css');
+        const jsContent = this.filesService.readVersionFile(sessionId, version, 'script.js');
 
         const updates = [];
         for (const img of images) {
-            const isUsed = htmlContent.includes(img.filename) || cssContent.includes(img.filename) || jsContent.includes(img.filename);
+            const isUsed = htmlContent?.includes(img.filename) || cssContent?.includes(img.filename) || jsContent?.includes(img.filename) || false;
             if (img.isUsed !== isUsed) {
                 img.isUsed = isUsed;
                 updates.push(img);
@@ -290,12 +303,8 @@ export abstract class ImageService {
         }
 
         // Delete file
-        const versionDir = this.resolveVersionDir(sessionId, version);
-        const filePath = path.join(versionDir, filename);
         try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+            this.filesService.deleteVersionFile(sessionId, version, filename);
         } catch (e) {
             console.error(`Failed to delete image file ${filename}`, e);
         }
@@ -305,12 +314,7 @@ export abstract class ImageService {
         }
     }
 
-    protected resolveVersionDir(sessionId: string, version: number): string {
-        const root = getSessionsDir();
-        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const safeVersion = Number.isInteger(version) && version >= 0 ? version : 0;
-        return path.join(root, safeId, 'versions', String(safeVersion));
-    }
+
 
     async copyImagesToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
         const sourceImages = await this.repository.find({ where: { sessionId, version: sourceVersion } });
@@ -344,13 +348,6 @@ export abstract class ImageService {
 
     async deleteSessionImages(sessionId: string): Promise<void> {
         await this.repository.delete({ sessionId });
-    }
-
-
-    protected ensureDirectory(dir: string): void {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
     }
 
     protected async saveMetadata(sessionId: string, version: number, newEntry: ImageMetadata): Promise<void> {

@@ -1,10 +1,12 @@
 import { Service } from 'typedi';
 import { ImageService, TokenUsageData } from './ImageService';
 
+import { FilesService } from '../session/FilesService';
+
 @Service()
 export class LiteLLMImageService extends ImageService {
-    constructor() {
-        super();
+    constructor(filesService: FilesService) {
+        super(filesService);
         const envModelId = process.env.LITELLM_IMAGE_MODEL;
         if (envModelId) {
             this.modelId = envModelId;

@@ -1,4 +1,4 @@
-import { LlmTool } from '../types';
+import { LlmTool } from '../core/types';
 import { TaskManagerService } from '../../TaskManagerService';
 import { Container } from 'typedi';
 import * as fs from 'fs/promises';
@@ -13,7 +13,7 @@ export interface HtmlConversionContext {
 export function createHtmlConversionTools(): (
     request: any,
     context: HtmlConversionContext
-) => LlmTool<HtmlConversionContext>[] {
+) => any[] {
     return (request: any, context: HtmlConversionContext) => {
         const { workingDirectory, taskId, abortController } = context;
         const taskManagerService = Container.get(TaskManagerService);

@@ -4,11 +4,11 @@ import { SessionService } from './session/SessionService';
 import { TurnService } from './session/TurnService';
 import { FilesService } from './session/FilesService';
 import { ChatService } from './ChatService';
-import { LlmFactory } from './llm/LlmFactory';
+import { HtmlConversionAgent } from './llm/agents/HtmlConversionAgent';
 import { TaskManagerService } from './TaskManagerService';
 import { AppDataSource } from '../data-source';
 import { Task } from '../entities/Task';
-import { Turn } from '../types/chat';
+import { Turn , TaskStatus , ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import extract from 'extract-zip';
@@ -27,7 +27,7 @@ export class HtmlImportService {
         @Inject() private filesService: FilesService,
         @Inject() private chatService: ChatService,
         @Inject() private taskManagerService: TaskManagerService,
-        @Inject() private llmFactory: LlmFactory,
+        @Inject() private htmlConversionAgent: HtmlConversionAgent,
         @Inject() private imageService: ImageService
     ) { }
 
@@ -65,7 +65,7 @@ export class HtmlImportService {
 
         } catch (error: any) {
             console.error('HTML Import failed:', error);
-            await this.taskManagerService.updateStatus(taskId, 'failed', error.message || String(error));
+            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
         } finally {
             // Remove uploaded zip from tmpdir
             try {
@@ -86,7 +86,7 @@ export class HtmlImportService {
             if (!sessionId) throw new Error('No session initialized for this project yet');
 
             const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
-            
+
             // Check if tempDir exists
             try {
                 await fs.access(tempDir);
@@ -98,7 +98,7 @@ export class HtmlImportService {
 
         } catch (error: any) {
             console.error('HTML Import Resume failed:', error);
-            await this.taskManagerService.updateStatus(taskId, 'failed', error.message || String(error));
+            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
         }
     }
 
@@ -108,7 +108,7 @@ export class HtmlImportService {
         let iterations = 0;
         const maxIterations = 20;
 
-        await this.taskManagerService.updateStatus(taskId, 'executing');
+        await this.taskManagerService.updateStatus(taskId, TaskStatus.EXECUTING);
 
         while (!allDone && iterations < maxIterations) {
             iterations++;
@@ -116,13 +116,12 @@ export class HtmlImportService {
             if (!(await this.taskManagerService.hasJobs(taskId))) {
                 console.log(`[Task ${taskId}] No jobs defined. Initializing Planner Agent...`);
                 const abortController = new AbortController();
-                const planClient = this.llmFactory.getHtmlPlanClient(tempDir, taskId, this.provider);
-                await planClient.generate({
+                await this.htmlConversionAgent.plan(this.provider as any, {
+                    workingDirectory: tempDir,
+                    taskId: taskId,
                     instruction: 'Analyze the working directory and create a granular optimization plan using add_jobs.',
-                    abortSignal: abortController.signal,
-                    abortController,
-                    onProgress: () => { }
-                } as any);
+                    abortSignal: abortController.signal
+                });
             } else {
                 const nextStep = await this.taskManagerService.getNextStep(taskId);
                 if (!nextStep) {
@@ -137,20 +136,19 @@ export class HtmlImportService {
                 await Promise.all(pendingJobs.map(async (nextJob) => {
                     console.log(`[Task ${taskId}] Executing Job: ${nextJob.shortDescription}`);
                     const abortController = new AbortController();
-                    const execClient = this.llmFactory.getHtmlExecutionClient(tempDir, taskId, nextJob.description, this.provider);
-                    await execClient.generate({
+                    await this.htmlConversionAgent.executeTask(this.provider as any, {
+                        workingDirectory: tempDir,
+                        taskId: taskId,
+                        currentTask: nextJob.description,
                         instruction: 'Execute the job.',
-                        abortSignal: abortController.signal,
-                        abortController,
-                        maxSteps: 100,
-                        onProgress: () => { }
-                    } as any);
+                        abortSignal: abortController.signal
+                    });
                 }));
             }
         }
 
         if (allDone) {
-            await this.taskManagerService.updateStatus(taskId, 'completed');
+            await this.taskManagerService.updateStatus(taskId, TaskStatus.COMPLETED);
 
             // 5. Move files to Session Version 0
             const files: Record<string, string> = {};
@@ -193,9 +191,12 @@ export class HtmlImportService {
                     }
                 }
             }
+            this.filesService.initFirstVersion(sessionId);
             await getFilesRec(tempDir, tempDir);
-            await this.filesService.persistVersionFiles(sessionId, 0, files);
-            await this.imageService.updateImagesUsage(sessionId, 0, files);
+            this.filesService.writeVersionFile(sessionId, 0, 'index.html', files['index.html'] || '');
+            this.filesService.writeVersionFile(sessionId, 0, 'styles.css', files['styles.css'] || '');
+            this.filesService.writeVersionFile(sessionId, 0, 'script.js', files['script.js'] || '');
+            await this.imageService.updateImagesUsage(sessionId, 0);
 
             // 6. Add First Turn
             const now = new Date();
@@ -216,12 +217,12 @@ export class HtmlImportService {
             });
 
             // 7. Update Project Status
-            await this.projectService.updateProjectStatus(projectId, 'ready');
+            await this.projectService.updateProjectStatus(projectId, ProjectStatus.READY);
 
             // Clean up temp dir
             await fs.rm(tempDir, { recursive: true, force: true });
         } else {
-            await this.taskManagerService.updateStatus(taskId, 'failed', 'Max iterations reached without completion');
+            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, 'Max iterations reached without completion');
         }
     }
 

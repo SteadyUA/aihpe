@@ -1,10 +1,10 @@
 import { ImageService } from '../../image/ImageService';
 import { FilesService } from '../../session/FilesService';
 import { SessionService } from '../../session/SessionService';
-import { GeneratePageRequest, SessionFiles, LlmTool } from '../types';
+import { GeneratePageRequest } from '../types';
 
 export interface PageGenContext {
-    currentFiles: SessionFiles;
+    getTargetVersion: () => number | undefined;
     ensureNextVersion: (sessionId: string) => Promise<number>;
 }
 
@@ -15,14 +15,14 @@ export function createPageGenTools(
 ): (
     request: GeneratePageRequest,
     context: PageGenContext
-) => LlmTool[] {
+) => any[] {
     return (
         request: GeneratePageRequest,
         context: PageGenContext
     ) => {
-        const { currentFiles, ensureNextVersion } = context;
+        const { ensureNextVersion, getTargetVersion } = context;
 
-        const tools: LlmTool[] = [
+        const tools: any[] = [
             {
                 name: 'read_file',
                 description: 'Read the content of a file. Use this to understand current code before editing.',
@@ -41,8 +41,15 @@ export function createPageGenTools(
                     file: 'index.html' | 'styles.css' | 'script.js';
                     summary: string;
                 }) => {
-                    const content = currentFiles[file];
+                    const version = getTargetVersion() ?? request.currentVersion;
+                    const content = filesService.readVersionFile(request.sessionId, version, file);
                     if (content !== undefined) return content;
+
+                    // Fallback to initial files if not found
+                    const { EMPTY_FILES } = await import('../../session/FilesService');
+                    const emptyContent = EMPTY_FILES[file];
+                    if (emptyContent !== undefined) return emptyContent;
+
                     return 'File not found';
                 }
             },
@@ -74,9 +81,15 @@ export function createPageGenTools(
                     // 1. If editing code files, we MUST ensure a new version exists.
                     //    This matches the FIRST code edit in this turn.
 
-                    await ensureNextVersion(request.sessionId);
+                    let nextVersion = await ensureNextVersion(request.sessionId);
 
-                    let content = currentFiles[file] || '';
+                    let content = filesService.readVersionFile(request.sessionId, nextVersion, file);
+
+                    if (content === undefined) {
+                        const { EMPTY_FILES } = await import('../../session/FilesService');
+                        content = EMPTY_FILES[file];
+                    }
+
                     if (!content && (file === 'styles.css' || file === 'script.js')) {
                         // Allow empty css/js if undefined
                         content = '';
@@ -119,7 +132,7 @@ export function createPageGenTools(
                         return `Error: oldString found multiple times in ${file}. Provide more unique context.`;
 
                     const newContent = content.replace(targetString, newString);
-                    currentFiles[file] = newContent;
+                    filesService.writeVersionFile(request.sessionId, nextVersion, file, newContent);
 
 
                     return `Successfully updated ${file}`;
@@ -232,7 +245,7 @@ export function createPageGenTools(
                 execute: async ({ description, summary }: { description: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
-                        const filename = await imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal, request.trackRequestTokenUsage);
+                        const filename = await imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal);
                         return `Image generated successfully: ${filename}`;
                     } catch (error: any) {
                         return `Failed to generate image: ${error.message}`;
@@ -255,7 +268,7 @@ export function createPageGenTools(
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         // Use currentVersion as source, nextVersion as target
-                        const savedFilename = await imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal, request.trackRequestTokenUsage);
+                        const savedFilename = await imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal);
                         return `Image edited successfully: ${savedFilename}`;
                     } catch (error: any) {
                         return `Failed to edit image: ${error.message}`;

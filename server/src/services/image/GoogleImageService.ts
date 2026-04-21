@@ -1,8 +1,14 @@
 import { Service } from 'typedi';
 import { ImageService, TokenUsageData } from './ImageService';
 
+import { FilesService } from '../session/FilesService';
+
 @Service()
 export class GoogleImageService extends ImageService {
+    constructor(filesService: FilesService) {
+        super(filesService);
+    }
+
     protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
