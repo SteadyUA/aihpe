@@ -2,7 +2,7 @@ import React from 'react';
 import classNames from 'classnames';
 import { UiCheckbox } from '../UiCheckbox';
 import { UiDropdown } from '../UiDropdown';
-import { UiButton } from '../UiButton';
+import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
@@ -564,8 +564,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     left={
                         <>
                             <UiButton
-                                variant="secondary"
-                                size="icon"
+                                variant={ButtonVariant.SECONDARY}
+                                size={ButtonSize.ICON}
                                 onClick={this.handleReload}
                                 title="Reload Preview"
                             >
@@ -603,8 +603,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                             {hasMultiStep && (
                                 <div className={styles.stepper}>
                                     <UiButton
-                                        variant="secondary"
-                                        size="icon"
+                                        variant={ButtonVariant.SECONDARY}
+                                        size={ButtonSize.ICON}
                                         onClick={this.handlePrev}
                                         disabled={currentStep === 0}
                                         title="Previous Step"
@@ -626,8 +626,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                         {currentStep + 1} / {maxStep}
                                     </span>
                                     <UiButton
-                                        variant="secondary"
-                                        size="icon"
+                                        variant={ButtonVariant.SECONDARY}
+                                        size={ButtonSize.ICON}
                                         onClick={this.handleNext}
                                         disabled={currentStep === maxStep - 1}
                                         title="Next Step"
@@ -652,8 +652,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     right={
                         <>
                             <UiButton
-                                variant="secondary"
-                                size="icon"
+                                variant={ButtonVariant.SECONDARY}
+                                size={ButtonSize.ICON}
                                 onClick={this.handleNewWindow}
                                 title="Open in new window"
                             >
@@ -673,8 +673,8 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 </svg>
                             </UiButton>
                             <UiButton
-                                variant="secondary"
-                                size="icon"
+                                variant={ButtonVariant.SECONDARY}
+                                size={ButtonSize.ICON}
                                 onClick={this.handleDownload}
                                 title="Download ZIP"
                             >

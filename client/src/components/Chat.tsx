@@ -2,14 +2,15 @@ import React from 'react';
 import classNames from 'classnames';
 import { createMarkedInstance } from '../utils/markdownUtils';
 
-import { UiButton } from './UiButton';
+import { UiButton, ButtonVariant, ButtonSize } from './UiButton';
 import { UiDropdown } from './UiDropdown';
 import { UiTarget } from './UiTarget';
 import { ProviderSelector } from './ProviderSelector';
+import { DropdownVariant } from './UiDropdown';
 import styles from './Chat.module.css';
 import { ConfirmationModal } from './ConfirmationModal';
 import { RichInput } from './RichInput';
-import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn, Session, UnsentData } from '../types';
+import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn, Session, UnsentData, SessionStatus, ChatRole } from '../types';
 import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
 
@@ -22,7 +23,7 @@ interface MessageProps {
     isActiveTurn?: boolean;
     isDimmed?: boolean;
     isLastAssistant?: boolean;
-    status?: string;
+    status?: SessionStatus;
     onUndo?: () => void;
     sessionIds?: string[];
     onSwitchSession?: (id: string) => void;
@@ -266,7 +267,7 @@ class Message extends React.Component<MessageProps> {
                         </div>
                     )}
                     {/* Undo Button for Last Assistant Message */}
-                    {isAssistant && isLastAssistant && status !== 'busy' && (
+                    {isAssistant && isLastAssistant && status !== SessionStatus.BUSY && (
                         <button
                             className={styles.undoButton}
                             onClick={(e) => {
@@ -332,7 +333,7 @@ class Message extends React.Component<MessageProps> {
 }
 
 interface ChatProps {
-    status: string;
+    status: SessionStatus;
     sessionId: string;
     onPickElement?: () => void;
     onCancelPick?: () => void;
@@ -409,7 +410,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     }
 
     componentDidMount() {
-        if (this.props.sessionId && this.props.isVisible && this.props.status !== 'pending') {
+        if (this.props.sessionId && this.props.isVisible && this.props.status !== SessionStatus.PENDING) {
             this.fetchTurns();
         }
 
@@ -450,23 +451,21 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                 startTime: Date.now(),
                 statusMessages: []
             });
-            this.props.onUpdateSession({ status: 'busy' });
+            this.props.onUpdateSession({ status: SessionStatus.BUSY });
         } else if (data.status === 'generating') {
             if (data.message) {
                 this.setState(prevState => ({
                     statusMessages: [...prevState.statusMessages, data.message]
                 }));
             }
-        } else if (data.status === 'completed') {
+        } else if (data.status === 'idle') {
             this.setState({
                 startTime: null,
                 statusMessages: []
             });
 
-            const updates: Partial<Session> = { status: 'idle' };
+            const updates: Partial<Session> = { status: SessionStatus.IDLE };
             this.props.onUpdateSession(updates);
-        } else if (data.status === 'stopped') {
-            this.props.onUpdateSession({ status: 'idle' });
         } else if (data.status === 'error') {
             this.setState({ startTime: null });
             if (data.message) {
@@ -474,7 +473,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     statusMessages: [...prevState.statusMessages, data.message]
                 }));
             }
-            this.props.onUpdateSession({ status: 'error' });
+            this.props.onUpdateSession({ status: SessionStatus.ERROR });
         }
     }
 
@@ -611,7 +610,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     this.props.onUpdateSession({ attachment: data.restoredAttachment });
                 }
 
-                this.props.onUpdateSession({ status: 'idle' });
+                this.props.onUpdateSession({ status: SessionStatus.IDLE });
                 this.syncVersion(null);
             } else {
                 // Revert optimistic update?
@@ -755,7 +754,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.setState({ turns: newTurns });
 
         this.props.onUpdateSession({
-            status: 'busy',
+            status: SessionStatus.BUSY,
             selection: null,
             activeTurn: nextTurn,
             lastTurn: nextTurn,
@@ -787,7 +786,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         } catch (e) {
             console.error('Failed to send message', e);
-            this.props.onUpdateSession({ status: 'error' });
+            this.props.onUpdateSession({ status: SessionStatus.ERROR });
         }
     };
 
@@ -937,7 +936,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         };
 
         this.props.onUpdateSession({
-            status: 'idle',
+            status: SessionStatus.IDLE,
             activeTurn: prevTurnNum,
             lastTurn: prevTurnNum
         });
@@ -1097,12 +1096,12 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         } = this.props;
         const { input, isUploading, isLoading, showSummaryModal, summaryContent, turns } = this.state;
-        const isFormDisabled = status === 'busy' || disabled;
+        const isFormDisabled = status === SessionStatus.BUSY || disabled;
 
         const messages: MessageData[] = [];
         turns.forEach(t => {
             messages.push({
-                role: 'user',
+                role: ChatRole.USER,
                 content: t.request,
                 turn: t.turn,
                 createdAt: t.beginTime,
@@ -1111,7 +1110,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             });
             if (t.response || t.endTime) {
                 messages.push({
-                    role: 'assistant',
+                    role: ChatRole.ASSISTANT,
                     content: t.response,
                     turn: t.turn,
                     version: t.version
@@ -1120,10 +1119,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         });
 
         let foundActive = false;
-        let lastAssistantIndex = -1;
         for (let i = messages.length - 1; i >= 0; i--) {
             if (messages[i].role === 'assistant') {
-                lastAssistantIndex = i;
                 break;
             }
         }
@@ -1170,7 +1167,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     m.turn === effectiveActiveTurn;
 
                                 if (isTurnMatch) foundActive = true;
-                                const shouldDim = foundActive && !isTurnMatch;
+
 
                                 return (
                                     <Message
@@ -1199,7 +1196,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 );
                             })}
                         </div>
-                        {status === 'busy' && (
+                        {status === SessionStatus.BUSY && (
                             <Message
                                 id={
                                     latestTurn
@@ -1207,7 +1204,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         : undefined
                                 }
                                 msg={{
-                                    role: 'assistant',
+                                    role: ChatRole.ASSISTANT,
                                     content: '',
                                     turn: latestTurn,
                                     version: 0,
@@ -1226,7 +1223,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     </div>
                 </div>
 
-                {status === 'error' ? (
+                {status === SessionStatus.ERROR ? (
                     <div className={styles.chatForm}>
                         <div className={styles.errorContainer}>
                             <div className={styles.errorMessage}>
@@ -1234,7 +1231,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 <p>{this.state.statusMessages && this.state.statusMessages.length > 0 ? this.state.statusMessages[this.state.statusMessages.length - 1] : 'Unknown error'}</p>
                             </div>
                             <UiButton
-                                variant="secondary"
+                                variant={ButtonVariant.SECONDARY}
                                 onClick={this.handleUndo}
                             >
                                 Undo last turn
@@ -1243,7 +1240,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     </div>
                 ) : (
                     <form className={styles.chatForm} onSubmit={this.handleSubmit}>
-                        <div className={classNames(styles.inputContainer, { [styles.busy]: status === 'busy' })} onClick={this.handleContainerClick}>
+                        <div className={classNames(styles.inputContainer, { [styles.busy]: status === SessionStatus.BUSY })} onClick={this.handleContainerClick}>
                             <div className={styles.selections}>
                                 {selection && (
                                     <div className={styles.pickerContainer}>
@@ -1293,8 +1290,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 <div className={styles.inputControlsLeft}>
                                     <UiButton
                                         type="button"
-                                        variant={isPicking ? 'ghost-active' : 'ghost'}
-                                        size="icon"
+                                        variant={isPicking ? ButtonVariant.GHOST_ACTIVE : ButtonVariant.GHOST}
+                                        size={ButtonSize.ICON}
                                         onClick={isPicking ? onCancelPick : onPickElement}
                                         disabled={isFormDisabled}
                                         title={isPicking ? "Cancel selection" : "Select element"}
@@ -1335,8 +1332,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         />
                                         <UiButton
                                             type="button"
-                                            variant="ghost"
-                                            size="icon"
+                                            variant={ButtonVariant.GHOST}
+                                            size={ButtonSize.ICON}
                                             onClick={() => this.fileInputRef.current?.click()}
                                             disabled={isFormDisabled || isUploading || !!attachment}
                                             title={!!attachment ? "Only one attachment allowed" : "Attach image"}
@@ -1371,7 +1368,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                             this.handleSaveUnsent({ fastMode: val === 'fast' });
                                         }}
                                         disabled={isFormDisabled}
-                                        variant="ghost"
+                                        variant={DropdownVariant.GHOST}
                                     />
                                     <ProviderSelector
                                         value={provider}
@@ -1381,16 +1378,16 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         }}
                                         disabled={isFormDisabled || isLoading || isUploading}
                                         className={styles.imageToggle}
-                                        variant="ghost"
+                                        variant={DropdownVariant.GHOST}
                                     />
                                 </div>
 
                                 <div className={styles.inputControlsRight}>
-                                    {status === 'busy' ? (
+                                    {status === SessionStatus.BUSY ? (
                                         <UiButton
                                             type="button"
-                                            variant="secondary"
-                                            size="icon"
+                                            variant={ButtonVariant.SECONDARY}
+                                            size={ButtonSize.ICON}
                                             onClick={this.handleStop}
                                             title="Stop generation"
                                             className={styles.stopButton}
@@ -1411,8 +1408,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                     ) : (
                                         <UiButton
                                             type="submit"
-                                            variant="primary"
-                                            size="icon"
+                                            variant={ButtonVariant.PRIMARY}
+                                            size={ButtonSize.ICON}
                                             disabled={isFormDisabled || !input.trim()}
                                             tabIndex={2}
                                             onClick={this.handleSubmit}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UiModal } from './UiModal';
-import { UiButton } from './UiButton';
+import { UiButton, ButtonVariant} from './UiButton';
 import { RichInput } from './RichInput';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
@@ -31,7 +31,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     const [rulesAndGoal, setRulesAndGoal] = useState(currentRulesAndGoal || '');
     const [name, setName] = useState(currentName || '');
     const [imageGenerationPref, setImageGenerationPref] = useState(currentImageGenerationPref || '');
-    const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(currentDefaultProvider || 'openai');
+    const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(currentDefaultProvider || LlmProvider.OPENAI);
     const [modelRole, setModelRole] = useState(currentModelRole || '');
     const [isSaving, setIsSaving] = useState(false);
 
@@ -41,7 +41,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             setRulesAndGoal(currentRulesAndGoal || '');
             setName(currentName || '');
             setImageGenerationPref(currentImageGenerationPref || '');
-            setDefaultProvider(currentDefaultProvider || 'openai');
+            setDefaultProvider(currentDefaultProvider || LlmProvider.OPENAI);
             setModelRole(currentModelRole || '');
         }
     }, [isOpen, currentRulesAndGoal, currentName, currentImageGenerationPref, currentDefaultProvider, currentModelRole]);
@@ -63,12 +63,12 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             onClose={onClose}
             actions={
                 <>
-                    <UiButton onClick={onClose} variant="secondary" disabled={isSaving}>
+                    <UiButton onClick={onClose} variant={ButtonVariant.SECONDARY} disabled={isSaving}>
                         Cancel
                     </UiButton>
                     <UiButton
                         onClick={handleSave}
-                        variant="primary"
+                        variant={ButtonVariant.PRIMARY}
                         disabled={isSaving}
                     >
                         {isSaving ? 'Saving...' : 'Save'}

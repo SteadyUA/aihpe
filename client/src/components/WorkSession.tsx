@@ -2,7 +2,7 @@
 import React from 'react';
 import { Chat } from './Chat';
 import { Workarea } from './Workarea';
-import { Session } from '../types';
+import { Session, SessionStatus } from '../types';
 import { ResizeHandle } from './ResizeHandle';
 import { ElementPicker } from '../lib/ElementPicker';
 
@@ -74,8 +74,8 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
             }
             this.chatRef.current?.focus();
         } else if (this.props.isVisible) {
-            const wasLoading = prevProps.session.status === 'pending' || prevProps.session.status === 'unloaded';
-            const isLoaded = this.props.session.status !== 'pending' && this.props.session.status !== 'unloaded';
+            const wasLoading = prevProps.session.status === SessionStatus.PENDING || prevProps.session.status === SessionStatus.UNLOADED;
+            const isLoaded = this.props.session.status !== SessionStatus.PENDING && this.props.session.status !== SessionStatus.UNLOADED;
             if (wasLoading && isLoaded) {
                 this.chatRef.current?.focus();
             }
@@ -217,7 +217,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
 
         const { chatWidth, isResizing } = this.state;
 
-        if (session.status === 'pending' || session.status === 'unloaded') {
+        if (session.status === SessionStatus.PENDING || session.status === SessionStatus.UNLOADED) {
             return (
                 <div style={{
                     display: isVisible ? 'flex' : 'none',
@@ -264,7 +264,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     ref={this.chatRef}
                     sessionId={session.id}
                     onUpdateSession={this.props.onUpdateSession}
-                    status={session.status || 'idle'}
+                    status={session.status || SessionStatus.IDLE}
                     isVisible={isVisible}
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
@@ -277,7 +277,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     lastTurn={session.lastTurn}
                     onPreviewTurn={onPreviewTurn}
                     provider={session.provider}
-                    attachment={session.attachment}
+                    attachment={session.attachment || undefined}
                     unsentInput={session.input ?? undefined}
                     sessionIds={sessionIds}
                     onSwitchSession={onSwitchSession}
@@ -300,7 +300,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     onLoad={this.handlePreviewLoad}
                     isResizing={isResizing}
                     onProceed={this.handleProceed}
-                    isBusy={session.status === 'busy'}
+                    isBusy={session.status === SessionStatus.BUSY}
                     isLatest={isLatest}
                     displayedTurn={currentTurn}
                 />

@@ -1,7 +1,7 @@
 import React from 'react';
 import classNames from 'classnames';
-import { UiCheckbox } from '../UiCheckbox';
-import { UiButton } from '../UiButton';
+import { UiCheckbox, CheckboxVariant } from '../UiCheckbox';
+import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { UiModal } from '../UiModal';
 import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
@@ -374,11 +374,11 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         const actions = (
             <>
-                <UiButton variant="secondary" onClick={this.closeUploadModal} disabled={isUploading}>
+                <UiButton variant={ButtonVariant.SECONDARY} onClick={this.closeUploadModal} disabled={isUploading}>
                     Cancel
                 </UiButton>
                 <UiButton
-                    variant={filesToUpload.length > 0 ? 'primary' : 'secondary'}
+                    variant={filesToUpload.length > 0 ? ButtonVariant.PRIMARY : ButtonVariant.SECONDARY}
                     disabled={filesToUpload.length === 0 || isUploading}
                     onClick={this.handleUpload}
                 >
@@ -420,7 +420,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                             checked={this.state.generateDescriptionOnUpload}
                             onChange={(checked) => this.setState({ generateDescriptionOnUpload: checked })}
                             label="Generate description"
-                            variant="danger"
+                            variant={CheckboxVariant.DANGER}
                         />
                     </div>
                     {filesToUpload.length > 0 && (
@@ -463,7 +463,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                 {!editingImage.isUsed && (
                     <div style={{ marginRight: 'auto' }}>
                         <UiButton
-                            variant="danger" // Assuming danger variant exists or will fallback
+                            variant={ButtonVariant.DANGER} // Assuming danger variant exists or will fallback
                             onClick={this.handleDeleteClick}
                             disabled={isBusy}
                             className={styles.deleteButton}
@@ -472,10 +472,10 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                         </UiButton>
                     </div>
                 )}
-                <UiButton variant="secondary" onClick={this.closeEditModal} disabled={isBusy}>
+                <UiButton variant={ButtonVariant.SECONDARY} onClick={this.closeEditModal} disabled={isBusy}>
                     Cancel
                 </UiButton>
-                <UiButton variant="primary" onClick={this.handleSaveDescription} disabled={isBusy}>
+                <UiButton variant={ButtonVariant.PRIMARY} onClick={this.handleSaveDescription} disabled={isBusy}>
                     {isSavingDescription ? 'Saving...' : 'Save'}
                 </UiButton>
             </>
@@ -507,8 +507,8 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                                 </span>
                             ) : (
                                 <UiButton
-                                    variant="secondary"
-                                    size="small"
+                                    variant={ButtonVariant.SECONDARY}
+                                    size={ButtonSize.SMALL}
                                     onClick={this.handleGenerateDescription}
                                     disabled={isBusy}
                                 >
@@ -549,8 +549,8 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                     }
                     right={
                         <UiButton
-                            variant="secondary"
-                            size="icon"
+                            variant={ButtonVariant.SECONDARY}
+                            size={ButtonSize.ICON}
                             onClick={this.openUploadModal}
                             title="Upload images"
                         >

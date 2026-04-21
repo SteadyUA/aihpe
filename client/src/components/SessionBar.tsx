@@ -1,4 +1,5 @@
 import React from 'react';
+import { SessionStatus } from '../types';
 import classNames from 'classnames';
 import styles from './SessionBar.module.css';
 
@@ -7,7 +8,7 @@ interface SessionBarProps {
     activeSessionId: string | null;
     onSwitch: (id: string) => void;
     onCreate: () => void;
-    statusMap: Record<string, string>;
+    statusMap: Record<string, SessionStatus>;
     groups: Record<string, number>; // Map sessionId -> groupId
     subjects: Record<string, string>; // Map sessionId -> subject
     onRemove: (id: string) => void;
@@ -224,9 +225,9 @@ export class SessionBar extends React.Component<
                     >
                         {sessions.map((id, index) => {
                             const isActive = id === activeSessionId;
-                            const status = statusMap?.[id] || 'idle';
+                            const status = statusMap?.[id] || SessionStatus.IDLE;
                             const isPending = pendingSessions.includes(id);
-                            const isBusy = status === 'busy' || isPending;
+                            const isBusy = status === SessionStatus.BUSY || isPending;
                             const groupId = groups?.[id];
                             // Access dynamic group class from styles module
                             const groupClass =
@@ -274,7 +275,7 @@ export class SessionBar extends React.Component<
                                                 },
                                             )}
                                         >
-                                            {status === 'error' && (
+                                            {status === SessionStatus.ERROR && (
                                                 <svg
                                                     width="12"
                                                     height="12"
@@ -290,7 +291,7 @@ export class SessionBar extends React.Component<
                                                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                                 </svg>
                                             )}
-                                            {!isBusy && status !== 'error' && (
+                                            {!isBusy && status !== SessionStatus.ERROR && (
                                                 <svg
                                                     width="12"
                                                     height="12"

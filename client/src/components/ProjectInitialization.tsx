@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { apiAuth } from '../utils/api';
 import { MainLayout } from './MainLayout';
-import { UiButton } from './UiButton';
+import { UiButton, ButtonVariant} from './UiButton';
 import styles from './Projects.module.css';
+import { TaskStatus } from '../types';
 
 interface Job {
     description: string;
@@ -17,7 +18,7 @@ interface Step {
 
 interface Task {
     id: string;
-    status: 'pending' | 'planning' | 'executing' | 'completed' | 'failed';
+    status: TaskStatus;
     steps: Step[];
     errorMessage?: string;
 }
@@ -43,10 +44,10 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                 const data = await res.json();
                 setTask(data);
 
-                if (data.status === 'completed') {
+                if (data.status === TaskStatus.COMPLETED) {
                     clearInterval(interval);
                     onComplete();
-                } else if (data.status === 'failed') {
+                } else if (data.status === TaskStatus.FAILED) {
                     clearInterval(interval);
                     setError(data.errorMessage || 'Conversion failed');
                 }
@@ -102,7 +103,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                     <h2 style={{ color: '#ff4d4f' }}>Initialization Failed</h2>
                     <p>{error}</p>
                     <UiButton 
-                        variant="primary" 
+                        variant={ButtonVariant.PRIMARY} 
                         onClick={handleRetry} 
                         style={{ marginTop: '1rem' }}
                     >

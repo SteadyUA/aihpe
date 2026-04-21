@@ -27,13 +27,17 @@ interface WorkareaProps {
     displayedTurn: number;
 }
 
-const FILENAME_MAP: Record<AssetType, string> = {
-    html: 'index.html',
-    css: 'styles.css',
-    js: 'script.js'
-};
+export enum AssetType {
+    HTML = 'html',
+    CSS = 'css',
+    JS = 'js'
+}
 
-type AssetType = 'html' | 'css' | 'js';
+const FILENAME_MAP: Record<AssetType, string> = {
+    [AssetType.HTML]: 'index.html',
+    [AssetType.CSS]: 'styles.css',
+    [AssetType.JS]: 'script.js'
+};
 
 interface WorkareaState {
     iframeKey: number;
@@ -55,8 +59,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.state = {
             iframeKey: 0,
             versionCache: {}, // Initialize empty
-            loading: { html: false, css: false, js: false },
-            unsavedContent: { html: null, css: null, js: null },
+            loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
+            unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
             isSaving: false,
         };
         this.previewRef = React.createRef();
@@ -85,8 +89,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             this.setState(
                 (prev) => {
                     const newState: Partial<WorkareaState> = {
-                        loading: { html: false, css: false, js: false },
-                        unsavedContent: { html: null, css: null, js: null },
+                        loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
+                        unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
                         iframeKey: prev.iframeKey + 1,
                     };
 
@@ -106,9 +110,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
     loadContent = () => {
         const { activeTab } = this.props;
-        if (activeTab === 'preview' || activeTab === 'images') return;
+        if (activeTab === TabType.PREVIEW || activeTab === TabType.IMAGES) return;
 
-        this.fetchFile(activeTab as AssetType);
+        this.fetchFile(activeTab as unknown as AssetType);
     };
 
     componentWillUnmount() {
@@ -156,15 +160,15 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
 
 
-            if (version === currentVersion && activeTab !== 'preview' && activeTab !== 'images' && sessionId) {
+            if (version === currentVersion && activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES && sessionId) {
                 // Standard file fetch
                 if (filename) {
                     const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
-                    if (type === activeTab) {
-                        this.fetchFile(activeTab as AssetType);
+                    if (type === activeTab as unknown as AssetType) {
+                        this.fetchFile(activeTab as unknown as AssetType);
                     }
                 } else {
-                    this.fetchFile(activeTab as AssetType);
+                    this.fetchFile(activeTab as unknown as AssetType);
                 }
             }
         });
@@ -204,7 +208,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             const text = await res.text();
 
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -216,7 +220,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         } catch (error) {
             console.error(`Failed to load ${type}`, error);
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -233,8 +237,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         const { activeTab } = this.props;
         const { unsavedContent } = this.state;
         // activeTab is the OLD tab
-        if (activeTab !== 'preview' && activeTab !== 'images' && unsavedContent[activeTab as AssetType] !== null) {
-            await this.handleSave(activeTab as AssetType);
+        if (activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES && unsavedContent[activeTab as unknown as AssetType] !== null) {
+            await this.handleSave(activeTab as unknown as AssetType);
         }
 
 
@@ -258,9 +262,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         const { unsavedContent } = this.state;
 
         // Use targetType if provided, otherwise activeTab
-        const typeToSave = targetType || activeTab;
+        const typeToSave = targetType || activeTab as unknown as AssetType;
 
-        if (typeToSave === 'preview' || typeToSave === 'images') return;
+        if (typeToSave === TabType.PREVIEW as unknown as AssetType || typeToSave === TabType.IMAGES as unknown as AssetType) return;
         const content = unsavedContent[typeToSave as AssetType];
         if (content === null) return; // No changes
 
@@ -296,7 +300,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             // Update cache with saved content and clear unsaved state
             // Update cache with saved content and clear unsaved state
             this.setState((prev) => {
-                const versionCache = prev.versionCache[version] || { html: null, css: null, js: null };
+                const versionCache = prev.versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
                 return {
                     versionCache: {
                         ...prev.versionCache,
@@ -461,10 +465,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             unsavedContent,
             iframeKey,
         } = this.state;
-        const isCodeView = activeTab !== 'preview' && activeTab !== 'images';
+        const isCodeView = activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES;
 
         // Resolve content for current version
-        const currentFiles = versionCache[version] || { html: null, css: null, js: null };
+        const currentFiles = versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
 
         return (
             <div
@@ -475,17 +479,17 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                 <div className={styles.assetsTabs}>
                     <button
                         className={classNames(styles.assetTab, {
-                            [styles.active]: activeTab === 'preview',
+                            [styles.active]: activeTab === TabType.PREVIEW,
                         })}
-                        onClick={() => this.handleTabChange('preview')}
+                        onClick={() => this.handleTabChange(TabType.PREVIEW)}
                     >
                         Preview
                     </button>
                     <button
                         className={classNames(styles.assetTab, {
-                            [styles.active]: activeTab === 'images',
+                            [styles.active]: activeTab === TabType.IMAGES,
                         })}
-                        onClick={() => this.handleTabChange('images')}
+                        onClick={() => this.handleTabChange(TabType.IMAGES)}
                     >
                         Images
                     </button>
@@ -494,13 +498,13 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     </span>
 
                     <div className={styles.assetsSpacer}></div>
-                    {(['html', 'css', 'js'] as const).map((type) => (
+                    {([AssetType.HTML, AssetType.CSS, AssetType.JS]).map((type) => (
                         <button
                             key={type}
                             className={classNames(styles.assetTab, {
-                                [styles.active]: activeTab === type,
+                                [styles.active]: activeTab as unknown as AssetType === type,
                             })}
-                            onClick={() => this.handleTabChange(type)}
+                            onClick={() => this.handleTabChange(type as unknown as TabType)}
                         >
                             {FILENAME_MAP[type]}
                             {unsavedContent[type] !== null && ' *'}
@@ -512,7 +516,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     ref={this.previewRef}
                     sessionId={sessionId}
                     version={version}
-                    active={activeTab === 'preview'}
+                    active={activeTab === TabType.PREVIEW}
                     onLoad={onLoad}
                     reloadTrigger={iframeKey}
                     isResizing={this.props.isResizing}
@@ -521,13 +525,13 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                 <Images
                     sessionId={sessionId}
                     version={version}
-                    active={activeTab === 'images'}
+                    active={activeTab === TabType.IMAGES}
                 />
 
 
 
                 {
-                    (['html', 'css', 'js'] as const).map(type => {
+                    ([AssetType.HTML, AssetType.CSS, AssetType.JS]).map(type => {
                         const content = unsavedContent[type] ?? currentFiles[type] ?? '';
                         const language = this.getEditorLanguage(type);
 
@@ -537,7 +541,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                                 language={language}
                                 value={content}
                                 loading={loading[type]}
-                                active={activeTab === type}
+                                active={activeTab as unknown as AssetType === type}
                                 onChange={this.handleEditorChange(type)}
                                 onMount={this.handleEditorDidMount(type)}
                             />

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UiModal } from './UiModal';
-import { UiButton } from './UiButton';
+import { UiButton, ButtonVariant} from './UiButton';
 import { RichInput } from './RichInput';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
@@ -16,7 +16,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
     const [name, setName] = useState('');
     const [rulesAndGoal, setRulesAndGoal] = useState('');
     const [imageGenerationPref, setImageGenerationPref] = useState('');
-    const [defaultProvider, setDefaultProvider] = useState<LlmProvider>('openai');
+    const [defaultProvider, setDefaultProvider] = useState<LlmProvider>(LlmProvider.OPENAI);
     const [modelRole, setModelRole] = useState('');
     const [file, setFile] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -45,14 +45,14 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
                 <>
                     <UiButton
                         onClick={() => onClose?.()}
-                        variant="secondary"
+                        variant={ButtonVariant.SECONDARY}
                         disabled={isCreating}
                     >
                         Cancel
                     </UiButton>
                     <UiButton
                         onClick={handleCreate}
-                        variant="primary"
+                        variant={ButtonVariant.PRIMARY}
                         disabled={isCreating}
                     >
                         {isCreating ? 'Creating...' : 'Create'}

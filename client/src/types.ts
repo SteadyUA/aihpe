@@ -1,7 +1,14 @@
-export type TabType = 'preview' | 'images' | 'html' | 'css' | 'js' | 'plan';
+export enum TabType {
+    PREVIEW = 'preview',
+    IMAGES = 'images',
+    HTML = 'html',
+    CSS = 'css',
+    JS = 'js',
+    PLAN = 'plan'
+}
 
 export interface MessageData {
-    role: 'user' | 'assistant' | 'system';
+    role: ChatRole;
     content: string;
     turn: number;
     version?: number;
@@ -28,7 +35,7 @@ export interface Project {
     sessionIds: string[];
     activeSessionId?: string;
     modelRole?: string;
-    status?: 'initialization' | 'ready';
+    status?: ProjectStatus;
     taskId?: string;
     createdAt: string;
     updatedAt: string;
@@ -44,13 +51,44 @@ export interface UnsentData {
 
 
 
-export type LlmProvider = 'openai' | 'google';
+export enum LlmProvider {
+    OPENAI = 'openai',
+    GOOGLE = 'google'
+}
+
+export enum ProjectStatus {
+    INITIALIZATION = 'initialization',
+    READY = 'ready'
+}
+
+export enum TaskStatus {
+    PENDING = 'pending',
+    PLANNING = 'planning',
+    EXECUTING = 'executing',
+    COMPLETED = 'completed',
+    FAILED = 'failed'
+}
+
+export enum ChatRole {
+    USER = 'user',
+    ASSISTANT = 'assistant',
+    SYSTEM = 'system',
+    TOOL = 'tool'
+}
+
+export enum SessionStatus {
+    IDLE = 'idle',
+    PENDING = 'pending',
+    BUSY = 'busy',
+    ERROR = 'error',
+    UNLOADED = 'unloaded'
+}
 
 export interface Session {
     id: string;
     projectId: string; // New field
     subject?: string;
-    status: 'idle' | 'pending' | 'busy' | 'error' | 'unloaded';
+    status: SessionStatus;
     // messages: MessageData[]; // DEPRECATED
     // turns: Turn[]; // MOVED TO CHAT COMPONENT STATE
 

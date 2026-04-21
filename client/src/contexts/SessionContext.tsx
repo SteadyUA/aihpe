@@ -1,7 +1,7 @@
 
 import React, { createContext } from 'react';
 import { apiAuth } from '../utils/api';
-import { Session, TabType } from '../types';
+import { Session, TabType, SessionStatus } from '../types';
 import { withRouter, RouterProps } from '../components/withRouter';
 
 interface SessionContextType {
@@ -264,12 +264,11 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
 
             // If session exists and is NOT pending, we ignore it (duplicate event).
             // If it IS pending, we need to update it with the confirm data (status: idle, etc).
-            if (exists && exists.status !== 'pending') return null;
+            if (exists && exists.status !== SessionStatus.PENDING) return null;
 
             const lastTurn = sessionData.lastTurn ?? sessionData.currentTurn ?? 0;
 
-            // If updating a pending session, assume status is 'idle' unless specified otherwise.
-            const status = sessionData.status ?? 'idle';
+            const status = sessionData.status ?? SessionStatus.IDLE;
 
             const newSession: Session = {
                 ...(exists || {}), // Keep existing props if merging
@@ -331,7 +330,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 const sessionData = await this.creatingSessionPromise;
                 if (sessionData) {
                     // Start pending session from existing data
-                    this.handleSessionCreated({ ...sessionData, status: 'pending' });
+                    this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING });
                 }
                 return;
             } catch (e) {
@@ -353,7 +352,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             const sessionData = await this.creatingSessionPromise;
 
             // Start optimistic pending session
-            this.handleSessionCreated({ ...sessionData, status: 'pending' });
+            this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING });
 
             this.creatingSessionPromise = null;
 
@@ -447,7 +446,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             if (!res.ok) throw new Error('Clone turn failed');
             const session = await res.json();
             // Force status to pending so Chat knows to wait for SSE (and then refetch turns)
-            this.handleSessionCreated({ ...session, status: 'pending' }, activeSessionId);
+            this.handleSessionCreated({ ...session, status: SessionStatus.PENDING }, activeSessionId);
         } catch (error) {
             console.error('Failed to clone turn', error);
         }
@@ -474,8 +473,8 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 fetchedIds.add(sId);
 
                 const serverStatus = s.status;
-                const mappedStatus = (serverStatus === 'started' || serverStatus === 'generating') ? 'busy' :
-                    (serverStatus === 'error') ? 'error' : 'idle';
+                const mappedStatus = (serverStatus === 'started' || serverStatus === 'generating') ? SessionStatus.BUSY :
+                    (serverStatus === 'error') ? SessionStatus.ERROR : SessionStatus.IDLE;
 
                 const existing = prev.sessions[sId];
 
@@ -483,7 +482,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 sessionsMap[sId] = {
                     id: sId,
                     projectId: this.props.projectId || s.projectId || '',
-                    status: existing ? (mappedStatus === 'idle' ? (existing.status || 'idle') : mappedStatus) : mappedStatus,
+                    status: existing ? (mappedStatus === SessionStatus.IDLE ? (existing.status || SessionStatus.IDLE) : mappedStatus) : mappedStatus,
 
                     lastTurn: s.lastTurn ?? 0,
                     activeTurn: existing ? (existing.activeTurn ?? s.lastTurn ?? 0) : (s.lastTurn ?? 0),

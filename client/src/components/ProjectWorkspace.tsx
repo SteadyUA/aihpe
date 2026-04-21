@@ -3,7 +3,7 @@ import React from 'react';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { SessionProvider } from '../contexts/SessionContext';
 import { apiAuth } from '../utils/api';
-import { LlmProvider } from '../types';
+import { LlmProvider, ProjectStatus } from '../types';
 import { withRouter, RouterProps } from './withRouter';
 import { ProjectInitialization } from './ProjectInitialization';
 
@@ -20,7 +20,7 @@ interface ProjectWorkspaceState {
     projectModelRole: string;
     projectSessions: any[];
     activeSessionId?: string | null;
-    projectStatus?: 'initialization' | 'ready';
+    projectStatus?: ProjectStatus;
     projectTaskId?: string;
 }
 
@@ -32,11 +32,11 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             projectName: '',
             projectRulesAndGoal: '',
             projectImageGenerationPref: '',
-            projectDefaultProvider: 'openai',
+            projectDefaultProvider: LlmProvider.OPENAI,
             projectModelRole: '',
             projectSessions: [],
             activeSessionId: null,
-            projectStatus: 'ready',
+            projectStatus: ProjectStatus.READY,
             projectTaskId: undefined,
         };
     }
@@ -211,7 +211,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
 
         if (!projectId) return <div>Loading Workspace...</div>;
 
-        if (projectStatus === 'initialization' && projectTaskId) {
+        if (projectStatus === ProjectStatus.INITIALIZATION && projectTaskId) {
             return (
                 <ProjectInitialization
                     taskId={projectTaskId}

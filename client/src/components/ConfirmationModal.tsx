@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { UiModal } from './UiModal';
-import { UiButton } from './UiButton';
+import { UiButton, ButtonVariant} from './UiButton';
 import styles from './ConfirmationModal.module.css';
 
 interface ConfirmationModalProps {
@@ -19,13 +19,13 @@ export class ConfirmationModal extends React.Component<ConfirmationModalProps> {
         const actions = (
             <>
                 <UiButton
-                    variant="secondary"
+                    variant={ButtonVariant.SECONDARY}
                     onClick={onCancel}
                 >
                     Cancel
                 </UiButton>
                 <UiButton
-                    variant="danger"
+                    variant={ButtonVariant.DANGER}
                     onClick={onConfirm}
                 >
                     Confirm

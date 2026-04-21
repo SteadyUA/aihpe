@@ -2,6 +2,11 @@ import React, { ChangeEvent } from 'react';
 import classNames from 'classnames';
 import styles from './UiCheckbox.module.css';
 
+export enum CheckboxVariant {
+    DEFAULT = 'default',
+    DANGER = 'danger'
+}
+
 interface UiCheckboxProps {
     checked: boolean;
     onChange: (checked: boolean) => void;
@@ -9,7 +14,7 @@ interface UiCheckboxProps {
     disabled?: boolean;
     title?: string;
     className?: string; // Allow external override/positioning
-    variant?: 'default' | 'danger';
+    variant?: CheckboxVariant;
 }
 
 export class UiCheckbox extends React.Component<UiCheckboxProps> {
@@ -20,13 +25,13 @@ export class UiCheckbox extends React.Component<UiCheckboxProps> {
     };
 
     render() {
-        const { checked, label, disabled, title, className, variant = 'default' } = this.props;
+        const { checked, label, disabled, title, className, variant = CheckboxVariant.DEFAULT } = this.props;
 
         return (
             <label
                 className={classNames(styles.container, className, {
                     [styles.disabled]: disabled,
-                    [styles.danger]: variant === 'danger',
+                    [styles.danger]: variant === CheckboxVariant.DANGER,
                 })}
                 title={title}
             >

@@ -7,7 +7,7 @@ import { ProjectCreationModal } from './ProjectCreationModal';
 import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { withSession, SessionContextProps } from '../contexts/SessionContext';
 import { SessionManager } from './SessionManager';
-import { LlmProvider } from '../types';
+import { LlmProvider, SessionStatus } from '../types';
 import { withRouter, RouterProps } from './withRouter';
 // import styles from './WorkspaceLayout.module.css'; // Replaced by MainLayout
 
@@ -129,7 +129,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             showProjectSettings,
         } = this.state;
 
-        const statusMap: Record<string, string> = {};
+        const statusMap: Record<string, SessionStatus> = {};
         const groups: Record<string, number> = {};
         const pendingSessions: string[] = [];
         const subjects: Record<string, string> = {};
@@ -140,7 +140,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                 statusMap[id] = s.status;
                 groups[id] = s.group;
                 subjects[id] = s.subject || '...';
-                if (s.status === 'pending') pendingSessions.push(id);
+                if (s.status === SessionStatus.PENDING) pendingSessions.push(id);
             }
         });
 

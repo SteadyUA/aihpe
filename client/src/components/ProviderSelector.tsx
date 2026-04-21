@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiDropdown } from './UiDropdown';
+import { UiDropdown, DropdownVariant } from './UiDropdown';
 import { LlmProvider } from '../types';
 import { LLM_PROVIDERS } from '../constants';
 
@@ -8,7 +8,7 @@ interface ProviderSelectorProps {
     onChange: (provider: LlmProvider) => void;
     disabled?: boolean;
     className?: string;
-    variant?: 'standard' | 'ghost';
+    variant?: DropdownVariant;
 }
 
 export class ProviderSelector extends React.Component<ProviderSelectorProps> {
@@ -17,7 +17,7 @@ export class ProviderSelector extends React.Component<ProviderSelectorProps> {
     };
 
     render() {
-        const { value = 'openai', disabled, className, variant } = this.props;
+        const { value = LlmProvider.OPENAI, disabled, className, variant } = this.props;
 
         return (
             <UiDropdown

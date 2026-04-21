@@ -7,6 +7,11 @@ interface UiDropdownOption {
     label: string;
 }
 
+export enum DropdownVariant {
+    STANDARD = 'standard',
+    GHOST = 'ghost'
+}
+
 interface UiDropdownProps {
     value: string;
     options: UiDropdownOption[];
@@ -15,7 +20,7 @@ interface UiDropdownProps {
     disabled?: boolean;
     className?: string;
     title?: string;
-    variant?: 'standard' | 'ghost';
+    variant?: DropdownVariant;
 }
 
 export class UiDropdown extends React.Component<UiDropdownProps> {
@@ -26,10 +31,10 @@ export class UiDropdown extends React.Component<UiDropdownProps> {
     };
 
     render() {
-        const { value, options, disabled, className, title, variant = 'standard' } = this.props;
+        const { value, options, disabled, className, title, variant = DropdownVariant.STANDARD } = this.props;
 
         return (
-            <div className={classNames(styles.container, className, { [styles.ghost]: variant === 'ghost' })} title={title}>
+            <div className={classNames(styles.container, className, { [styles.ghost]: variant === DropdownVariant.GHOST })} title={title}>
                 <select
                     className={styles.select}
                     value={value}
