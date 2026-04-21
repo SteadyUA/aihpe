@@ -1,15 +1,15 @@
 import { Service } from 'typedi';
-import { ChatAttachment, ChatMessage, LlmProvider, SessionMetadata, SessionStatus, Turn } from '../types/chat';
-import { ChatStatus } from './SseService';
-import { FilesService, EMPTY_FILES } from './session/FilesService';
+import { ChatAttachment, ChatMessage, LlmProvider, SessionMetadata, SessionStatus, Turn, ChatRole } from '../types/chat';
+
+import { FilesService } from './session/FilesService';
 import { SessionService } from './session/SessionService';
 import { ContextService } from './session/ContextService';
 import { TurnService } from './session/TurnService';
-import { LlmFactory } from './llm/LlmFactory';
+import { PageGenAgent } from './llm/agents/PageGenAgent';
+import { HistorySummaryAgent } from './llm/agents/HistorySummaryAgent';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
 import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
-import { TokenUsageService } from './llm/TokenUsageService';
 import { UnsentService } from './session/UnsentService';
 import { UploadService } from './image/UploadService';
 import { EventBus } from '../utils/bus';
@@ -31,9 +31,20 @@ export const SessionPatchEvent = EventBus.createEvent<any>('SESSION_PATCH');
 
 export const SessionStatusChangedEvent = EventBus.createEvent<{
     sessionId: string;
-    status: ChatStatus;
+    status: SessionStatus;
     message?: string;
 }>('SESSION_STATUS_CHANGED');
+
+export const ChatTokenUsedEvent = EventBus.createEvent<{
+    sessionId: string;
+    projectId: string;
+    agent: string;
+    turn: number;
+    model: string;
+    prompt: number;
+    completion: number;
+    total: number;
+}>('CHAT_TOKEN_USED');
 
 @Service()
 export class ChatService {
@@ -42,10 +53,10 @@ export class ChatService {
         private readonly sessionService: SessionService,
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
-        private readonly llmFactory: LlmFactory,
+        private readonly pageGenAgent: PageGenAgent,
+        private readonly historySummaryAgent: HistorySummaryAgent,
         private readonly imageService: ImageService,
         private readonly projectService: ProjectService,
-        private readonly tokenUsageService: TokenUsageService,
         private readonly unsentService: UnsentService,
         private readonly uploadService: UploadService,
         private readonly eventBus: EventBus,
@@ -79,13 +90,13 @@ export class ChatService {
 
         const metadata = await this.sessionService.getMetadata(sessionId);
         if (!metadata) {
-            await this.createSession(sessionId, '');
+            throw new Error(`Session ${sessionId} not found`);
         }
 
         if (!hasContent) {
             this.notifyStatus(
                 sessionId,
-                'skipped',
+                SessionStatus.IDLE,
                 'Message is empty. No changes applied.',
             );
             return {
@@ -95,13 +106,15 @@ export class ChatService {
         }
 
         // Update provider if specified and different
-        if (provider) {
+        if (provider && provider != metadata.provider) {
             await this.sessionService.updateMetadata(sessionId, { provider });
         }
 
         // Reload session metadata after potential update
         const currentMetadata = await this.sessionService.getMetadata(sessionId);
-        if (!currentMetadata) throw new Error(`Session ${sessionId} not found`);
+        if (!currentMetadata) {
+            throw new Error(`Session ${sessionId} not found`);
+        }
 
         // Append user message immediately
         const userContentForHistory = this.composeUserContent(
@@ -115,7 +128,7 @@ export class ChatService {
         const newTurn = currentTurn + 1;
 
         const contextEntry: ChatMessage = {
-            role: 'user',
+            role: ChatRole.USER,
             content: this.enrichContentWithSelection(userContentForHistory, selection),
             createdAt: now,
             selection,
@@ -128,10 +141,9 @@ export class ChatService {
         const newTurnEntry: Turn = {
             turn: newTurn,
             beginTime: now,
-            // endTime: undefined, // Incomplete
             request: userContentForHistory,
             response: '',
-            provider: provider ?? currentMetadata.provider ?? 'openai',
+            provider: provider ?? currentMetadata.provider ?? LlmProvider.OPENAI,
             fastMode: fastMode ?? currentMetadata.fastMode ?? false,
             selection,
             attachment: normalizedAttachment,
@@ -155,7 +167,6 @@ export class ChatService {
 
         return {
             turn: newTurn,
-            // session: await this.getRequiredSessionData(sessionId), // REMOVED
             promptData: {
                 message: trimmed,
                 attachment: normalizedAttachment,
@@ -178,7 +189,7 @@ export class ChatService {
         allowVariants: boolean = true,
         fastModeOverride?: boolean,
     ): Promise<void> {
-        this.notifyStatus(sessionId, 'started', 'Thinking...');
+        this.notifyStatus(sessionId, SessionStatus.STARTED, 'Thinking...');
 
         // Cancel any existing generation for this session (just in case)
         if (this.activeGenerations.has(sessionId)) {
@@ -258,17 +269,13 @@ export class ChatService {
         const imageGenerationPref = project?.imageGenerationPref;
         const modelRole = project?.modelRole;
 
-        const currentFiles = this.filesService.readVersionFiles(sessionId, currentMetadata.currentVersion) || EMPTY_FILES;
-
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
             let thoughtBuffer = '';
 
-            const client = this.llmFactory.getPageGenClient(currentMetadata.provider);
-            const generation = await client.generate({
+            const generation = await this.pageGenAgent.generatePage(currentMetadata.provider || LlmProvider.OPENAI, {
                 sessionId,
                 instructions: effectiveInstructions,
-                files: currentFiles,
                 conversation,
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
@@ -280,51 +287,47 @@ export class ChatService {
                 subject: currentMetadata.subject,
                 abortSignal: controller.signal,
                 summary: currentMetadata.summary, // Pass cumulative summary
-                trackRequestTokenUsage: async (usage: any) => {
-                    if (controller.signal.aborted) return;
-                    await this.tokenUsageService.saveUsage({
-                        projectId: currentMetadata.projectId,
-                        sessionId: sessionId,
-                        agent: usage.agent,
-                        turn: turn,
-                        model: usage.model,
-                        prompt: usage.prompt,
-                        completion: usage.completion,
-                        total: usage.total,
-                    });
-                },
+                onTokenUsage: this.createTokenUsageCallback(sessionId, currentMetadata.projectId, turn),
                 onPatch: (patch: any) => {
                     this.eventBus.publish(SessionPatchEvent({
                         sessionId,
                         ...patch,
                     }));
                 },
-                onProgress: (chunk: string) => {
-                    // Logic to handle both streaming thoughts and tool status updates
+                onNewMessage: async (msg: ChatMessage) => {
+                    const currentMeta = await this.sessionService.getMetadata(sessionId);
+                    await this.contextService.appendMessage(sessionId, {
+                        ...msg,
+                        version: currentMeta?.currentVersion || currentMetadata.currentVersion,
+                        turn: currentMeta?.lastTurn ?? turn,
+                    });
+                },
+                onChunkContent: (chunk: string) => {
                     if (controller.signal.aborted) return;
 
-                    if (chunk.startsWith('Tool call:') || chunk.startsWith('Step ')) {
-                        this.notifyStatus(sessionId, 'generating', chunk);
-                    } else {
-                        // Text stream (thoughts)
-                        thoughtBuffer += chunk;
-                        if (thoughtBuffer.includes('\n')) {
-                            const lines = thoughtBuffer.split('\n');
-                            thoughtBuffer = lines.pop() || ''; // Keep last partial line
+                    // Text stream (thoughts)
+                    thoughtBuffer += chunk;
+                    if (thoughtBuffer.includes('\n')) {
+                        const lines = thoughtBuffer.split('\n');
+                        thoughtBuffer = lines.pop() || ''; // Keep last partial line
 
-                            for (const line of lines) {
-                                const trimmedLine = line.trim();
-                                if (trimmedLine.length > 0) {
-                                    this.notifyStatus(sessionId, 'generating', trimmedLine);
-                                }
+                        for (const line of lines) {
+                            const trimmedLine = line.trim();
+                            if (trimmedLine.length > 0) {
+                                this.notifyStatus(sessionId, SessionStatus.GENERATING, trimmedLine);
                             }
                         }
                     }
                 },
+                onToolCall: (toolName: string, args: any) => {
+                    if (controller.signal.aborted) return;
+                    const summary = args?.summary || toolName;
+                    this.notifyStatus(sessionId, SessionStatus.GENERATING, summary);
+                },
                 onVariantRequest: async (instruction: string) => {
                     this.notifyStatus(
                         sessionId,
-                        'generating',
+                        SessionStatus.GENERATING,
                         `Tool call: generate_variant`,
                     );
 
@@ -382,93 +385,20 @@ export class ChatService {
                 },
             });
 
-
             if (generation.targetVersion !== undefined && generation.targetVersion !== null) {
-                // Merge existing files with new changes to avoid overwriting with partial updates
-                const mergedFiles = { ...currentFiles, ...generation.files };
+                if (generation.targetVersion > currentMetadata.currentVersion) {
+                    await this.sessionService.updateMetadata(sessionId, {
+                        currentVersion: generation.targetVersion,
+                        updatedAt: new Date(),
+                    });
+                }
 
-                await this.filesService.persistVersionFiles(sessionId, generation.targetVersion, mergedFiles);
-                await this.sessionService.updateMetadata(sessionId, {
-                    currentVersion: generation.targetVersion > currentMetadata.currentVersion ? generation.targetVersion : currentMetadata.currentVersion,
-                    updatedAt: new Date(),
-                });
-
-                await this.imageService.updateImagesUsage(sessionId, generation.targetVersion, generation.files);
-
-
-
-                // Detect and emit file changes
-                // Detect and emit file changes
-                // REMOVED file-change event emission
-            } else {
-                // No changes to files/version, just append messages
+                await this.imageService.updateImagesUsage(sessionId, generation.targetVersion);
             }
-
-            // Token usage is now tracked per-request via trackRequestTokenUsage callback
-
-            // TokenUsageSummary no longer includes capacity here. It's handled in saveUsage.
-            const currentUsageSummary = await this.tokenUsageService.getSummary(sessionId, 'chat');
 
             // Re-fetch strict session state
             const updatedMetadata = await this.sessionService.getMetadata(sessionId);
             if (!updatedMetadata) throw new Error(`Session ${sessionId} not found`);
-
-            if (generation.newMessages && generation.newMessages.length > 0) {
-                for (const msg of generation.newMessages) {
-                    await this.contextService.appendMessage(sessionId, {
-                        role: msg.role,
-                        content: msg.content,
-                        createdAt: new Date(),
-                        version: updatedMetadata.currentVersion,
-                        selection: msg.selection,
-                        turn: updatedMetadata.lastTurn ?? 0, // Use current turn (which was updated by user message)
-                        providerData: msg.providerData,
-                    });
-                }
-            }
-
-            // Check if we need to append the summary explicitly.
-            // If the last message was a tool execution (role='tool') or an assistant call without text response,
-            // we should append the summary so the user sees it.
-            const lastMsg =
-                generation.newMessages?.[generation.newMessages.length - 1];
-            let hasVisibleResponse = false;
-
-            if (lastMsg && lastMsg.role === 'assistant') {
-                if (
-                    typeof lastMsg.content === 'string' &&
-                    lastMsg.content.trim().length > 0
-                ) {
-                    hasVisibleResponse = true;
-                } else if (Array.isArray(lastMsg.content)) {
-                    // Check if there is any text part with content
-                    const textPart = lastMsg.content.find(
-                        (p: any) =>
-                            p.type === 'text' &&
-                            p.text &&
-                            p.text.trim().length > 0,
-                    );
-                    if (textPart) hasVisibleResponse = true;
-                }
-            }
-
-            if (!hasVisibleResponse && generation.summary) {
-                this.appendAssistantMessage(
-                    sessionId,
-                    generation.summary,
-                    updatedMetadata.currentVersion,
-                    false, // Do not add to context
-                );
-            }
-
-            // Construct the assistant message object to send to client
-            const assistantMessage: ChatMessage = {
-                role: 'assistant',
-                content: generation.summary,
-                createdAt: new Date(),
-                version: updatedMetadata.currentVersion,
-                turn: updatedMetadata.lastTurn ?? 0,
-            };
 
             // Update the existing turn with response, endTime and version
             // turn is passed from addUserMessage (1-based), but turn in DB is also 1-based.
@@ -479,20 +409,11 @@ export class ChatService {
             });
             await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });
 
-            // Summary generation moved to start of function
-            /* 
-            if (turn > 0 && turn % 5 === 0) {
-                await this.generateHistorySummary(sessionId, turn);
-            }
-            */
-
             this.notifyStatus(
                 sessionId,
-                'completed',
+                SessionStatus.IDLE,
                 'Request completed.',
             );
-
-
 
         } catch (error: any) {
             if (error.name === 'AbortError' || error.message?.includes('aborted')) {
@@ -511,7 +432,7 @@ export class ChatService {
             const description = this.describeError(error);
             this.notifyStatus(
                 sessionId,
-                'error',
+                SessionStatus.ERROR,
                 description,
             );
 
@@ -559,8 +480,8 @@ export class ChatService {
         // But we should push 'idle' status just in case (undoLastTurn does it, but we can be explicit if needed).
         // The undoLastTurn sets status to 'idle'.
 
-        // Emitting 'stopped' status might be useful for transient UI states
-        this.notifyStatus(sessionId, 'completed', 'Request stopped.'); // Using 'completed' or 'skipped' to reset state?
+        // Emitting 'idle' status might be useful for transient UI states
+        this.notifyStatus(sessionId, SessionStatus.IDLE, 'Request stopped.');
         // Actually undoLastTurn handles the SessionData update.
         // We might want to send a specific event to client? 
         // The client will handle the response from this API call.
@@ -587,19 +508,14 @@ export class ChatService {
 
     private async notifyStatus(
         sessionId: string,
-        status: ChatStatus,
+        status: SessionStatus,
         message?: string,
     ): Promise<void> {
-
-        let newStatus: SessionStatus = status;
-        if (status === 'completed' || status === 'skipped') {
-            newStatus = 'idle';
-        }
 
         await this.sessionService.updateMetadata(
             sessionId,
             {
-                status: newStatus,
+                status: status,
                 errorMessage: status === 'error' ? message : undefined,
             }
         );
@@ -609,6 +525,21 @@ export class ChatService {
             status,
             message,
         }));
+    }
+
+    private createTokenUsageCallback(sessionId: string, projectId: string, turn: number) {
+        return async (agentName: string, modelId: string, prompt: number, completion: number, total: number) => {
+            this.eventBus.publish(ChatTokenUsedEvent({
+                projectId,
+                sessionId,
+                agent: agentName,
+                turn,
+                model: modelId,
+                prompt,
+                completion,
+                total,
+            }));
+        };
     }
 
     private describeError(error: unknown): string {
@@ -750,7 +681,7 @@ export class ChatService {
         if (!session) throw new Error(`Session ${sessionId} not found`);
 
         const assistantMessage: ChatMessage = {
-            role: 'assistant',
+            role: ChatRole.ASSISTANT,
             content: content,
             createdAt: new Date(),
             version: version ?? 0,
@@ -811,27 +742,15 @@ export class ChatService {
         const modelRole = project?.modelRole;
 
         try {
-            this.notifyStatus(sessionId, 'generating', `summarization...`);
-            const client = this.llmFactory.getHistoryClient(session.provider);
-            const summary = await client.generate({
+            this.notifyStatus(sessionId, SessionStatus.GENERATING, `summarization...`);
+            const summary = await this.historySummaryAgent.summarizeHistory(session.provider || LlmProvider.OPENAI, {
                 sessionId,
                 conversation: messagesToSummarize,
                 rulesAndGoal,
                 modelRole,
                 abortSignal: this.activeGenerations.get(sessionId)?.signal,
                 previousSummary: session.summary,
-                trackRequestTokenUsage: async (usage: any) => {
-                    await this.tokenUsageService.saveUsage({
-                        projectId: session.projectId,
-                        sessionId: sessionId,
-                        agent: usage.agent,
-                        turn: turn,
-                        model: usage.model,
-                        prompt: usage.prompt,
-                        completion: usage.completion,
-                        total: usage.total,
-                    });
-                },
+                onTokenUsage: this.createTokenUsageCallback(sessionId, session.projectId, turn),
             });
 
             // Update session with new summary
@@ -876,7 +795,7 @@ export class ChatService {
             await this.generateHistorySummary(sessionId, t);
         }
 
-        this.notifyStatus(sessionId, 'completed', 'Summary regeneration complete.');
+        this.notifyStatus(sessionId, SessionStatus.IDLE, 'Summary regeneration complete.');
         console.log(`Finished rebuilding summary for session ${sessionId}`);
     }
 
@@ -884,7 +803,7 @@ export class ChatService {
         sessionId: string,
         projectId: string,
         group?: number,
-        provider: LlmProvider = 'openai',
+        provider: LlmProvider = LlmProvider.OPENAI,
         sourceSessionId: string = 'system'
     ): Promise<SessionMetadata> {
         const now = new Date();
@@ -897,14 +816,14 @@ export class ChatService {
             lastTurn: 0,
             provider,
             fastMode: false,
-            status: 'idle',
+            status: SessionStatus.IDLE,
             subject: '...',
         };
 
         await this.sessionService.saveMetadata(metadata);
         await this.contextService.saveContext(sessionId, []);
         await this.turnService.saveTurns(sessionId, []);
-        this.filesService.persistVersionFiles(sessionId, 0, EMPTY_FILES);
+        this.filesService.initFirstVersion(sessionId);
 
         this.eventBus.publish(SessionCreatedEvent({
             sessionId,
@@ -957,11 +876,6 @@ export class ChatService {
             }
         }
 
-        const filesSnapshot = this.filesService.readVersionFiles(sourceId, targetVersion);
-        if (!filesSnapshot) {
-            throw new Error(`Files for version ${targetVersion} not found for session ${sourceId}`);
-        }
-
         // We should eventually return just metadata or void.
         // ChatController expects SessionData, so we construct it.
         const newMetadata: SessionMetadata = {
@@ -970,7 +884,7 @@ export class ChatService {
             updatedAt: new Date(),
             currentVersion: targetVersion,
             lastTurn: lastTurn,
-            status: 'idle',
+            status: SessionStatus.IDLE,
         };
 
         this.filesService.deleteSessionDir(targetId);
@@ -1068,7 +982,7 @@ export class ChatService {
             currentVersion: targetVersion,
             lastTurn: currentTurn - 1,
             updatedAt: new Date(),
-            status: 'idle',
+            status: SessionStatus.IDLE,
         });
         await this.contextService.saveContext(sessionId, newContext);
         await this.turnService.saveTurns(sessionId, newTurns);

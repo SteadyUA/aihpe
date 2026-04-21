@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { Service } from 'typedi';
-import { SessionFiles } from '../../types/chat';
 import { getSessionsDir } from '../../utils/pathUtils';
 
 const DEFAULT_SESSION_SCRIPT = `(() => {
@@ -39,7 +39,7 @@ const DEFAULT_SESSION_SCRIPT = `(() => {
   }, true);
 })();\n`;
 
-export const EMPTY_FILES: SessionFiles = {
+export const EMPTY_FILES: Record<string, string> = {
     'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
     'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
     'script.js': DEFAULT_SESSION_SCRIPT,
@@ -69,6 +69,10 @@ export class FilesService {
         return path.join(this.resolveSessionDir(sessionId), VERSION_DIRNAME, String(safeVersion));
     }
 
+    public resolveVersionFilePath(sessionId: string, version: number, filename: string): string {
+        return path.join(this.resolveVersionDir(sessionId, version), path.basename(filename));
+    }
+
     public ensureDirectory(dir: string): void {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
@@ -81,40 +85,85 @@ export class FilesService {
         }
     }
 
-    public readVersionFiles(sessionId: string, version: number): SessionFiles | undefined {
+    public listVersionFiles(sessionId: string, version: number): string[] {
         const versionDir = this.resolveVersionDir(sessionId, version);
         if (!fs.existsSync(versionDir)) {
-            return undefined;
+            return [];
         }
-        return {
-            'index.html': this.readFileOrDefault(path.join(versionDir, 'index.html'), EMPTY_FILES['index.html']),
-            'styles.css': this.readFileOrDefault(path.join(versionDir, 'styles.css'), EMPTY_FILES['styles.css']),
-            'script.js': this.readFileOrDefault(path.join(versionDir, 'script.js'), EMPTY_FILES['script.js']),
-        };
+        try {
+            return fs.readdirSync(versionDir).filter(file => fs.statSync(path.join(versionDir, file)).isFile());
+        } catch (error) {
+            console.error(`Failed to list files for ${sessionId} v${version}`, error);
+            return [];
+        }
     }
 
-    private readFileOrDefault(filePath: string, fallback: string): string {
+    public readVersionFile(sessionId: string, version: number, filename: string): string | undefined {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        if (!fs.existsSync(filePath)) {
+            return undefined;
+        }
         try {
-            if (!fs.existsSync(filePath)) return fallback;
             return fs.readFileSync(filePath, 'utf-8');
         } catch (error) {
             console.error(`Failed to read file ${filePath}`, error);
-            return fallback;
+            return undefined;
         }
     }
 
-    public persistVersionFiles(sessionId: string, version: number, files: SessionFiles): void {
-        const versionDir = this.resolveVersionDir(sessionId, version);
-        this.ensureDirectory(versionDir);
-        fs.writeFileSync(path.join(versionDir, 'index.html'), files['index.html'] || '', 'utf-8');
-        fs.writeFileSync(path.join(versionDir, 'styles.css'), files['styles.css'] || '', 'utf-8');
-        fs.writeFileSync(path.join(versionDir, 'script.js'), files['script.js'] || '', 'utf-8');
+    public readVersionFileBuffer(sessionId: string, version: number, filename: string): Buffer | undefined {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        if (!fs.existsSync(filePath)) {
+            return undefined;
+        }
+        try {
+            return fs.readFileSync(filePath);
+        } catch (error) {
+            console.error(`Failed to read buffer for ${filePath}`, error);
+            return undefined;
+        }
     }
 
-    public persistSessionFile(sessionId: string, version: number, filename: string, content: string): void {
-        const versionDir = this.resolveVersionDir(sessionId, version);
+    public versionFileExists(sessionId: string, version: number, filename: string): boolean {
+        return fs.existsSync(this.resolveVersionFilePath(sessionId, version, filename));
+    }
+
+    public writeVersionFile(sessionId: string, version: number, filename: string, content: Buffer | string): void {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        fs.writeFileSync(filePath, content);
+    }
+
+    public copyFileToVersion(sessionId: string, version: number, filename: string, sourcePath: string): void {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        fs.copyFileSync(sourcePath, filePath);
+    }
+
+    public deleteVersionFile(sessionId: string, version: number, filename: string): void {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    }
+
+    public getVersionFileStream(sessionId: string, version: number, filename: string): Readable | undefined {
+        const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        if (!fs.existsSync(filePath)) {
+            return undefined;
+        }
+        try {
+            return fs.createReadStream(filePath);
+        } catch (error) {
+            console.error(`Failed to create read stream for ${filePath}`, error);
+            return undefined;
+        }
+    }
+
+    public initFirstVersion(sessionId: string): void {
+        const versionDir = this.resolveVersionDir(sessionId, 0);
         this.ensureDirectory(versionDir);
-        fs.writeFileSync(path.join(versionDir, filename), content, 'utf-8');
+        fs.writeFileSync(path.join(versionDir, 'index.html'), EMPTY_FILES['index.html'], 'utf-8');
+        fs.writeFileSync(path.join(versionDir, 'styles.css'), EMPTY_FILES['styles.css'], 'utf-8');
+        fs.writeFileSync(path.join(versionDir, 'script.js'), EMPTY_FILES['script.js'], 'utf-8');
     }
 
     public async initNextVersion(sessionId: string, currentVersion: number): Promise<number> {

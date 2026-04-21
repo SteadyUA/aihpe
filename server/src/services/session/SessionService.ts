@@ -3,6 +3,7 @@ import { Session } from '../../entities/Session';
 import { AppDataSource } from '../../data-source';
 import { LlmProvider, SessionMetadata, SessionStatus } from '../../types/chat';
 
+
 @Service()
 export class SessionService {
     private readonly sessions = new Map<string, SessionMetadata>();
@@ -32,7 +33,7 @@ export class SessionService {
                 lastTurn: entity.lastTurn || 0,
                 provider: (entity.provider as LlmProvider) || 'openai',
                 fastMode: entity.fastMode || false,
-                status: (entity.status as SessionStatus) || 'idle',
+                status: (entity.status as SessionStatus) || SessionStatus.IDLE,
                 errorMessage: entity.errorMessage || undefined,
                 subject: entity.subject || undefined,
                 summary: entity.summary || undefined,
@@ -59,7 +60,7 @@ export class SessionService {
             lastTurn: entity.lastTurn || 0,
             provider: (entity.provider as LlmProvider) || 'openai',
             fastMode: entity.fastMode || false,
-            status: (entity.status as SessionStatus) || 'idle',
+            status: (entity.status as SessionStatus) || SessionStatus.IDLE,
             errorMessage: entity.errorMessage || undefined,
             subject: entity.subject || undefined,
             summary: entity.summary || undefined,

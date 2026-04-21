@@ -32,7 +32,7 @@ import { SseService } from '../services/SseService';
 import { SessionService } from '../services/session/SessionService';
 import { TurnService } from '../services/session/TurnService';
 import { TokenUsageService } from '../services/llm/TokenUsageService';
-import { LlmFactory } from '../services/llm/LlmFactory';
+
 
 import { LlmProvider, SessionMetadata, UnsentData, SessionStatus } from '../types/chat';
 import { UploadService } from '../services/image/UploadService';
@@ -336,7 +336,7 @@ export class SessionController {
         private readonly chatService: ChatService,
         private readonly sseService: SseService,
         private readonly tokenUsageService: TokenUsageService,
-        private readonly llmFactory: LlmFactory,
+
         private readonly uploadService: UploadService,
         private readonly unsentService: UnsentService,
         private readonly sessionService: SessionService,
@@ -353,7 +353,7 @@ export class SessionController {
             group: snapshot.group,
             currentVersion: snapshot.currentVersion,
             lastTurn: snapshot.lastTurn ?? 0,
-            provider: snapshot.provider ?? 'openai',
+            provider: snapshot.provider ?? LlmProvider.OPENAI,
             fastMode: snapshot.fastMode ?? false,
             subject: snapshot.subject,
             tokenUsage,
@@ -393,7 +393,7 @@ export class SessionController {
                 console.error(`Background session creation failed for ${id}`, error);
                 this.sseService.emitChatStatus({
                     sessionId: id,
-                    status: 'error',
+                    status: SessionStatus.ERROR,
                     message: 'Failed to create session',
                 });
             }
@@ -628,7 +628,7 @@ export class SessionController {
                 console.error('Background session cloning failed', error);
                 this.sseService.emitChatStatus({
                     sessionId: newSessionId,
-                    status: 'error',
+                    status: SessionStatus.ERROR,
                     message: 'Failed to clone session in background',
                 });
             }
@@ -642,28 +642,4 @@ export class SessionController {
         };
     }
 
-    private async createTokenTracker(sessionId: string) {
-        // Fetch session to getKey info
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) throw new Error(`Session ${sessionId} not found`);
-
-        return async (usage: { prompt: number, completion: number, total: number, model: string }) => {
-            const currentTurn = session.lastTurn || 0;
-            // Maybe increment turn? Or attach to current turn? 
-            // In ChatService we attached to the turn being generated. 
-            // Here we are outside of a chat turn generation flow (it's a manual upload or manual describe trigger).
-            // Attaching to currentTurn is probably safest.
-
-            await this.tokenUsageService.saveUsage({
-                projectId: session.projectId,
-                sessionId: sessionId,
-                agent: 'image',
-                turn: currentTurn,
-                model: usage.model,
-                prompt: usage.prompt,
-                completion: usage.completion,
-                total: usage.total,
-            });
-        };
-    }
 }

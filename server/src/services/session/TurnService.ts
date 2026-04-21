@@ -2,7 +2,7 @@ import { Service } from 'typedi';
 import { Repository } from 'typeorm';
 import { SessionTurn } from '../../entities/SessionTurn';
 import { AppDataSource } from '../../data-source';
-import { Turn, LlmProvider, ChatAttachment, ChatMessage } from '../../types/chat';
+import { Turn, LlmProvider, ChatAttachment, ChatMessage , ChatRole } from '../../types/chat';
 import { EventBus } from '../../utils/bus';
 
 export const TurnCompletedEvent = EventBus.createEvent<{
@@ -112,7 +112,7 @@ export class TurnService {
 
         if (update.response !== undefined) {
             const message: ChatMessage = {
-                role: 'assistant',
+                role: ChatRole.ASSISTANT,
                 content: turnEntry.response,
                 createdAt: turnEntry.endTime || new Date(),
                 version: turnEntry.version,

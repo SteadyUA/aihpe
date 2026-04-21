@@ -1,17 +1,23 @@
-import { Body, Delete, Get, JsonController, Param, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
+import { Body, Delete, Get, JsonController, Param, Params, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
+import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
-import { SessionService } from '../services/session/SessionService';
 import { ImageService, ImageMetadata } from '../services/image/ImageService';
-import { getSessionsDir } from '../utils/pathUtils';
 import archiver from 'archiver';
-import fs from 'fs';
-import path from 'path';
 import { Service } from 'typedi';
 import { Readable } from 'stream';
-import { TokenUsageService } from '../services/llm/TokenUsageService';
 import { FileResponse, FileStreamResponse, FileResponseHandler } from '../interceptors/FileResponseHandler';
-import { IsString, IsNumber, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, IsInt, Min } from 'class-validator';
+
+class SessionVersionParams {
+    @IsString()
+    sessionId!: string;
+
+    @Type(() => Number)
+    @IsInt({ message: 'Invalid version' })
+    @Min(0, { message: 'Invalid version' })
+    version!: number;
+}
 
 class GalleryImageResponse {
     @IsString()
@@ -39,11 +45,6 @@ class GalleryImageResponse {
     isUsed?: boolean;
 }
 
-class UpdateStaticFileRequest {
-    @IsString()
-    content!: string;
-}
-
 class UpdateDescriptionRequest {
     @IsString()
     description!: string;
@@ -64,9 +65,7 @@ class OkResponse {
 export class SessionVersionController {
     constructor(
         private readonly filesService: FilesService,
-        private readonly sessionService: SessionService,
         private readonly imageService: ImageService,
-        private readonly tokenUsageService: TokenUsageService,
     ) { }
 
     private mapImageToResponse(metadata: ImageMetadata): GalleryImageResponse {
@@ -84,39 +83,21 @@ export class SessionVersionController {
     @Post('/api/sessions/:sessionId/:version/files/:filename')
     @UseBefore(AuthMiddleware)
     async updateStaticFile(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @Param('filename') filename: string,
-        @Body() body: string | UpdateStaticFileRequest,
+        @Body() body: any,
     ): Promise<OkResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
+        const { sessionId, version } = params;
+
+        if (typeof body !== 'string') {
+            console.error('[updateStaticFile] Invalid body type', typeof body);
+            throw new BadRequestError('Invalid body: expected a plain text string');
         }
 
-        let content = '';
-        if (typeof body === 'string') {
-            content = body;
-        } else if (typeof body === 'object' && body !== null) {
-            if (typeof body.content === 'string') {
-                content = body.content;
-            } else {
-                // Fallback for cases where filename is the key
-                const anyBody = body as any;
-                if (typeof anyBody[filename] === 'string') {
-                    content = anyBody[filename];
-                } else {
-                    console.error('[updateStaticFile] Missing content in object body', body);
-                    throw new BadRequestError('Missing content');
-                }
-            }
-        } else {
-            console.error('[updateStaticFile] Invalid body type', typeof body);
-            throw new BadRequestError('Invalid body');
-        }
+        const content = body;
 
         try {
-            await this.filesService.persistSessionFile(
+            await this.filesService.writeVersionFile(
                 sessionId,
                 version,
                 filename,
@@ -132,79 +113,42 @@ export class SessionVersionController {
     @Get('/api/sessions/:sessionId/:version/files/:filename')
     @UseInterceptor(FileResponseHandler)
     async getFile(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @Param('filename') filename: string,
     ): Promise<string | FileResponse | FileStreamResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
+        const { sessionId, version } = params;
+
+        const stream = this.filesService.getVersionFileStream(sessionId, version, filename);
+
+        if (!stream) {
+            throw new NotFoundError('File not found');
         }
 
-        const validFiles = ['index.html', 'styles.css', 'script.js'];
-        if (validFiles.includes(filename)) {
-            const files = this.filesService.readVersionFiles(sessionId, version);
-            if (!files) {
-                throw new NotFoundError('Files not found');
-            }
+        if (filename === 'script.js') {
+            const basePath = process.env.APP_BASE_PATH || '';
+            const header = `const API_BASE = '${basePath}/api/stab';\n`;
+            const footer = `\nif (typeof regform !== 'undefined') { window.regform = regform; }`;
 
-            let content = files[filename];
-            if (content === undefined) {
-                throw new NotFoundError('File content missing');
-            }
+            const modifiedStream = Readable.from((async function* () {
+                yield header;
+                for await (const chunk of stream) {
+                    yield chunk;
+                }
+                yield footer;
+            })());
 
-            if (filename === 'script.js') {
-                const basePath = process.env.APP_BASE_PATH || '';
-                const header = `const API_BASE = '${basePath}/api/stab';\n`;
-                const footer = `\nif (typeof regform !== 'undefined') { window.regform = regform; }`;
-
-                const stream = Readable.from((async function* () {
-                    yield header;
-                    yield content;
-                    yield footer;
-                })());
-
-                return new FileStreamResponse(filename, stream);
-            }
-
-            // For index.html and styles.css, we return the string directly
-            // routing-controllers will handle basic content-types if we are lucky, 
-            // but for index.html/styles.css it might return text/plain by default without interceptor help.
-            // Actually, we can just use FileResponse if we persisted them to disk, 
-            // but if they are in memory (FilesService Cache), we return string.
-            // Let's use FileResponse where possible.
+            return new FileStreamResponse(filename, modifiedStream);
         }
 
-        // Validate filename for fallback
-        if (!/^[a-zA-Z0-9-_\.]+$/.test(filename)) {
-            throw new BadRequestError('Invalid filename');
-        }
-
-        // Fallback for other files
-        const sessionRoot = getSessionsDir();
-        const safeId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_') || 'default';
-        const safeVersion = version;
-        // SECURITY: Always use path.basename
-        const safeFilename = path.basename(filename);
-        const filePath = path.join(sessionRoot, safeId, 'versions', String(safeVersion), safeFilename);
-
-        if (!fs.existsSync(filePath)) {
-            throw new NotFoundError('File found');
-        }
-
-        return new FileResponse(filePath);
+        return new FileStreamResponse(filename, stream);
     }
 
     @Get('/api/sessions/:sessionId/:version/images')
     @UseBefore(AuthMiddleware)
     async getImages(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
     ): Promise<GalleryImageResponse[]> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
         const images = await this.imageService.listImages(sessionId, version);
         return images.map(img => this.mapImageToResponse(img));
@@ -213,15 +157,11 @@ export class SessionVersionController {
     @Post('/api/sessions/:sessionId/:version/images')
     @UseBefore(AuthMiddleware)
     async uploadGalleryImage(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @UploadedFile('file') file: Express.Multer.File,
         @Body() body: { generateDescription?: string }
     ): Promise<GalleryImageResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
         if (!file) {
             throw new BadRequestError('No file provided');
@@ -233,8 +173,7 @@ export class SessionVersionController {
             const generateDescription = body.generateDescription === 'true';
             if (generateDescription) {
                 try {
-                    const tracker = await this.createTokenTracker(sessionId);
-                    const description = await this.imageService.describeImage(sessionId, version, metadata.filename, undefined, tracker);
+                    const description = await this.imageService.describeImage(sessionId, version, metadata.filename, undefined);
                     await this.imageService.updateImageDescription(sessionId, version, metadata.filename, description);
                     metadata.description = description;
                 } catch (descError) {
@@ -252,14 +191,10 @@ export class SessionVersionController {
     @Delete('/api/sessions/:sessionId/:version/images/:filename')
     @UseBefore(AuthMiddleware)
     async deleteImage(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @Param('filename') filename: string,
     ): Promise<OkResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
         try {
             await this.imageService.deleteImage(sessionId, version, filename);
@@ -279,15 +214,11 @@ export class SessionVersionController {
     @Post('/api/sessions/:sessionId/:version/images/:filename/description')
     @UseBefore(AuthMiddleware)
     async updateImageDescription(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @Param('filename') filename: string,
         @Body() body: UpdateDescriptionRequest,
     ): Promise<OkResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
         try {
             await this.imageService.updateImageDescription(sessionId, version, filename, body.description);
@@ -304,18 +235,13 @@ export class SessionVersionController {
     @Get('/api/sessions/:sessionId/:version/images/:filename/describe')
     @UseBefore(AuthMiddleware)
     async generateImageDescription(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
         @Param('filename') filename: string,
     ): Promise<DescriptionResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
         try {
-            const tracker = await this.createTokenTracker(sessionId);
-            const description = await this.imageService.describeImage(sessionId, version, filename, undefined, tracker);
+            const description = await this.imageService.describeImage(sessionId, version, filename, undefined);
             return { description };
         } catch (error: any) {
             console.error('Failed to generate image description', error);
@@ -330,85 +256,30 @@ export class SessionVersionController {
     @UseBefore(AuthMiddleware)
     @UseInterceptor(FileResponseHandler)
     async downloadArchive(
-        @Param('sessionId') sessionId: string,
-        @Param('version') versionParam: string,
+        @Params() params: SessionVersionParams,
     ): Promise<FileStreamResponse> {
-        const version = parseInt(versionParam, 10);
-        if (isNaN(version) || version < 0) {
-            throw new BadRequestError('Invalid version');
-        }
+        const { sessionId, version } = params;
 
-        // Get code files
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) {
-            throw new NotFoundError('Session not found');
-        }
-        const files = this.filesService.readVersionFiles(sessionId, version);
-        if (!files) {
+        const physicalFiles = this.filesService.listVersionFiles(sessionId, version);
+        if (physicalFiles.length === 0 && version > 0) {
             throw new NotFoundError('Files for the specified turn not found');
         }
 
-        const safeId = sessionId?.replace(/[^a-zA-Z0-9-_]/g, '_') || 'session';
         const archive = archiver('zip', { zlib: { level: 9 } });
 
-        // Add code files
-        for (const [filename, content] of Object.entries(files)) {
-            archive.append(content, { name: filename });
-        }
-
-        // Add images
-        try {
-            const images = await this.imageService.listImages(sessionId, version);
-            const sessionRoot = getSessionsDir();
-            const safeVersion = version;
-
-            const versionDir = path.join(
-                sessionRoot,
-                safeId,
-                'versions',
-                String(safeVersion)
-            );
-
-            for (const img of images) {
-                const imgPath = path.join(versionDir, img.filename);
-                if (fs.existsSync(imgPath)) {
-                    archive.file(imgPath, { name: img.filename });
-                }
+        for (const filename of physicalFiles) {
+            const stream = this.filesService.getVersionFileStream(sessionId, version, filename);
+            if (stream) {
+                archive.append(stream, { name: filename });
             }
-        } catch (imageError) {
-            console.warn('Failed to add images to archive', imageError);
         }
 
         void archive.finalize();
 
-        const downloadFilename = `session-${safeId}-v${version}.zip`;
+        const downloadFilename = `session-${sessionId}-v${version}.zip`;
         // Since FileStreamResponse expectation is a ReadStream from fs, but archiver is a stream as well, 
         // we might need to cast or adjust. archiver is a Transform stream which is a Writable/Readable combo.
         return new FileStreamResponse(downloadFilename, archive as any, downloadFilename);
     }
 
-    private async createTokenTracker(sessionId: string) {
-        // Fetch session to getKey info
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) throw new Error(`Session ${sessionId} not found`);
-
-        return async (usage: { prompt: number, completion: number, total: number, model: string }) => {
-            const currentTurn = session.lastTurn || 0;
-            // Maybe increment turn? Or attach to current turn? 
-            // In ChatService we attached to the turn being generated. 
-            // Here we are outside of a chat turn generation flow (it's a manual upload or manual describe trigger).
-            // Attaching to currentTurn is probably safest.
-
-            await this.tokenUsageService.saveUsage({
-                projectId: session.projectId,
-                sessionId: sessionId,
-                agent: 'image',
-                turn: currentTurn,
-                model: usage.model,
-                prompt: usage.prompt,
-                completion: usage.completion,
-                total: usage.total,
-            });
-        };
-    }
 }

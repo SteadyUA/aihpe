@@ -1,10 +1,29 @@
-import { ChatStatus } from '../services/SseService';
+export enum SessionStatus {
+    IDLE = 'idle',
+    STARTED = 'started',
+    GENERATING = 'generating',
+    ERROR = 'error'
+}
 
-export type SessionStatus = ChatStatus | 'idle';
+export enum ProjectStatus {
+    INITIALIZATION = 'initialization',
+    READY = 'ready'
+}
 
-export type SessionFiles = Record<string, string>;
+export enum TaskStatus {
+    PENDING = 'pending',
+    PLANNING = 'planning',
+    EXECUTING = 'executing',
+    COMPLETED = 'completed',
+    FAILED = 'failed'
+}
 
-export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
+export enum ChatRole {
+    USER = 'user',
+    ASSISTANT = 'assistant',
+    SYSTEM = 'system',
+    TOOL = 'tool'
+}
 
 export interface ChatMessage {
     role: ChatRole;
@@ -17,7 +36,10 @@ export interface ChatMessage {
     providerData?: Record<string, any>;
 }
 
-export type LlmProvider = 'openai' | 'google';
+export enum LlmProvider {
+    OPENAI = 'openai',
+    GOOGLE = 'google'
+}
 
 export interface Project {
     id: string;
