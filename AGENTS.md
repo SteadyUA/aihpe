@@ -89,6 +89,7 @@ This repository is a monorepo containing a **React/Vite client** and a **Node.js
 4. **Safety:** When modifying the database schema, always create a migration script rather than relying on `synchronize: true` in production.
 5. **Environment Integrity:** DO NOT modify `.env` files. If you need to change environment variables for a temporary or test script, pass the values in the command line (e.g., `VAR=value npm run script`) instead of changing the `.env` file.
 6. **Data Persistence:** DO NOT reset the database or delete existing data. If a table structure must be recreated, create a temporary script to migrate data instead of dropping tables and re-running migrations.
+7. **Committing Changes:** Do NOT automatically commit your changes to Git unless the user explicitly asks you to do so. When asked to commit, ALWAYS run `git status` and `git diff` to review ALL modified files in the working directory, not just the ones you edited. You must identify related changes (e.g., if a method was renamed by the user, find and stage all files containing that rename together) and group them into atomic commits. If the working directory contains unrelated changes across different features, you must split them into multiple separate atomic commits.
 
 ---
 
