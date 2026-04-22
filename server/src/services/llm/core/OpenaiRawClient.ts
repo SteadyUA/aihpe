@@ -50,10 +50,10 @@ export class OpenaiRawClient implements LlmClient {
     private mapToProviderMessages(agnosticMessages: LlmMessage[]): any[] {
         return agnosticMessages.map(msg => {
             const mapped: any = { role: msg.role };
-            
+
             // Map content. For tool results we assume `content` has string.
             mapped.content = msg.content;
-            
+
             if (msg.toolCalls && msg.toolCalls.length > 0) {
                 mapped.tool_calls = msg.toolCalls.map(tc => ({
                     id: tc.id,
@@ -156,7 +156,7 @@ export class OpenaiRawClient implements LlmClient {
                 if (Object.keys(streamState.currentProviderData).length > 0) {
                     assistantMessageAny.providerData = streamState.currentProviderData;
                 }
-                
+
                 const assistantMessageMapped: LlmMessage = {
                     role: LlmRole.ASSISTANT,
                     content: streamState.stepText || '',
@@ -178,7 +178,7 @@ export class OpenaiRawClient implements LlmClient {
 
                 currentMessages.push(assistantMessageAny);
                 lastAssistantText = streamState.stepText || '';
-                
+
                 if (request.onNewMessage) {
                     await request.onNewMessage(assistantMessageMapped);
                 }
@@ -296,6 +296,9 @@ export class OpenaiRawClient implements LlmClient {
             toolCallsBuffer: Record<number, { id: string; name: string; arguments: string }>;
         }
     ) {
+        // DEBUG: uncomment the line below to trace all raw deltas
+        // console.log('DEBUG DELTA:', JSON.stringify(delta));
+
         if (delta.content) {
             state.stepText += delta.content;
             if (request.onChunkContent) {
@@ -316,24 +319,34 @@ export class OpenaiRawClient implements LlmClient {
         if (delta.tool_calls) {
             for (const toolCall of delta.tool_calls) {
                 let targetIndex = toolCall.index;
-                if (toolCall.id) {
-                    const existingIndex = Object.keys(state.toolCallsBuffer).find(key => state.toolCallsBuffer[Number(key)].id === toolCall.id);
-                    if (existingIndex !== undefined) {
-                        targetIndex = Number(existingIndex);
-                    } else {
-                        if (state.toolCallsBuffer[targetIndex] && state.toolCallsBuffer[targetIndex].id !== toolCall.id) {
-                            targetIndex = Object.keys(state.toolCallsBuffer).length;
-                        }
+
+                if (targetIndex !== undefined && targetIndex !== null) {
+                    const existingBuffer = state.toolCallsBuffer[targetIndex];
+                    if (existingBuffer && toolCall.id && existingBuffer.id && existingBuffer.id !== toolCall.id) {
+                        const keys = Object.keys(state.toolCallsBuffer).map(Number);
+                        targetIndex = keys.length > 0 ? Math.max(...keys) + 1 : 0;
                     }
                 } else {
-                    const lastIndex = Object.keys(state.toolCallsBuffer).length - 1;
-                    if (lastIndex >= 0) {
-                        targetIndex = lastIndex;
+                    if (toolCall.id) {
+                        const existingKey = Object.keys(state.toolCallsBuffer).find(key => state.toolCallsBuffer[Number(key)].id === toolCall.id);
+                        if (existingKey !== undefined) {
+                            targetIndex = Number(existingKey);
+                        }
                     }
-                }
-
-                if (targetIndex === undefined || targetIndex === null) {
-                    targetIndex = Object.keys(state.toolCallsBuffer).length;
+                    
+                    if (targetIndex === undefined) {
+                        const keys = Object.keys(state.toolCallsBuffer).map(Number);
+                        if (keys.length === 0) {
+                            targetIndex = 0;
+                        } else {
+                            const maxKey = Math.max(...keys);
+                            const lastBuffer = state.toolCallsBuffer[maxKey];
+                            const idConflict = toolCall.id && lastBuffer.id && lastBuffer.id !== toolCall.id;
+                            const nameConflict = toolCall.function?.name && lastBuffer.name && lastBuffer.name !== toolCall.function.name;
+                            
+                            targetIndex = (idConflict || nameConflict) ? maxKey + 1 : maxKey;
+                        }
+                    }
                 }
 
                 if (!state.toolCallsBuffer[targetIndex]) {
@@ -384,7 +397,7 @@ export class OpenaiRawClient implements LlmClient {
                 tool_call_id: toolCall.id,
                 content: result
             });
-            
+
             const toolMsg: LlmMessage = {
                 role: LlmRole.TOOL,
                 toolCallId: toolCall.id,
