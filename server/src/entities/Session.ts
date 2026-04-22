@@ -11,10 +11,6 @@ export class Session {
     @Column({ type: 'varchar' })
     projectId!: string;
 
-    @ManyToOne(() => Project)
-    @JoinColumn({ name: 'projectId' })
-    project!: Project;
-
     @Column({ type: 'integer' })
     group!: number;
 
