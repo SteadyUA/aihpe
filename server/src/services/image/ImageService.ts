@@ -316,7 +316,7 @@ export abstract class ImageService {
 
 
 
-    async copyImagesToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
+    async migrateToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
         const sourceImages = await this.repository.find({ where: { sessionId, version: sourceVersion } });
 
         for (const img of sourceImages) {

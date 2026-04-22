@@ -31,6 +31,7 @@ export class PageGenAgent {
                 const metadata = await this.sessionService.getMetadata(sessionId);
                 const currentVersion = metadata?.currentVersion || 0;
                 targetVersion = await this.filesService.initNextVersion(sessionId, currentVersion);
+                await this.imageService.migrateToVersion(sessionId, currentVersion, targetVersion);
             }
             return targetVersion;
         };
