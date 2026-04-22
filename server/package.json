@@ -10,6 +10,7 @@
     "create-account": "ts-node src/scripts/create-account.ts",
     "change-password": "ts-node src/scripts/change-password.ts",
     "regenerate-summary": "ts-node src/scripts/regenerate-summary.ts",
+    "get-models": "ts-node src/scripts/get-models.ts",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
