@@ -332,6 +332,10 @@ export class OpenaiRawClient implements LlmClient {
                     }
                 }
 
+                if (targetIndex === undefined || targetIndex === null) {
+                    targetIndex = Object.keys(state.toolCallsBuffer).length;
+                }
+
                 if (!state.toolCallsBuffer[targetIndex]) {
                     state.toolCallsBuffer[targetIndex] = { id: '', name: '', arguments: '' };
                 }
