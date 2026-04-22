@@ -19,6 +19,11 @@ class SessionVersionParams {
     version!: number;
 }
 
+class SessionVersionFileParams extends SessionVersionParams {
+    @IsString()
+    filename!: string;
+}
+
 class GalleryImageResponse {
     @IsString()
     filename!: string;
@@ -83,11 +88,10 @@ export class SessionVersionController {
     @Post('/api/sessions/:sessionId/:version/files/:filename')
     @UseBefore(AuthMiddleware)
     async updateStaticFile(
-        @Params() params: SessionVersionParams,
-        @Param('filename') filename: string,
+        @Params() params: SessionVersionFileParams,
         @Body() body: any,
     ): Promise<OkResponse> {
-        const { sessionId, version } = params;
+        const { sessionId, version, filename } = params;
 
         if (typeof body !== 'string') {
             console.error('[updateStaticFile] Invalid body type', typeof body);
@@ -113,10 +117,9 @@ export class SessionVersionController {
     @Get('/api/sessions/:sessionId/:version/files/:filename')
     @UseInterceptor(FileResponseHandler)
     async getFile(
-        @Params() params: SessionVersionParams,
-        @Param('filename') filename: string,
+        @Params() params: SessionVersionFileParams,
     ): Promise<string | FileResponse | FileStreamResponse> {
-        const { sessionId, version } = params;
+        const { sessionId, version, filename } = params;
 
         const stream = this.filesService.getVersionFileStream(sessionId, version, filename);
 
@@ -191,10 +194,9 @@ export class SessionVersionController {
     @Delete('/api/sessions/:sessionId/:version/images/:filename')
     @UseBefore(AuthMiddleware)
     async deleteImage(
-        @Params() params: SessionVersionParams,
-        @Param('filename') filename: string,
+        @Params() params: SessionVersionFileParams,
     ): Promise<OkResponse> {
-        const { sessionId, version } = params;
+        const { sessionId, version, filename } = params;
 
         try {
             await this.imageService.deleteImage(sessionId, version, filename);
@@ -214,11 +216,10 @@ export class SessionVersionController {
     @Post('/api/sessions/:sessionId/:version/images/:filename/description')
     @UseBefore(AuthMiddleware)
     async updateImageDescription(
-        @Params() params: SessionVersionParams,
-        @Param('filename') filename: string,
+        @Params() params: SessionVersionFileParams,
         @Body() body: UpdateDescriptionRequest,
     ): Promise<OkResponse> {
-        const { sessionId, version } = params;
+        const { sessionId, version, filename } = params;
 
         try {
             await this.imageService.updateImageDescription(sessionId, version, filename, body.description);
@@ -235,10 +236,9 @@ export class SessionVersionController {
     @Get('/api/sessions/:sessionId/:version/images/:filename/describe')
     @UseBefore(AuthMiddleware)
     async generateImageDescription(
-        @Params() params: SessionVersionParams,
-        @Param('filename') filename: string,
+        @Params() params: SessionVersionFileParams,
     ): Promise<DescriptionResponse> {
-        const { sessionId, version } = params;
+        const { sessionId, version, filename } = params;
 
         try {
             const description = await this.imageService.describeImage(sessionId, version, filename, undefined);
