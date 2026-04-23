@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Service } from 'typedi';
 
-import { SessionStatus } from '../types/chat';
+import { SessionStatus, LlmProvider } from '../types/chat';
 
 export interface ChatStatusPayload {
     sessionId: string;
@@ -23,6 +23,9 @@ export interface SessionCreatedPayload {
     projectId?: string;
     lastTurn?: number;
     timestamp?: string;
+    subject?: string;
+    provider?: LlmProvider;
+    fastMode?: boolean;
 }
 
 @Service()

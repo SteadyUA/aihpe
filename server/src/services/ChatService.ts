@@ -20,6 +20,9 @@ export const SessionCreatedEvent = EventBus.createEvent<{
     group: number;
     sourceSessionId?: string;
     lastTurn?: number;
+    subject?: string;
+    provider?: LlmProvider;
+    fastMode?: boolean;
 }>('SESSION_CREATED');
 
 export const SessionDeletedEvent = EventBus.createEvent<{
@@ -361,6 +364,9 @@ export class ChatService {
                         group: variantGroup,
                         projectId: sessionMetadata.projectId,
                         lastTurn: targetTurn,
+                        subject: sessionMetadata.subject,
+                        provider: sessionMetadata.provider,
+                        fastMode: sessionMetadata.fastMode,
                     }));
 
                     this.addUserMessage(
@@ -831,6 +837,9 @@ export class ChatService {
             group: metadata.group,
             sourceSessionId,
             lastTurn: metadata.lastTurn,
+            subject: metadata.subject,
+            provider: metadata.provider,
+            fastMode: metadata.fastMode,
         }));
 
         return metadata;
@@ -847,6 +856,8 @@ export class ChatService {
         let lastTurn = sourceMetadata.lastTurn ?? 0;
         let contextSnapshot = [...sourceContext];
         let turnsSnapshot = [...sourceTurns];
+        let summary = sourceMetadata.summary;
+        let summaryTurn = sourceMetadata.summaryTurn;
 
         if (turn !== undefined) {
             const normalizedTurn = Math.floor(turn);
@@ -874,6 +885,11 @@ export class ChatService {
                     targetVersion = ctx.version;
                 }
             }
+
+            if (summaryTurn !== undefined && normalizedTurn < summaryTurn) {
+                summary = undefined;
+                summaryTurn = undefined;
+            }
         }
 
         // We should eventually return just metadata or void.
@@ -885,6 +901,8 @@ export class ChatService {
             currentVersion: targetVersion,
             lastTurn: lastTurn,
             status: SessionStatus.IDLE,
+            summary,
+            summaryTurn,
         };
 
         this.filesService.deleteSessionDir(targetId);
@@ -923,6 +941,9 @@ export class ChatService {
                 group: newMetadata.group,
                 sourceSessionId: sourceId,
                 lastTurn: newMetadata.lastTurn,
+                subject: newMetadata.subject,
+                provider: newMetadata.provider,
+                fastMode: newMetadata.fastMode,
             }));
         }
 

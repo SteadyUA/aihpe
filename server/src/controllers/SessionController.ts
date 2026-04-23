@@ -172,6 +172,18 @@ class CloneSessionResponse {
 
     @IsString()
     updatedAt!: string;
+
+    @IsOptional()
+    @IsString()
+    subject?: string;
+
+    @IsOptional()
+    @IsString()
+    provider?: LlmProvider;
+
+    @IsOptional()
+    @IsBoolean()
+    fastMode?: boolean;
 }
 
 class StopGenerationResponse {
@@ -639,6 +651,9 @@ export class SessionController {
             group: variantGroup,
             currentTurn: turn,
             updatedAt: new Date().toISOString(),
+            subject: sourceSession.subject,
+            provider: sourceSession.provider,
+            fastMode: sourceSession.fastMode,
         };
     }
 

@@ -26,6 +26,9 @@ export class SseHandler {
             group: payload.group,
             sourceSessionId: payload.sourceSessionId || 'system',
             lastTurn: payload.lastTurn,
+            subject: payload.subject,
+            provider: payload.provider,
+            fastMode: payload.fastMode,
         });
     }
 

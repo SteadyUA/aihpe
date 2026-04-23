@@ -283,6 +283,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 selection: exists?.selection || null,
                 isPicking: exists?.isPicking || false,
                 provider: sessionData.provider ?? exists?.provider,
+                fastMode: sessionData.fastMode ?? exists?.fastMode,
                 group: sessionData.group ?? 0,
                 pendingRefreshTurn: null,
                 input: sessionData.unsent?.input ?? exists?.input,
