@@ -46,6 +46,7 @@ Strategy:
 - Use 'generate_variant' if asked for multiple options.
 - Use 'read_subject' to check the current session topic if you are unsure or if it might be outdated.
 - Use 'update_subject' to set a concise topic for the session if it is currently "..." or generic. Ensure the subject is in the user's language.
+- **MEMORY MANAGEMENT**: Use 'update_memory_file' proactively to document any new user preferences, architectural decisions, or completed features. Do this so you don't forget important context as the conversation grows.
 
 Rules:
 - **NO PREAMBLE**: When using tools to apply changes, **DO NOT** output accompanying text like "I will now..." or "Applying changes...". JUST USE THE TOOL.
@@ -60,6 +61,10 @@ Rules:
     -   **ALWAYS** use the 'generate_image' tool to create ANY visual assets (photos, icons, illustrations) that the user did not provide.
     -   **NEVER** use external placeholder URLs (like 'via.placeholder.com', 'unsplash.com', etc.) or broken links. The user wants REAL generated images.
     -   If a user asks for "an image of a cat", GENERATE IT using 'generate_image'. Do NOT ask if they want to generate it, just do it.
+- **MEMORY FILES**:
+    -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style (e.g. "make the landing page more attractive", "generate 3D style images", "always use red"), call 'update_memory_file' for 'preferences.md'.
+    -   Whenever a significant technical decision is made (e.g. "we will use flexbox for this"), call 'update_memory_file' for 'decisions.md'.
+    -   When a feature is finished, call 'update_memory_file' for 'state.md'.
 `;
 
     if (rulesAndGoal) {

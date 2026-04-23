@@ -4,6 +4,7 @@ import { OpenaiRawClient } from '../core/OpenaiRawClient';
 import { LlmMessage, LlmRequest, LlmContentPart, LlmRole } from '../core/types';
 import { ImageService } from '../../image/ImageService';
 import { FilesService } from '../../session/FilesService';
+import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
 import { LlmProvider, ChatMessage } from '../../../types/chat';
 import { buildPageGenPrompt } from '../prompts/PageGenPrompt';
@@ -19,6 +20,9 @@ export class PageGenAgent {
 
     @Inject()
     private sessionService!: SessionService;
+
+    @Inject()
+    private memoryService!: MemoryService;
 
     public async generatePage(provider: LlmProvider, request: GeneratePageRequest): Promise<GeneratePageResult> {
         const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
@@ -41,9 +45,11 @@ export class PageGenAgent {
             ensureNextVersion
         };
 
-        const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService)(request as any, context);
+        const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService, this.memoryService)(request as any, context);
 
-        const systemPrompt = buildPageGenPrompt(request as any);
+        const baseSystemPrompt = buildPageGenPrompt(request as any);
+        const memoryContext = await this.memoryService.getMemoryContext(request.sessionId, request.currentVersion || 0);
+        const systemPrompt = baseSystemPrompt + '\n\n' + memoryContext;
 
         const messages: LlmMessage[] = [
             { role: LlmRole.SYSTEM, content: systemPrompt }

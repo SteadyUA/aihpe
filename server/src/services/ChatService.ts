@@ -6,7 +6,6 @@ import { SessionService } from './session/SessionService';
 import { ContextService } from './session/ContextService';
 import { TurnService } from './session/TurnService';
 import { PageGenAgent } from './llm/agents/PageGenAgent';
-import { HistorySummaryAgent } from './llm/agents/HistorySummaryAgent';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
 import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
@@ -57,7 +56,6 @@ export class ChatService {
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
         private readonly pageGenAgent: PageGenAgent,
-        private readonly historySummaryAgent: HistorySummaryAgent,
         private readonly imageService: ImageService,
         private readonly projectService: ProjectService,
         private readonly unsentService: UnsentService,
@@ -209,9 +207,6 @@ export class ChatService {
         let currentMetadata = await this.sessionService.getMetadata(sessionId);
         if (!currentMetadata) throw new Error(`Session ${sessionId} not found`);
 
-        // 0. Generate history summary properly BEFORE generation
-        await this.generateHistorySummary(sessionId, turn);
-
         // 2. Prepare conversation history for prompt
         const currentContext = await this.contextService.loadContext(sessionId);
 
@@ -289,7 +284,6 @@ export class ChatService {
                 fastMode: fastModeOverride ?? currentMetadata.fastMode,
                 subject: currentMetadata.subject,
                 abortSignal: controller.signal,
-                summary: currentMetadata.summary, // Pass cumulative summary
                 onTokenUsage: this.createTokenUsageCallback(sessionId, currentMetadata.projectId, turn),
                 onPatch: (patch: any) => {
                     this.eventBus.publish(SessionPatchEvent({
@@ -714,97 +708,6 @@ export class ChatService {
         return content;
     }
 
-    public async generateHistorySummary(sessionId: string, turn: number): Promise<void> {
-
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) throw new Error(`Session ${sessionId} not found`);
-
-        // Apply Step-based Window logic (sync with generateResponse)
-        const contextStartTurn = calculateContextStartTurn(turn);
-
-        // We want to summarize everything that is about to be dropped (or has been dropped) 
-        // and hasn't been summarized yet.
-        // The context window starts at contextStartTurn.
-        // So we summarize up to contextStartTurn - 1.
-        const targetSummaryEnd = contextStartTurn - 1;
-        const previousSummaryTurn = session.summaryTurn ?? 0;
-
-        if (targetSummaryEnd <= previousSummaryTurn) {
-            return;
-        }
-
-        // Collect messages to summarize: turns (previousSummaryTurn + 1) to targetSummaryEnd
-        const currentContext = await this.contextService.loadContext(sessionId);
-        const messagesToSummarize = currentContext.filter((msg) =>
-            (msg.turn ?? 0) > previousSummaryTurn && (msg.turn ?? 0) <= targetSummaryEnd
-        );
-
-        if (messagesToSummarize.length === 0 && !session.summary) {
-            return;
-        }
-
-        const project = await this.projectService.getProject(session.projectId);
-        const rulesAndGoal = project?.rulesAndGoal;
-        const modelRole = project?.modelRole;
-
-        try {
-            this.notifyStatus(sessionId, SessionStatus.GENERATING, `summarization...`);
-            const summary = await this.historySummaryAgent.summarizeHistory(session.provider || LlmProvider.OPENAI, {
-                sessionId,
-                conversation: messagesToSummarize,
-                rulesAndGoal,
-                modelRole,
-                abortSignal: this.activeGenerations.get(sessionId)?.signal,
-                previousSummary: session.summary,
-                onTokenUsage: this.createTokenUsageCallback(sessionId, session.projectId, turn),
-            });
-
-            // Update session with new summary
-            await this.sessionService.updateMetadata(sessionId, {
-                summary: summary,
-                summaryTurn: targetSummaryEnd,
-            });
-
-            console.log(`Generated history summary for session ${sessionId}. Added turns ${previousSummaryTurn + 1}-${targetSummaryEnd}. Total coverage: 1-${targetSummaryEnd}.`);
-            console.log(`Summary: ${summary}\n`);
-        } catch (error) {
-            console.error(`Failed to generate history summary for session ${sessionId}:`, error);
-        }
-    }
-
-    async rebuildSessionSummary(sessionId: string): Promise<void> {
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) throw new Error(`Session ${sessionId} not found`);
-
-        console.log(`Rebuilding summary for session ${sessionId}, total turns: ${session.lastTurn || 0}`);
-
-        // Reset summary
-        await this.sessionService.updateMetadata(sessionId, {
-            summary: undefined,
-            summaryTurn: 0,
-        });
-
-        // Iterate through turns to trigger summarization
-        // Logic: generateHistorySummary checks if summarization is needed for a given turn.
-        // It summarizes up to calculateContextStartTurn(turn) - 1.
-        // So we just need to hit the thresholds.
-
-        const lastTurn = session.lastTurn || 0;
-
-        // We simulate the progression of the session
-        for (let t = 1; t <= lastTurn; t++) {
-            // We only need to check at specific intervals where summarization MIGHT trigger.
-            // But valid logic is encapsulated in generateHistorySummary, so we can just call it?
-            // Actually generateHistorySummary expects 'turn' to be the CURRENT turn being generated.
-            // And it calculates what to summarize based on that.
-
-            await this.generateHistorySummary(sessionId, t);
-        }
-
-        this.notifyStatus(sessionId, SessionStatus.IDLE, 'Summary regeneration complete.');
-        console.log(`Finished rebuilding summary for session ${sessionId}`);
-    }
-
     public async createSession(
         sessionId: string,
         projectId: string,
@@ -856,8 +759,6 @@ export class ChatService {
         let lastTurn = sourceMetadata.lastTurn ?? 0;
         let contextSnapshot = [...sourceContext];
         let turnsSnapshot = [...sourceTurns];
-        let summary = sourceMetadata.summary;
-        let summaryTurn = sourceMetadata.summaryTurn;
 
         if (turn !== undefined) {
             const normalizedTurn = Math.floor(turn);
@@ -885,11 +786,6 @@ export class ChatService {
                     targetVersion = ctx.version;
                 }
             }
-
-            if (summaryTurn !== undefined && normalizedTurn < summaryTurn) {
-                summary = undefined;
-                summaryTurn = undefined;
-            }
         }
 
         // We should eventually return just metadata or void.
@@ -901,8 +797,6 @@ export class ChatService {
             currentVersion: targetVersion,
             lastTurn: lastTurn,
             status: SessionStatus.IDLE,
-            summary,
-            summaryTurn,
         };
 
         this.filesService.deleteSessionDir(targetId);

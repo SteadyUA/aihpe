@@ -1,5 +1,6 @@
 import { ImageService } from '../../image/ImageService';
 import { FilesService } from '../../session/FilesService';
+import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
 import { GeneratePageRequest } from '../types';
 
@@ -11,7 +12,8 @@ export interface PageGenContext {
 export function createPageGenTools(
     imageService: ImageService,
     filesService: FilesService,
-    sessionService: SessionService
+    sessionService: SessionService,
+    memoryService: MemoryService
 ): (
     request: GeneratePageRequest,
     context: PageGenContext
@@ -272,6 +274,49 @@ export function createPageGenTools(
                         return `Image edited successfully: ${savedFilename}`;
                     } catch (error: any) {
                         return `Failed to edit image: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'read_memory_file',
+                description: 'Read a memory file to recall technical decisions, state, or user preferences.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to read.' },
+                        summary: { type: 'string', description: 'Explain why you are reading this memory file.' }
+                    },
+                    required: ['filename', 'summary']
+                },
+                execute: async ({ filename, summary }: { filename: string; summary: string }) => {
+                    try {
+                        const version = getTargetVersion() ?? request.currentVersion;
+                        const content = memoryService.readMemoryFile(request.sessionId, version, filename);
+                        return content || '(File is empty)';
+                    } catch (error: any) {
+                        return `Failed to read memory file: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'update_memory_file',
+                description: 'Update a memory file to persist new technical decisions, state changes, or user preferences for future turns.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to update.' },
+                        content: { type: 'string', description: 'The completely new content of the memory file (this overwrites the existing file).' },
+                        summary: { type: 'string', description: 'Explain why you are updating this memory file.' }
+                    },
+                    required: ['filename', 'content', 'summary']
+                },
+                execute: async ({ filename, content, summary }: { filename: string; content: string; summary: string }) => {
+                    try {
+                        const nextVersion = await ensureNextVersion(request.sessionId);
+                        memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, content);
+                        return `Successfully updated memory file: ${filename}`;
+                    } catch (error: any) {
+                        return `Failed to update memory file: ${error.message}`;
                     }
                 }
             }
