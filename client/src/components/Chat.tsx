@@ -1045,22 +1045,6 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         this.setState({ showSummaryModal: false });
     };
 
-    handleSummarySubmit = async () => {
-        const { sessionId } = this.props;
-        const { summaryContent } = this.state;
-        try {
-            await apiAuth.fetch(`/api/sessions/${sessionId}/summary`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ summary: summaryContent }),
-            });
-            this.props.onUpdateSession({ subject: summaryContent });
-            this.setState({ showSummaryModal: false });
-        } catch (e) {
-            console.error('Failed to update summary', e);
-        }
-    };
-
     private imageLoadTimeout: ReturnType<typeof setTimeout> | null = null;
     handleImageLoad = () => {
         if (this.imageLoadTimeout) {
