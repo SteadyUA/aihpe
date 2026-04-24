@@ -8,6 +8,7 @@ interface UiModalProps {
     actions: ReactNode;
     onClose: () => void;
     className?: string; // Allow extending basic modal styles
+    style?: React.CSSProperties; // Allow overriding styles
 }
 
 export class UiModal extends Component<UiModalProps> {
@@ -26,7 +27,7 @@ export class UiModal extends Component<UiModalProps> {
     };
 
     render() {
-        const { isOpen, title, children, actions, className } = this.props;
+        const { isOpen, title, children, actions, className, style } = this.props;
 
         if (!isOpen) return null;
 
@@ -38,6 +39,7 @@ export class UiModal extends Component<UiModalProps> {
             >
                 <div
                     className={`${styles.modal} ${className || ''}`}
+                    style={style}
                     onClick={(e) => e.stopPropagation()}
                 >
                     <h3 className={styles.title}>{title}</h3>

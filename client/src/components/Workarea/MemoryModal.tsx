@@ -2,6 +2,7 @@ import React from 'react';
 import { UiModal } from '../UiModal';
 import { UiButton } from '../UiButton';
 import { apiAuth } from '../../utils/api';
+import { createMarkedInstance } from '../../utils/markdownUtils';
 
 interface MemoryModalProps {
     sessionId: string;
@@ -79,6 +80,7 @@ export class MemoryModal extends React.Component<MemoryModalProps, MemoryModalSt
             <UiModal
                 isOpen={isOpen}
                 title={`Memory Files v${memoryVersion}`}
+                style={{ maxWidth: '600px' }}
                 onClose={onClose}
                 actions={
                     <div style={{ display: 'flex', gap: '8px', width: '100%', justifyContent: 'space-between' }}>
@@ -90,9 +92,10 @@ export class MemoryModal extends React.Component<MemoryModalProps, MemoryModalSt
                     </div>
                 }
             >
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                    {memoryContent}
-                </div>
+                <div 
+                    style={{ whiteSpace: 'normal', lineHeight: '1.5' }}
+                    dangerouslySetInnerHTML={{ __html: createMarkedInstance({} as any).parse(memoryContent) as string }}
+                />
             </UiModal>
         );
     }
