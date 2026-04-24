@@ -585,7 +585,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
                 <UiModal
                     isOpen={this.state.showMemoryModal}
-                    title="Memory Files"
+                    title={`Memory Files v${version}`}
                     onClose={this.closeMemoryModal}
                     actions={
                         <UiButton onClick={this.closeMemoryModal}>Close</UiButton>
