@@ -533,7 +533,10 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         const turn = this.state.turns.find(t => t.turn === targetTurn);
         const version = turn?.version ?? 0;
 
-        this.props.onUpdateSession({ currentVersion: version });
+        const lastTurnObj = this.state.turns.find(t => t.turn === this.props.lastTurn);
+        const latestVersion = lastTurnObj?.version ?? 0;
+
+        this.props.onUpdateSession({ currentVersion: version, latestVersion });
     }
 
     scrollToActiveTurn = (behavior: ScrollBehavior = 'smooth', block: ScrollLogicalPosition = 'start', attempts = 0) => {

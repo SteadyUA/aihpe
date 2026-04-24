@@ -90,6 +90,7 @@ export interface Session {
     // turns: Turn[]; // MOVED TO CHAT COMPONENT STATE
 
     currentVersion?: number;
+    latestVersion?: number;
     lastTurn: number;
     activeTurn: number | null;
     activeTab: TabType;

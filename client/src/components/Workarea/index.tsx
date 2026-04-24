@@ -11,8 +11,7 @@ import { TabType } from '../../types';
 import { Preview } from './Preview';
 import { Images } from './Images';
 import { Editor } from './Editor';
-import { UiModal } from '../UiModal';
-import { UiButton } from '../UiButton';
+import { MemoryModal } from './MemoryModal';
 
 import { apiAuth } from '../../utils/api';
 
@@ -26,6 +25,7 @@ interface WorkareaProps {
     onProceed?: () => void;
     isBusy?: boolean;
     isLatest?: boolean;
+    latestVersion?: number;
     displayedTurn: number;
 }
 
@@ -49,7 +49,6 @@ interface WorkareaState {
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
     showMemoryModal: boolean;
-    memoryContent: string;
 
 
 }
@@ -67,7 +66,6 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
             isSaving: false,
             showMemoryModal: false,
-            memoryContent: '',
         };
         this.previewRef = React.createRef();
     }
@@ -131,23 +129,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.previewRef.current?.saveScroll();
     }
 
-    handleVersionClick = async () => {
-        const { sessionId, version } = this.props;
-        if (!sessionId) return;
-        try {
-            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/memory`);
-            if (res.ok) {
-                const data = await res.json();
-                this.setState({
-                    memoryContent: data.memory || 'No memory available yet.',
-                    showMemoryModal: true
-                });
-            } else {
-                console.error('Failed to fetch memory');
-            }
-        } catch (e) {
-            console.error('Error fetching memory', e);
-        }
+    handleVersionClick = () => {
+        this.setState({ showMemoryModal: true });
     };
 
     closeMemoryModal = () => {
@@ -583,18 +566,15 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     })
                 }
 
-                <UiModal
-                    isOpen={this.state.showMemoryModal}
-                    title={`Memory Files v${version}`}
-                    onClose={this.closeMemoryModal}
-                    actions={
-                        <UiButton onClick={this.closeMemoryModal}>Close</UiButton>
-                    }
-                >
-                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                        {this.state.memoryContent}
-                    </div>
-                </UiModal>
+                {sessionId && (
+                    <MemoryModal
+                        sessionId={sessionId}
+                        isOpen={this.state.showMemoryModal}
+                        onClose={this.closeMemoryModal}
+                        initialVersion={version}
+                        maxVersion={this.props.latestVersion ?? version}
+                    />
+                )}
             </div >
         );
     }

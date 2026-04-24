@@ -295,6 +295,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     ref={this.previewRef}
                     sessionId={session.id}
                     version={session.currentVersion ?? 0}
+                    latestVersion={session.latestVersion ?? 0}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}
                     onLoad={this.handlePreviewLoad}
