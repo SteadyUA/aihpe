@@ -68,10 +68,6 @@ export interface SessionMetadata {
     status: SessionStatus;
     errorMessage?: string; // Persisted error message
     subject?: string;
-
-    // Conversation Summary Management
-    summary?: string; // Cumulative summary of "dropped" history
-    summaryTurn?: number; // The last turn included in the summary
 }
 
 export interface TokenUsage {
