@@ -1,6 +1,6 @@
 import { GeneratePageRequest } from '../types';
 
-export function buildPageGenPrompt(request: GeneratePageRequest): string {
+export function buildPageGenPrompt(_request: GeneratePageRequest): string {
     const roleDefinition = 'You are an expert web developer';
 
     let prompt = `${roleDefinition} that maintains a simple web page composed of three files: index.html, styles.css, and script.js.

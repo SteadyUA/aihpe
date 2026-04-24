@@ -1,5 +1,4 @@
 import { Service } from 'typedi';
-import { Repository } from 'typeorm';
 import { SessionTurn } from '../../entities/SessionTurn';
 import { AppDataSource } from '../../data-source';
 import { Turn, LlmProvider, ChatAttachment, ChatMessage , ChatRole } from '../../types/chat';

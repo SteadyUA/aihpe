@@ -1,4 +1,4 @@
-import { Body, Delete, Get, JsonController, Param, Params, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
+import { Body, Delete, Get, JsonController, Params, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';

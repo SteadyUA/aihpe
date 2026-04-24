@@ -1,12 +1,10 @@
 import { Service } from 'typedi';
 import { FilesService, MEMORY_FILES } from './FilesService';
-import { SessionService } from './SessionService';
 
 @Service()
 export class MemoryService {
     constructor(
-        private readonly filesService: FilesService,
-        private readonly sessionService: SessionService
+        private readonly filesService: FilesService
     ) {}
 
     public async getMemoryContext(sessionId: string, version: number): Promise<string> {

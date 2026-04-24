@@ -1,4 +1,3 @@
-import { LlmTool } from '../core/types';
 import { TaskManagerService } from '../../TaskManagerService';
 import { Container } from 'typedi';
 import * as fs from 'fs/promises';
@@ -14,7 +13,7 @@ export function createHtmlConversionTools(): (
     request: any,
     context: HtmlConversionContext
 ) => any[] {
-    return (request: any, context: HtmlConversionContext) => {
+    return (_request: any, context: HtmlConversionContext) => {
         const { workingDirectory, taskId, abortController } = context;
         const taskManagerService = Container.get(TaskManagerService);
 
@@ -61,7 +60,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['steps', 'summary']
                 },
-                execute: async ({ steps, summary }: { steps: { stepName: string, concurrentJobs: { description: string, shortDescription: string }[] }[]; summary: string }) => {
+                execute: async ({ steps }: { steps: { stepName: string, concurrentJobs: { description: string, shortDescription: string }[] }[]; summary: string }) => {
                     await taskManagerService.addJobs(taskId, steps);
                     if (abortController) {
                         abortController.abort();
@@ -81,7 +80,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['job', 'summary']
                 },
-                execute: async ({ job, summary }: { job: string; summary: string }) => {
+                execute: async ({ job }: { job: string; summary: string }) => {
                     const success = await taskManagerService.completeJob(taskId, job);
                     if (abortController) {
                         abortController.abort();
@@ -104,7 +103,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['summary']
                 },
-                execute: async ({ summary }: { summary: string }) => {
+                execute: async (_args: { summary: string }) => {
                     async function getFiles(dir: string): Promise<string[]> {
                         const dirents = await fs.readdir(dir, { withFileTypes: true });
                         const files = await Promise.all(dirents.map((dirent) => {
@@ -165,7 +164,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePath', 'summary']
                 },
-                execute: async ({ filePath, summary }: { filePath: string; summary: string }) => {
+                execute: async ({ filePath }: { filePath: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         const content = await fs.readFile(fullPath, 'utf-8');
@@ -187,7 +186,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePath', 'content', 'summary']
                 },
-                execute: async ({ filePath, content, summary }: { filePath: string; content: string; summary: string }) => {
+                execute: async ({ filePath, content }: { filePath: string; content: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -211,7 +210,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePath', 'oldString', 'newString', 'summary']
                 },
-                execute: async ({ filePath, oldString, newString, summary }: { filePath: string; oldString: string; newString: string; summary: string }) => {
+                execute: async ({ filePath, oldString, newString }: { filePath: string; oldString: string; newString: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         let content = await fs.readFile(fullPath, 'utf-8');
@@ -238,7 +237,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePath', 'content', 'summary']
                 },
-                execute: async ({ filePath, content, summary }: { filePath: string; content: string; summary: string }) => {
+                execute: async ({ filePath, content }: { filePath: string; content: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         await fs.mkdir(path.dirname(fullPath), { recursive: true });
@@ -272,7 +271,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['moves', 'summary']
                 },
-                execute: async ({ moves, summary }: { moves: { sourcePath: string, destPath: string }[]; summary: string }) => {
+                execute: async ({ moves }: { moves: { sourcePath: string, destPath: string }[]; summary: string }) => {
                     try {
                         const results = [];
                         for (const move of moves) {
@@ -303,7 +302,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePaths', 'summary']
                 },
-                execute: async ({ filePaths, summary }: { filePaths: string[]; summary: string }) => {
+                execute: async ({ filePaths }: { filePaths: string[]; summary: string }) => {
                     try {
                         const results = [];
                         for (const filePath of filePaths) {
@@ -328,7 +327,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['filePath', 'summary']
                 },
-                execute: async ({ filePath, summary }: { filePath: string; summary: string }) => {
+                execute: async ({ filePath }: { filePath: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         const stats = await fs.stat(fullPath);
@@ -355,7 +354,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['pattern', 'filePath', 'summary']
                 },
-                execute: async ({ pattern, flags, filePath, summary }: { pattern: string; flags?: string; filePath: string; summary: string }) => {
+                execute: async ({ pattern, flags, filePath }: { pattern: string; flags?: string; filePath: string; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         const content = await fs.readFile(fullPath, 'utf-8');
@@ -403,7 +402,7 @@ export function createHtmlConversionTools(): (
                     },
                     required: ['pattern', 'dirPath', 'summary']
                 },
-                execute: async ({ pattern, flags, dirPath, summary }: { pattern: string; flags?: string; dirPath: string; summary: string }) => {
+                execute: async ({ pattern, flags, dirPath }: { pattern: string; flags?: string; dirPath: string; summary: string }) => {
                     try {
                         const fullDir = resolvePath(dirPath);
                         const regex = new RegExp(pattern, flags);

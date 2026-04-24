@@ -1,5 +1,4 @@
 import { Service } from 'typedi';
-import { Repository } from 'typeorm';
 import { SessionContext } from '../../entities/SessionContext';
 import { AppDataSource } from '../../data-source';
 import { ChatMessage, ChatRole, ChatAttachment } from '../../types/chat';

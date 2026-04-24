@@ -5,7 +5,7 @@ import { Request, Response, NextFunction } from 'express';
 @Service()
 @Middleware({ type: 'after' })
 export class CustomErrorHandler implements ExpressErrorMiddlewareInterface {
-    error(error: any, request: Request, response: Response, next: NextFunction): void {
+    error(error: any, request: Request, response: Response, _next: NextFunction): void {
         const status = error instanceof HttpError ? error.httpCode : (error.status || 500);
         const message = error.message || 'Internal Server Error';
 

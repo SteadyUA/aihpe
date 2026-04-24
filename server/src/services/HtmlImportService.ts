@@ -6,8 +6,6 @@ import { FilesService } from './session/FilesService';
 import { ChatService } from './ChatService';
 import { HtmlConversionAgent } from './llm/agents/HtmlConversionAgent';
 import { TaskManagerService } from './TaskManagerService';
-import { AppDataSource } from '../data-source';
-import { Task } from '../entities/Task';
 import { Turn , TaskStatus , ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';

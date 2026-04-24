@@ -8,7 +8,7 @@ import { TurnService } from './session/TurnService';
 import { PageGenAgent } from './llm/agents/PageGenAgent';
 import { ProjectService } from './ProjectService';
 import { ImageService } from './image/ImageService';
-import { formatContentForUi, calculateContextStartTurn } from '../utils/chat';
+import { calculateContextStartTurn } from '../utils/chat';
 import { UnsentService } from './session/UnsentService';
 import { UploadService } from './image/UploadService';
 import { EventBus } from '../utils/bus';
@@ -118,10 +118,7 @@ export class ChatService {
         }
 
         // Append user message immediately
-        const userContentForHistory = this.composeUserContent(
-            trimmed,
-            normalizedAttachment,
-        );
+        const userContentForHistory = trimmed;
         const now = new Date();
         // Determine turn: User message starts a new turn
         const currentTurn = currentMetadata.lastTurn ?? 0;
@@ -261,8 +258,6 @@ export class ChatService {
         if (!effectiveInstructions && selectorsSummary) {
             effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
         }
-
-        const project = await this.projectService.getProject(currentMetadata.projectId);
 
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
@@ -654,41 +649,6 @@ export class ChatService {
             return copy;
         }
         return attachment;
-    }
-
-    private composeUserContent(
-        message: string,
-        attachment?: ChatAttachment,
-    ): string {
-        return message.trim();
-    }
-
-    private async appendAssistantMessage(
-        sessionId: string,
-        content: any,
-        version?: number,
-        addToContext: boolean = true,
-    ): Promise<void> {
-        const uiContent = formatContentForUi(content);
-
-        const session = await this.sessionService.getMetadata(sessionId);
-        if (!session) throw new Error(`Session ${sessionId} not found`);
-
-        const assistantMessage: ChatMessage = {
-            role: ChatRole.ASSISTANT,
-            content: content,
-            createdAt: new Date(),
-            version: version ?? 0,
-            turn: session.lastTurn ?? 0, // Associate with current turn
-        };
-
-        // Filter logic for HISTORY (UI)
-
-        // Context logic
-        if (addToContext) {
-            await this.contextService.appendMessage(sessionId, assistantMessage);
-            await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });
-        }
     }
 
     private enrichContentWithSelection(

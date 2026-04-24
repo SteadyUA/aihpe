@@ -19,7 +19,7 @@ export function createApp(): express.Express {
     app.use(express.text());
 
     // Disable caching for API routes
-    app.use(`${basePath}/api`, (req, res, next) => {
+    app.use(`${basePath}/api`, (_req, res, next) => {
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.set('Pragma', 'no-cache');
         res.set('Expires', '0');

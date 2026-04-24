@@ -38,7 +38,6 @@ export function createPageGenTools(
                 },
                 execute: async ({
                     file,
-                    summary,
                 }: {
                     file: 'index.html' | 'styles.css' | 'script.js';
                     summary: string;
@@ -72,7 +71,6 @@ export function createPageGenTools(
                     file,
                     oldString,
                     newString,
-                    summary,
                 }: {
                     file: 'index.html' | 'styles.css' | 'script.js';
                     oldString: string;
@@ -169,7 +167,7 @@ export function createPageGenTools(
                     },
                     required: ['summary']
                 },
-                execute: async ({ summary }: { summary?: string }) => {
+                execute: async (_args: { summary?: string }) => {
                     const currentSubject = request.subject || '...';
                     return `Current Session Subject: "${currentSubject}"`;
                 },
@@ -184,7 +182,7 @@ export function createPageGenTools(
                     },
                     required: ['summary']
                 },
-                execute: async ({ summary }: { summary: string }) => {
+                execute: async (_args: { summary: string }) => {
                     try {
                         const images = await imageService.listImages(request.sessionId, request.currentVersion);
                         const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
@@ -215,7 +213,7 @@ export function createPageGenTools(
                     },
                     required: ['filename', 'summary']
                 },
-                execute: async ({ filename, summary }: { filename: string; summary: string }) => {
+                execute: async ({ filename }: { filename: string; summary: string }) => {
                     try {
                         const info = await imageService.getImageInfo(request.sessionId, request.currentVersion, filename);
                         if (!info) {
@@ -244,7 +242,7 @@ export function createPageGenTools(
                     },
                     required: ['description', 'summary']
                 },
-                execute: async ({ description, summary }: { description: string; summary: string }) => {
+                execute: async ({ description }: { description: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         const filename = await imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal);
@@ -266,7 +264,7 @@ export function createPageGenTools(
                     },
                     required: ['filename', 'description', 'summary']
                 },
-                execute: async ({ filename, description, summary }: { filename: string; description: string; summary: string }) => {
+                execute: async ({ filename, description }: { filename: string; description: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         // Use currentVersion as source, nextVersion as target
@@ -288,7 +286,7 @@ export function createPageGenTools(
                     },
                     required: ['filename', 'summary']
                 },
-                execute: async ({ filename, summary }: { filename: string; summary: string }) => {
+                execute: async ({ filename }: { filename: string; summary: string }) => {
                     try {
                         const version = getTargetVersion() ?? request.currentVersion;
                         const content = memoryService.readMemoryFile(request.sessionId, version, filename);
@@ -310,7 +308,7 @@ export function createPageGenTools(
                     },
                     required: ['filename', 'content', 'summary']
                 },
-                execute: async ({ filename, content, summary }: { filename: string; content: string; summary: string }) => {
+                execute: async ({ filename, content }: { filename: string; content: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, content);

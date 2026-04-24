@@ -7,7 +7,7 @@ import { AuthService } from '../services/AuthService';
 @Service()
 export class AuthMiddleware implements ExpressMiddlewareInterface {
     constructor(private authService: AuthService) {}
-    async use(request: Request, response: Response, next: NextFunction): Promise<any> {
+    async use(request: Request, _response: Response, next: NextFunction): Promise<any> {
         const authHeader = request.headers['authorization'];
         if (!authHeader) {
             throw new HttpError(401, 'No authorization header provided');

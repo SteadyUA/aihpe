@@ -2,7 +2,7 @@ import { Service } from 'typedi';
 import { AppDataSource } from '../../data-source';
 import { SessionUnsent } from '../../entities/SessionUnsent';
 import { SessionUpload } from '../../entities/SessionUpload';
-import { UnsentData, ChatAttachment } from '../../types/chat';
+import { UnsentData } from '../../types/chat';
 
 @Service()
 export class UnsentService {

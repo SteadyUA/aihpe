@@ -1,5 +1,4 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
-import { Project } from './Project';
+import { Entity, PrimaryColumn, Column } from 'typeorm';
 
 import { SessionStatus } from '../types/chat';
 

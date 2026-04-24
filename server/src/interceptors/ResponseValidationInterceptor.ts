@@ -5,7 +5,7 @@ import { validateOrReject, getMetadataStorage } from 'class-validator';
 @Service()
 @Interceptor()
 export class ResponseValidationInterceptor implements InterceptorInterface {
-    async intercept(action: Action, content: any): Promise<any> {
+    async intercept(_action: Action, content: any): Promise<any> {
         // If content is an object and not an array, check if it has validation decorators
         if (content && typeof content === 'object' && !Array.isArray(content) && !(content instanceof Buffer)) {
             const metadatas = getMetadataStorage().getTargetValidationMetadatas(content.constructor, '', true, false);
