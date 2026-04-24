@@ -62,9 +62,16 @@ const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
 
     if (!startTime || elapsed <= 0) return null;
 
+    const formatDuration = (totalSeconds: number) => {
+        if (totalSeconds < 60) return `${totalSeconds}s`;
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}m${seconds}s`;
+    };
+
     return (
         <span className={styles.timer}>
-            {`${elapsed}s`}
+            {formatDuration(elapsed)}
         </span>
     );
 };
@@ -326,6 +333,12 @@ class Message extends React.Component<MessageProps> {
                                 </svg>
                             </button>
                         )}
+                    {/* Timestamp for assistant messages */}
+                    {isAssistant && !isPending && msg.createdAt && (
+                        <div className={styles.messageMeta}>
+                            {formatTime(msg.createdAt)}
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -429,7 +442,12 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             const turns = [...prevState.turns];
             const index = turns.findIndex(t => t.turn === assistantMsg.turn);
             if (index !== -1) {
-                turns[index] = { ...turns[index], ...assistantMsg, response: assistantMsg.content };
+                turns[index] = { 
+                    ...turns[index], 
+                    ...assistantMsg, 
+                    response: assistantMsg.content,
+                    endTime: assistantMsg.createdAt
+                };
             }
             return { turns };
         }, () => {
@@ -1100,7 +1118,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     role: ChatRole.ASSISTANT,
                     content: t.response,
                     turn: t.turn,
-                    version: t.version
+                    version: t.version,
+                    createdAt: t.endTime
                 });
             }
         });
