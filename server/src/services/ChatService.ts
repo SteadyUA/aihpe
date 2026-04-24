@@ -311,12 +311,6 @@ export class ChatService {
                     this.notifyStatus(sessionId, SessionStatus.GENERATING, summary);
                 },
                 onVariantRequest: async (instruction: string) => {
-                    this.notifyStatus(
-                        sessionId,
-                        SessionStatus.GENERATING,
-                        `Tool call: generate_variant`,
-                    );
-
                     const targetTurn = Math.max(0, turn - 1);
                     const variantGroup = this.sessionService.getNextGroup();
 

@@ -323,16 +323,18 @@ export function createPageGenTools(
         if (request.allowVariants) {
             tools.push({
                 name: 'generate_variant',
-                description: 'Generate A SINGLE variant of the page.',
+                description: 'Generate a variant of the page in a new session. This session inherits all previous conversation context. The instruction must be written as a natural follow-up message in the chat, NOT as a standalone prompt.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        instruction: { type: 'string', description: 'Specific, actionable instruction for this variant.' }
+                        instruction: { type: 'string', description: 'The exact text of the simulated user message asking for the variant (e.g., "Now make the background dark", "Try using a sweet candy pastel palette"). Do NOT write a completely new standalone prompt.' },
+                        summary: { type: 'string', description: 'Explain why you are generating this variant.' }
                     },
-                    required: ['instruction']
+                    required: ['instruction', 'summary']
                 },
                 execute: async (args: {
                     instruction: string;
+                    summary: string;
                 }) => {
                     if (request.onVariantRequest) {
                         return await request.onVariantRequest(args.instruction);
