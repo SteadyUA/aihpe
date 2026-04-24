@@ -434,7 +434,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     handleTurnCompleted = (event: CustomEvent) => {
         const data = event.detail;
         if (data.sessionId !== this.props.sessionId) return;
-        
+
         const assistantMsg = data.message;
         if (!assistantMsg) return;
 
@@ -442,9 +442,9 @@ export class Chat extends React.Component<ChatProps, ChatState> {
             const turns = [...prevState.turns];
             const index = turns.findIndex(t => t.turn === assistantMsg.turn);
             if (index !== -1) {
-                turns[index] = { 
-                    ...turns[index], 
-                    ...assistantMsg, 
+                turns[index] = {
+                    ...turns[index],
+                    ...assistantMsg,
                     response: assistantMsg.content,
                     endTime: assistantMsg.createdAt
                 };
@@ -817,6 +817,43 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         if (this.state.input.trim() || this.props.attachment) {
             this.sendMessage(this.state.input);
+        }
+    };
+
+    handleParallelGeneration = async (count: number) => {
+        const { sessionId, provider, fastMode, selection, attachment } = this.props;
+        if (!sessionId) return;
+
+        const selectionData = selection ? { selector: selection } : undefined;
+        const text = this.state.input;
+
+        // Clear UI state as the messages are sent
+        this.setState({ input: '' });
+        this.props.onUpdateSession({
+            selection: null,
+            attachment: undefined,
+            input: undefined
+        });
+
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/parallel`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    attachment,
+                    selection: selectionData,
+                    provider: provider,
+                    fastMode: fastMode,
+                    count: count
+                }),
+            });
+
+            if (!res.ok) {
+                console.error('Failed to start parallel generation');
+            }
+        } catch (e) {
+            console.error('Error starting parallel generation', e);
         }
     };
 
@@ -1412,28 +1449,67 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                             </svg>
                                         </UiButton>
                                     ) : (
-                                        <UiButton
-                                            type="submit"
-                                            variant={ButtonVariant.PRIMARY}
-                                            size={ButtonSize.ICON}
-                                            disabled={isFormDisabled || !input.trim()}
-                                            tabIndex={2}
-                                            onClick={this.handleSubmit}
-                                        >
-                                            <svg
-                                                width="16"
-                                                height="16"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="2"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
+                                        <div className={styles.sendButtonGroup}>
+                                            <UiButton
+                                                type="submit"
+                                                variant={ButtonVariant.PRIMARY}
+                                                size={ButtonSize.ICON}
+                                                disabled={isFormDisabled || (!input.trim() && !attachment)}
+                                                tabIndex={2}
+                                                onClick={this.handleSubmit}
+                                                className={styles.mainSendButton}
+                                                title="Send"
                                             >
-                                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                            </svg>
-                                        </UiButton>
+                                                <svg
+                                                    width="16"
+                                                    height="16"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                                </svg>
+                                            </UiButton>
+                                            <div className={classNames(styles.parallelButtonWrapper, { [styles.disabledWrapper]: isFormDisabled || (!input.trim() && !attachment) })}>
+                                                <select
+                                                    className={styles.parallelSelect}
+                                                    title="Run generation in new sessions"
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (val) {
+                                                            this.handleParallelGeneration(parseInt(val));
+                                                            e.target.value = '';
+                                                        }
+                                                    }}
+                                                    value=""
+                                                    disabled={isFormDisabled || (!input.trim() && !attachment)}
+                                                >
+                                                    <option value="" disabled hidden></option>
+                                                    {[1, 2, 3, 4, 5].map(num => (
+                                                        <option key={num} value={num}>{num} {num === 1 ? 'session' : 'sessions'}</option>
+                                                    ))}
+                                                </select>
+                                                <div className={styles.parallelIcon}>
+                                                    <svg
+                                                        width="14"
+                                                        height="14"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="2"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                    >
+                                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                        <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                                    </svg>
+                                                </div>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>

@@ -23,6 +23,8 @@ import {
     ValidateNested,
     IsBoolean,
     IsNumber,
+    Min,
+    Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { Service } from 'typedi';
@@ -103,6 +105,14 @@ class ChatRequest {
     @IsOptional()
     @IsBoolean()
     fastMode?: boolean;
+}
+
+class ParallelChatRequest extends ChatRequest {
+    @IsOptional()
+    @IsNumber()
+    @Min(1)
+    @Max(5)
+    count?: number;
 }
 
 class ChatResponse {
@@ -461,6 +471,43 @@ export class SessionController {
         return {
             turn: result.turn,
         };
+    }
+
+    @Post('/api/sessions/:sessionId/parallel')
+    @UseBefore(AuthMiddleware)
+    @HttpCode(201)
+    async parallelChat(
+        @Param('sessionId') sessionId: string,
+        @Body() body: ParallelChatRequest,
+    ): Promise<{ sessionIds: string[] }> {
+        const count = body.count || 1;
+        const sessionIds: string[] = [];
+
+        const sourceSession = await this.sessionService.getMetadata(sessionId);
+        if (!sourceSession) {
+            throw new NotFoundError('Source session not found');
+        }
+
+        for (let i = 0; i < count; i++) {
+            try {
+                const newSessionId = await this.chatService.cloneAndGenerate(
+                    sessionId,
+                    sourceSession.lastTurn,
+                    body.message ?? '',
+                    body.attachment,
+                    body.selection,
+                    body.provider,
+                    body.fastMode,
+                    true // allowVariants
+                );
+                sessionIds.push(newSessionId);
+            } catch (error) {
+                console.error(`Parallel generation setup failed`, error);
+                // Note: since we throw or log, we might just continue or abort. Logging is fine.
+            }
+        }
+
+        return { sessionIds };
     }
 
     @Post('/api/sessions/:sessionId/stop')

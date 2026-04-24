@@ -317,60 +317,23 @@ export class ChatService {
                         `Tool call: generate_variant`,
                     );
 
-                    // Re-instantiate metadata
-                    const sessionMetadata = await this.sessionService.getMetadata(sessionId);
-                    if (!sessionMetadata) throw new Error(`Session ${sessionId} not found`);
-
                     const targetTurn = Math.max(0, turn - 1);
-                    const variantId = this.sessionService.getNextId();
                     const variantGroup = this.sessionService.getNextGroup();
 
-                    const newSession = await this.performCloneSession(variantId, sessionId, targetTurn);
-
-                    // 2. Set up the new session
-                    await this.sessionService.updateMetadata(newSession.id, {
-                        group: variantGroup,
-                        lastTurn: targetTurn,
-                    });
-                    const updatedContext = await this.contextService.loadContext(newSession.id);
-                    await this.contextService.saveContext(newSession.id, updatedContext);
-
-                    // Add to project
-                    if (sessionMetadata.projectId) {
-                        await this.projectService.addSessionToProject(sessionMetadata.projectId, newSession.id);
-                    }
-
-                    // Emit creation event
-                    this.eventBus.publish(SessionCreatedEvent({
-                        sourceSessionId: sessionId,
-                        sessionId: newSession.id,
-                        group: variantGroup,
-                        projectId: sessionMetadata.projectId,
-                        lastTurn: targetTurn,
-                        subject: sessionMetadata.subject,
-                        provider: sessionMetadata.provider,
-                        fastMode: sessionMetadata.fastMode,
-                    }));
-
-                    this.addUserMessage(
-                        newSession.id,
+                    const newSessionId = await this.cloneAndGenerate(
+                        sessionId,
+                        targetTurn,
                         instruction,
-                        undefined,
-                        undefined,
-                        undefined,
-                        undefined, // Do NOT persist fastMode
-                    ).then(async (result) => {
-                        if (!result.skipped && result.promptData) {
-                            await this.generateResponse(newSession.id, result.promptData, result.turn, false, true);
-                        }
-                    }).catch((e) =>
-                        console.error(
-                            `Failed to generate variant for session ${newSession.id}`,
-                            e,
-                        ),
+                        undefined, // attachment
+                        undefined, // selection
+                        undefined, // provider
+                        undefined, // fastMode
+                        false,     // allowVariants = false to prevent infinite recursion
+                        true,      // fastModeOverride = true
+                        variantGroup
                     );
 
-                    return `Variant created in session: ${newSession.id}`;
+                    return `Variant created in session: ${newSessionId}`;
                 },
             });
 
@@ -702,7 +665,73 @@ export class ChatService {
         return metadata;
     }
 
-    public async performCloneSession(targetId: string, sourceId: string, turn?: number): Promise<SessionMetadata> {
+    public async cloneAndGenerate(
+        sourceSessionId: string,
+        targetTurn: number | undefined,
+        message: string,
+        attachment?: ChatAttachment,
+        selection?: { selector: string },
+        provider?: LlmProvider,
+        fastMode?: boolean,
+        allowVariants: boolean = true,
+        fastModeOverride?: boolean,
+        targetGroup?: number
+    ): Promise<string> {
+        const sourceMetadata = await this.sessionService.getMetadata(sourceSessionId);
+        if (!sourceMetadata) throw new Error(`Session ${sourceSessionId} not found`);
+
+        const newSessionId = this.sessionService.getNextId();
+        
+        // 1. Clone session (do NOT emit SessionCreatedEvent yet)
+        const newSession = await this.performCloneSession(newSessionId, sourceSessionId, targetTurn, true, targetGroup);
+
+        // Add to project if variant needs it.
+        if (sourceMetadata.projectId && this.projectService) {
+            await this.projectService.addSessionToProject(sourceMetadata.projectId, newSession.id);
+        }
+
+        // 2. Add user message (this updates lastTurn in metadata)
+        const result = await this.addUserMessage(
+            newSessionId,
+            message,
+            attachment,
+            selection,
+            provider,
+            fastMode
+        );
+
+        // 3. Re-fetch metadata to get updated lastTurn and emit SessionCreatedEvent
+        const updatedMetadata = await this.sessionService.getMetadata(newSessionId);
+        if (updatedMetadata && sourceMetadata.projectId) {
+            this.eventBus.publish(SessionCreatedEvent({
+                sessionId: newSessionId,
+                projectId: sourceMetadata.projectId,
+                group: newSession.group,
+                sourceSessionId: sourceSessionId,
+                lastTurn: updatedMetadata.lastTurn,
+                subject: updatedMetadata.subject,
+                provider: updatedMetadata.provider,
+                fastMode: updatedMetadata.fastMode,
+            }));
+        }
+
+        // 4. Start generation in the background
+        if (!result.skipped && result.promptData) {
+            setImmediate(() => {
+                this.generateResponse(
+                    newSessionId,
+                    result.promptData!,
+                    result.turn,
+                    allowVariants,
+                    fastModeOverride
+                ).catch(e => console.error(`Generation error in clone ${newSessionId}`, e));
+            });
+        }
+
+        return newSessionId;
+    }
+
+    public async performCloneSession(targetId: string, sourceId: string, turn?: number, skipEvent?: boolean, targetGroup?: number): Promise<SessionMetadata> {
         const sourceMetadata = await this.sessionService.getMetadata(sourceId);
         if (!sourceMetadata) throw new Error(`Source session ${sourceId} not found`);
 
@@ -747,6 +776,7 @@ export class ChatService {
         const newMetadata: SessionMetadata = {
             ...sourceMetadata,
             id: targetId,
+            group: targetGroup ?? sourceMetadata.group,
             updatedAt: new Date(),
             currentVersion: targetVersion,
             lastTurn: lastTurn,
@@ -782,7 +812,7 @@ export class ChatService {
         await this.contextService.saveContext(targetId, contextSnapshot);
         await this.turnService.saveTurns(targetId, turnsSnapshot);
 
-        if (sourceMetadata.projectId) {
+        if (sourceMetadata.projectId && !skipEvent) {
             this.eventBus.publish(SessionCreatedEvent({
                 sessionId: targetId,
                 projectId: sourceMetadata.projectId,

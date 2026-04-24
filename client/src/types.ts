@@ -86,6 +86,7 @@ export interface Session {
     projectId: string; // New field
     subject?: string;
     status: SessionStatus;
+    errorMessage?: string;
     // messages: MessageData[]; // DEPRECATED
     // turns: Turn[]; // MOVED TO CHAT COMPONENT STATE
 

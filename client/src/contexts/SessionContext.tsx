@@ -84,7 +84,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         window.addEventListener('app:session-created', this.onSessionCreated);
         window.addEventListener('app:session-update', this.onSessionUpdate);
         window.addEventListener('app:token-usage', this.onTokenUsage);
-        // window.addEventListener('app:chat-status', ...); // Chat specific handling if needed here or in child
+        window.addEventListener('app:chat-status', this.onChatStatus as EventListener);
     }
 
     componentDidUpdate(prevProps: SessionProviderProps, prevState: SessionProviderState) {
@@ -95,12 +95,13 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         window.removeEventListener('app:session-created', this.onSessionCreated);
         window.removeEventListener('app:session-update', this.onSessionUpdate);
         window.removeEventListener('app:token-usage', this.onTokenUsage);
+        window.removeEventListener('app:chat-status', this.onChatStatus as EventListener);
     }
 
     onSessionCreated = (e: Event) => {
         const detail = (e as CustomEvent).detail;
         if (detail.projectId && detail.projectId !== this.props.projectId) return; // Ignore irrelevant sessions
-        this.handleSessionCreated(detail);
+        this.handleSessionCreated(detail, detail.sourceSessionId, false);
     }
 
     onSessionUpdate = (e: Event) => {
@@ -109,12 +110,42 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             this.setState((prevState) => {
                 const session = prevState.sessions[payload.sessionId];
                 if (!session) return null;
+                
+                const newLastTurn = payload.lastTurn ?? session.lastTurn;
+                const newActiveTurn = session.activeTurn === session.lastTurn ? newLastTurn : session.activeTurn;
+
                 return {
                     sessions: {
                         ...prevState.sessions,
                         [payload.sessionId]: {
                             ...session,
-                            subject: payload.subject ?? session.subject
+                            subject: payload.subject ?? session.subject,
+                            lastTurn: newLastTurn,
+                            activeTurn: newActiveTurn,
+                        }
+                    }
+                };
+            });
+        }
+    }
+
+    onChatStatus = (e: Event) => {
+        const payload = (e as CustomEvent).detail;
+        if (payload.sessionId && payload.status) {
+            this.setState((prevState) => {
+                const session = prevState.sessions[payload.sessionId];
+                if (!session) return null;
+                
+                const mappedStatus = (payload.status === 'started' || payload.status === 'generating') ? SessionStatus.BUSY :
+                    (payload.status === 'error') ? SessionStatus.ERROR : SessionStatus.IDLE;
+
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [payload.sessionId]: {
+                            ...session,
+                            status: mappedStatus,
+                            errorMessage: payload.status === 'error' ? payload.message : session.errorMessage
                         }
                     }
                 };
@@ -258,7 +289,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
 
     // fetchSession removed as per requirement to stop using GET /api/sessions/:id
 
-    handleSessionCreated = (sessionData: any, sourceSessionId?: string) => {
+    handleSessionCreated = (sessionData: any, sourceSessionId?: string, autoSwitch: boolean = false) => {
         this.setState((prevState) => {
             const exists = prevState.sessions[sessionData.id];
 
@@ -314,7 +345,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 sessions: { ...prevState.sessions, [sessionData.id]: newSession },
                 sessionOrder: newOrder,
                 stableSessionIds: newStable,
-                activeSessionId: exists ? prevState.activeSessionId : sessionData.id // Don't switch if updating (already on it)
+                activeSessionId: (!exists && autoSwitch) ? sessionData.id : prevState.activeSessionId
             };
         });
 
@@ -331,7 +362,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                 const sessionData = await this.creatingSessionPromise;
                 if (sessionData) {
                     // Start pending session from existing data
-                    this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING });
+                    this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING }, undefined, true);
                 }
                 return;
             } catch (e) {
@@ -353,7 +384,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             const sessionData = await this.creatingSessionPromise;
 
             // Start optimistic pending session
-            this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING });
+            this.handleSessionCreated({ ...sessionData, status: SessionStatus.PENDING }, undefined, true);
 
             this.creatingSessionPromise = null;
 
@@ -447,7 +478,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
             if (!res.ok) throw new Error('Clone turn failed');
             const session = await res.json();
             // Force status to pending so Chat knows to wait for SSE (and then refetch turns)
-            this.handleSessionCreated({ ...session, status: SessionStatus.PENDING }, activeSessionId);
+            this.handleSessionCreated({ ...session, status: SessionStatus.PENDING }, activeSessionId, true);
         } catch (error) {
             console.error('Failed to clone turn', error);
         }

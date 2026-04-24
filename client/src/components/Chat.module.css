@@ -576,3 +576,60 @@
 .stopButton {
     color: #ef4444 !important;
 }
+
+/* Send Button Group */
+.sendButtonGroup {
+    display: flex;
+    align-items: stretch;
+}
+
+.mainSendButton {
+    border-top-right-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+}
+
+.parallelButtonWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-primary);
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    width: 28px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.parallelButtonWrapper:hover:not(.disabledWrapper) {
+    background: var(--accent-hover);
+}
+
+.disabledWrapper {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--accent-primary);
+}
+
+.parallelSelect {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.parallelSelect:disabled {
+    cursor: not-allowed;
+}
+
+.parallelIcon {
+    pointer-events: none;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
