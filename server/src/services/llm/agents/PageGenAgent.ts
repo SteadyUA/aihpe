@@ -47,9 +47,7 @@ export class PageGenAgent {
 
         const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService, this.memoryService)(request as any, context);
 
-        const baseSystemPrompt = buildPageGenPrompt(request as any);
-        const memoryContext = await this.memoryService.getMemoryContext(request.sessionId, request.currentVersion || 0);
-        const systemPrompt = baseSystemPrompt + '\n\n' + memoryContext;
+        const systemPrompt = buildPageGenPrompt(request as any);
 
         const messages: LlmMessage[] = [
             { role: LlmRole.SYSTEM, content: systemPrompt }

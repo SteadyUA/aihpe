@@ -56,9 +56,12 @@ Rules:
     -   **NEVER** use external placeholder URLs (like 'via.placeholder.com', 'unsplash.com', etc.) or broken links. The user wants REAL generated images.
     -   If a user asks for "an image of a cat", GENERATE IT using 'generate_image'. Do NOT ask if they want to generate it, just do it.
 - **MEMORY FILES**:
-    -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style (e.g. "make the landing page more attractive", "generate 3D style images", "always use red"), call 'update_memory_file' for 'preferences.md'.
-    -   Whenever a significant technical decision is made (e.g. "we will use flexbox for this"), call 'update_memory_file' for 'decisions.md'.
-    -   When a feature is finished, call 'update_memory_file' for 'state.md'.
+    -   You have access to the following memory files which persist your knowledge across the entire session: 'preferences.md', 'decisions.md', 'state.md'.
+    -   **READING**: ALWAYS use the 'read_memory_file' tool to inspect these files BEFORE making architectural changes, applying styles, or if you are unsure about the project rules and user preferences.
+    -   **WRITING**:
+        -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style, call 'update_memory_file' for 'preferences.md'.
+        -   Whenever a significant technical, business, or design decision is made, call 'update_memory_file' for 'decisions.md'.
+        -   When a feature is finished, call 'update_memory_file' for 'state.md'.
 `;
 
     return prompt;

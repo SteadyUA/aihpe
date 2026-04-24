@@ -5,14 +5,14 @@ import { FilesService, MEMORY_FILES } from './FilesService';
 export class MemoryService {
     constructor(
         private readonly filesService: FilesService
-    ) {}
+    ) { }
 
     public async getMemoryContext(sessionId: string, version: number): Promise<string> {
-        let context = 'You have access to the following memory files which persist your knowledge across the entire session. Use your tools to read and update these files to remember important technical decisions, user preferences, high-level goals, and implementation progress:\n\n';
+        let context = '';
 
         for (const file of MEMORY_FILES) {
             const content = this.filesService.readMemoryFile(sessionId, version, file) || '';
-            context += `=== MEMORY FILE: ${file} ===\n${content}\n\n`;
+            context += `### ${file}\n${content}\n`;
         }
 
         return context;
