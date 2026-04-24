@@ -141,7 +141,7 @@ export class PageGenAgent {
         const result = await client.generate(llmReq);
 
         return {
-            summary: result.text,
+            text: result.text,
             targetVersion: targetVersion
         };
     }

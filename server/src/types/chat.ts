@@ -45,15 +45,14 @@ export interface Project {
     id: string;
     accountId?: number;
     name: string;
-    rulesAndGoal: string;
-    imageGenerationPref?: string;
     defaultProvider?: LlmProvider;
     sessionIds: string[];
     createdAt: Date;
     updatedAt: Date;
     lastAssignedSessionGroup?: number;
     activeSessionId?: string;
-    modelRole?: string;
+    status: ProjectStatus;
+    taskId?: string;
 }
 
 export interface SessionMetadata {

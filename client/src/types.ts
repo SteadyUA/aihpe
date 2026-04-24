@@ -29,12 +29,9 @@ export type ChatAttachment = ImageAttachment;
 export interface Project {
     id: string;
     name: string;
-    rulesAndGoal: string;
-    imageGenerationPref?: string;
     defaultProvider?: LlmProvider;
     sessionIds: string[];
     activeSessionId?: string;
-    modelRole?: string;
     status?: ProjectStatus;
     taskId?: string;
     createdAt: string;

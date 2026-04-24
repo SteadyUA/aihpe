@@ -26,11 +26,8 @@ import { Project } from '../entities/Project';
 class ProjectResponse {
     id!: string;
     name!: string;
-    rulesAndGoal!: string;
-    imageGenerationPref?: string | null;
     defaultProvider?: LlmProvider | null;
     activeSessionId?: string | null;
-    modelRole?: string | null;
     status!: string;
     taskId?: string | null;
     sessionIds!: string[];
@@ -42,13 +39,6 @@ class OkResponse {
 }
 
 class CreateProjectRequest {
-    @IsString()
-    rulesAndGoal!: string;
-
-    @IsOptional()
-    @IsString()
-    imageGenerationPref?: string;
-
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
@@ -56,21 +46,9 @@ class CreateProjectRequest {
     @IsOptional()
     @IsString()
     name?: string;
-
-    @IsOptional()
-    @IsString()
-    modelRole?: string;
 }
 
 class UpdateProjectRequest {
-    @IsOptional()
-    @IsString()
-    rulesAndGoal?: string;
-
-    @IsOptional()
-    @IsString()
-    imageGenerationPref?: string;
-
     @IsOptional()
     @IsString()
     defaultProvider?: LlmProvider;
@@ -82,10 +60,6 @@ class UpdateProjectRequest {
     @IsOptional()
     @IsString()
     activeSessionId?: string;
-
-    @IsOptional()
-    @IsString()
-    modelRole?: string;
 
     @IsOptional()
     @IsArray()
@@ -109,11 +83,8 @@ export class ProjectController {
         return {
             id: project.id,
             name: project.name,
-            rulesAndGoal: project.rulesAndGoal,
-            imageGenerationPref: project.imageGenerationPref,
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
-            modelRole: project.modelRole,
             status: project.status,
             taskId: project.taskId,
             sessionIds: project.sessionIds || [], // Ensure safe fallbacks if needed
@@ -132,12 +103,9 @@ export class ProjectController {
         const taskId = file ? this.taskManagerService.getNextId() : undefined;
 
         const project = await this.projectService.createProject(
-            body.rulesAndGoal || '',
-            body.imageGenerationPref,
             body.defaultProvider,
             body.name,
             accountId,
-            body.modelRole,
             status,
             taskId
         );
@@ -187,12 +155,9 @@ export class ProjectController {
         @CurrentUser() user: any
     ): Promise<ProjectResponse> {
         const updateData: any = {};
-        if (body.rulesAndGoal !== undefined) updateData.rulesAndGoal = body.rulesAndGoal;
-        if (body.imageGenerationPref !== undefined) updateData.imageGenerationPref = body.imageGenerationPref;
         if (body.defaultProvider !== undefined) updateData.defaultProvider = body.defaultProvider;
         if (body.name !== undefined) updateData.name = body.name;
         if (body.activeSessionId !== undefined) updateData.activeSessionId = body.activeSessionId;
-        if (body.modelRole !== undefined) updateData.modelRole = body.modelRole;
         if (body.sessionIds !== undefined) updateData.sessionIds = body.sessionIds;
 
         const accountId = user?.accountId;

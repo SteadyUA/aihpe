@@ -263,9 +263,6 @@ export class ChatService {
         }
 
         const project = await this.projectService.getProject(currentMetadata.projectId);
-        const rulesAndGoal = project?.rulesAndGoal;
-        const imageGenerationPref = project?.imageGenerationPref;
-        const modelRole = project?.modelRole;
 
         try {
             // Buffer for streaming thoughts to avoid emitting too frequent partial updates
@@ -278,9 +275,6 @@ export class ChatService {
                 attachment: hydratedCurrentAttachment,
                 allowVariants,
                 currentVersion: currentMetadata.currentVersion,
-                rulesAndGoal,
-                imageGenerationPref,
-                modelRole,
                 fastMode: fastModeOverride ?? currentMetadata.fastMode,
                 subject: currentMetadata.subject,
                 abortSignal: controller.signal,
@@ -404,7 +398,7 @@ export class ChatService {
             // turn is passed from addUserMessage (1-based), but turn in DB is also 1-based.
             await this.turnService.updateTurn(sessionId, turn, {
                 endTime: new Date(),
-                response: generation.summary || '',
+                response: generation.text || '',
                 version: updatedMetadata.currentVersion,
             });
             await this.sessionService.updateMetadata(sessionId, { updatedAt: new Date() });

@@ -13,16 +13,13 @@ import { withRouter, RouterProps } from './withRouter';
 
 interface WorkspaceLayoutProps extends SessionContextProps, RouterProps {
     projectId: string | null;
-    projectName: string;
-    projectRulesAndGoal: string;
-    projectImageGenerationPref?: string;
+    currentName?: string;
     projectDefaultProvider?: LlmProvider;
-    projectModelRole?: string;
     initialProjectSessions?: any[];
     initialActiveSessionId?: string | null;
 
-    onUpdateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string, role: string) => Promise<void>;
-    onCreateProject: (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => Promise<void>;
+    onUpdateProject: (defaultProvider: LlmProvider, name: string) => Promise<void>;
+    onCreateProject: (defaultProvider: LlmProvider, name: string, file?: File) => Promise<void>;
 
     fetchProject: (id: string, sessionContextSync?: (sessions: any[], activeId?: string) => void) => Promise<void>;
 }
@@ -57,7 +54,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             prevProps.router.location.pathname !== this.props.router.location.pathname ||
             prevProps.activeSessionId !== this.props.activeSessionId ||
             prevProps.sessions !== this.props.sessions ||
-            prevProps.projectName !== this.props.projectName
+            prevProps.currentName !== this.props.currentName
         ) {
             this.updateTitle();
         }
@@ -79,15 +76,15 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
     }
 
     updateTitle = () => {
-        const { activeSessionId, sessions, projectName } = this.props;
+        const { activeSessionId, sessions, currentName } = this.props;
 
         if (activeSessionId && sessions[activeSessionId]) {
             const session = sessions[activeSessionId];
             const subject = session.subject || '...';
-            const project = projectName || 'AiLand';
+            const project = currentName || 'AiLand';
             document.title = `${project} - ${subject}`;
-        } else if (projectName) {
-            document.title = projectName;
+        } else if (currentName) {
+            document.title = currentName;
         } else {
             document.title = 'AiLand';
         }
@@ -97,19 +94,15 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
         this.setState(prev => ({ showProjectSettings: !prev.showProjectSettings }));
     };
 
-    handleCreateProjectWrapper = async (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => {
-        await this.props.onCreateProject(rules, imgPref, provider, name, modelRole, file);
+    handleCreateProjectWrapper = async (provider: LlmProvider, name: string, file?: File) => {
+        await this.props.onCreateProject(provider, name, file);
         this.setState({ showProjectCreation: false });
     }
 
     render() {
         const {
-            projectId,
-            projectName,
-            projectRulesAndGoal,
-            projectImageGenerationPref,
+            currentName,
             projectDefaultProvider,
-            projectModelRole,
             onUpdateProject,
 
             sessions,
@@ -152,19 +145,13 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                     onClose={() => this.setState({ showProjectCreation: false })}
                 />
 
-                {projectId && (
-                    <ProjectSettingsModal
-                        isOpen={showProjectSettings}
-                        projectId={projectId}
-                        currentName={projectName}
-                        currentRulesAndGoal={projectRulesAndGoal}
-                        currentImageGenerationPref={projectImageGenerationPref}
-                        currentDefaultProvider={projectDefaultProvider}
-                        currentModelRole={projectModelRole}
-                        onUpdate={onUpdateProject}
-                        onClose={this.toggleProjectSettings}
-                    />
-                )}
+                <ProjectSettingsModal
+                    isOpen={showProjectSettings}
+                    currentName={currentName}
+                    currentDefaultProvider={projectDefaultProvider}
+                    onUpdate={onUpdateProject}
+                    onClose={this.toggleProjectSettings}
+                />
 
                 <ConfirmationModal
                     isOpen={!!sessionToDelete}
@@ -188,7 +175,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                             subjects={subjects}
                             pendingSessions={pendingSessions}
                             onProjectSettings={this.toggleProjectSettings}
-                            projectName={projectName}
+                            projectName={currentName || 'Untitled'}
                             onReorder={handleSessionReorder}
                         />
                     }

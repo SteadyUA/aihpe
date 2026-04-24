@@ -3,7 +3,7 @@ import React from 'react';
 import { WorkspaceLayout } from './WorkspaceLayout';
 import { SessionProvider } from '../contexts/SessionContext';
 import { apiAuth } from '../utils/api';
-import { LlmProvider, ProjectStatus } from '../types';
+import { LlmProvider, ProjectStatus, Project, Session } from '../types';
 import { withRouter, RouterProps } from './withRouter';
 import { ProjectInitialization } from './ProjectInitialization';
 
@@ -13,12 +13,10 @@ interface ProjectWorkspaceProps extends RouterProps {
 
 interface ProjectWorkspaceState {
     projectId: string | null;
-    projectName: string;
-    projectRulesAndGoal: string;
-    projectImageGenerationPref: string;
-    projectDefaultProvider: LlmProvider;
-    projectModelRole: string;
-    projectSessions: any[];
+    project: Project | null;
+    projectDefaultProvider?: LlmProvider;
+    isSettingsModalOpen: boolean;
+    sessions: Session[];
     activeSessionId?: string | null;
     projectStatus?: ProjectStatus;
     projectTaskId?: string;
@@ -29,12 +27,9 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
         super(props);
         this.state = {
             projectId: null,
-            projectName: '',
-            projectRulesAndGoal: '',
-            projectImageGenerationPref: '',
-            projectDefaultProvider: LlmProvider.OPENAI,
-            projectModelRole: '',
-            projectSessions: [],
+            project: null,
+            isSettingsModalOpen: false,
+            sessions: [],
             activeSessionId: null,
             projectStatus: ProjectStatus.READY,
             projectTaskId: undefined,
@@ -90,12 +85,9 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
 
             this.setState({
                 projectId: id,
-                projectName: data.name || 'Untitled',
-                projectRulesAndGoal: data.rulesAndGoal || '',
-                projectImageGenerationPref: data.imageGenerationPref,
+                project: data,
                 projectDefaultProvider: data.defaultProvider,
-                projectModelRole: data.modelRole,
-                projectSessions: sessionsData,
+                sessions: sessionsData,
                 activeSessionId: data.activeSessionId,
                 projectStatus: data.status,
                 projectTaskId: data.taskId,
@@ -131,69 +123,26 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
         }
     };
 
-    handleCreateProject = async (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string, file?: File) => {
+    handleSaveProjectSettings = async (defaultProvider: LlmProvider, name: string) => {
         try {
-            const formData = new FormData();
-            formData.append('name', name);
-            formData.append('rulesAndGoal', rules);
-            formData.append('imageGenerationPref', imgPref);
-            formData.append('defaultProvider', provider);
-            formData.append('modelRole', modelRole);
-            if (file) {
-                formData.append('file', file);
-            }
+            const { project } = this.state;
+            if (!project) return;
 
-            const response = await apiAuth.fetch('/api/projects', {
-                method: 'POST',
-                body: formData,
-            });
-            if (!response.ok) throw new Error('Failed to create project');
-            const project = await response.json();
-
-            this.setState({
-                projectId: project.id,
-                projectName: project.name,
-                projectRulesAndGoal: project.rulesAndGoal,
-                projectImageGenerationPref: project.imageGenerationPref,
-                projectDefaultProvider: project.defaultProvider,
-                projectModelRole: project.modelRole,
-                projectStatus: project.status,
-                projectTaskId: project.taskId,
-                activeSessionId: project.activeSessionId,
-                projectSessions: project.sessions || []
-            }, () => {
-                this.normalizeUrl(project);
-            });
-        } catch (e) {
-            console.error('Failed to create project', e);
-            throw e;
-        }
-    };
-
-    handleUpdateProject = async (rules: string, imgPref: string, provider: LlmProvider, name: string, modelRole: string) => {
-        const { projectId } = this.state;
-        if (!projectId) return;
-
-        try {
-            const response = await apiAuth.fetch(`/api/projects/${projectId}`, {
+            const response = await apiAuth.fetch(`/api/projects/${project.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    rulesAndGoal: rules,
-                    imageGenerationPref: imgPref,
-                    defaultProvider: provider,
-                    name,
-                    modelRole
+                    defaultProvider,
+                    name
                 })
             });
             if (!response.ok) throw new Error('Failed to update project');
+            const updatedProject = await response.json();
 
             this.setState({
-                projectName: name,
-                projectRulesAndGoal: rules,
-                projectImageGenerationPref: imgPref,
-                projectDefaultProvider: provider,
-                projectModelRole: modelRole
+                project: updatedProject,
+                projectDefaultProvider: updatedProject.defaultProvider,
+                isSettingsModalOpen: false
             });
         } catch (e) {
             console.error('Failed to update project', e);
@@ -202,8 +151,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
 
     render() {
         const {
-            projectId, projectName, projectRulesAndGoal,
-            projectImageGenerationPref, projectDefaultProvider, projectModelRole,
+            projectId, project, projectDefaultProvider,
             projectStatus, projectTaskId
         } = this.state;
 
@@ -224,17 +172,15 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             <SessionProvider projectId={projectId} initialActiveSessionId={this.state.activeSessionId}>
                 <WorkspaceLayout
                     projectId={projectId}
-                    projectName={projectName}
-                    projectRulesAndGoal={projectRulesAndGoal}
-                    projectImageGenerationPref={projectImageGenerationPref}
+                    currentName={project?.name}
                     projectDefaultProvider={projectDefaultProvider}
-                    projectModelRole={projectModelRole}
-                    initialProjectSessions={this.state.projectSessions}
+                    onUpdateProject={this.handleSaveProjectSettings}
+                    initialProjectSessions={this.state.sessions}
                     initialActiveSessionId={this.state.activeSessionId}
-
-                    onUpdateProject={this.handleUpdateProject}
-                    onCreateProject={this.handleCreateProject}
-
+                    
+                    onCreateProject={async (prov, name, file) => {
+                        // Not implemented at workspace level yet, usually done in Projects
+                    }}
                     fetchProject={this.fetchProject}
                 />
             </SessionProvider>

@@ -1,12 +1,7 @@
 import { GeneratePageRequest } from '../types';
 
 export function buildPageGenPrompt(request: GeneratePageRequest): string {
-    const rulesAndGoal = request.rulesAndGoal;
-    const imageGenerationPref = request.imageGenerationPref;
-    const modelRole = request.modelRole;
-    const summary = request.summary;
-
-    const roleDefinition = modelRole || 'You are an expert web developer';
+    const roleDefinition = 'You are an expert web developer';
 
     let prompt = `${roleDefinition} that maintains a simple web page composed of three files: index.html, styles.css, and script.js.
 
@@ -23,7 +18,6 @@ Your goal is to fulfill the user's request by following this strict workflow:
     -   Explicit approval is typically a short phrase like "ok", "proceed", "yes", "do it", "looks good".
     -   **EXCEPTION 1**: If the user explicitly asks to make changes "without planning", "no plan", or "fast mode", you may SKIP the planning phase and proceed directly to implementation.
     -   **EXCEPTION 2**: If you asked CLARIFYING QUESTIONS and the user provided clean answers that make the path forward clear, you may PROCEED directly to implementation without summarizing the plan again.
-
     -   **PLAN SUMMARY**:
         -   Before asking for approval, summarize the agreed-upon features in a clear, bulleted list in your chat message.
         -   For each feature, provide a clear description of the change and its goal. Use natural language (e.g., "Improve navigation by replacing the progress bar to make it more visible").
@@ -66,19 +60,6 @@ Rules:
     -   Whenever a significant technical decision is made (e.g. "we will use flexbox for this"), call 'update_memory_file' for 'decisions.md'.
     -   When a feature is finished, call 'update_memory_file' for 'state.md'.
 `;
-
-    if (rulesAndGoal) {
-        prompt += `\n\nCONTEXT - PROJECT RULES AND GOAL:\n"${rulesAndGoal}"`;
-    }
-
-    if (imageGenerationPref) {
-        prompt += `\n\nCONTEXT - IMAGE GENERATION PREFERENCES:\n"${imageGenerationPref}"`;
-    }
-
-
-    if (summary) {
-        prompt += `\n\nCONTEXT - PREVIOUS CONVERSATION SUMMARY:\n"${summary}"\n(This summary covers older messages that are no longer in the context window. Use it to maintain continuity.)`;
-    }
 
     return prompt;
 }

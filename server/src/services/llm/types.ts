@@ -16,9 +16,7 @@ export interface GeneratePageRequest {
     fastMode?: boolean;
     subject?: string;
     onPatch?: (patch: { subject?: string }) => void;
-    modelRole?: string;
     abortSignal?: AbortSignal;
-    summary?: string; // Cumulative summary of previous conversation history (that might be excluded from 'conversation' list)
     onTokenUsage?: (agentName: string, modelId: string, prompt: number, completion: number, total: number) => Promise<void>;
     maxSteps?: number;
 }
@@ -34,6 +32,6 @@ export interface SummarizeHistoryRequest {
 }
 
 export interface GeneratePageResult {
-    summary: string;
+    text: string;
     targetVersion?: number;
 }

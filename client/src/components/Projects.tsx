@@ -64,14 +64,11 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         this.props.onSelectProject(projectId, lastSessionId);
     };
 
-    handleCreateProject = async (rulesAndGoal: string, imageGenerationPref: string, defaultProvider: string, name: string, modelRole: string, file?: File) => {
+    handleCreateProject = async (defaultProvider: string, name: string, file?: File) => {
         try {
             const formData = new FormData();
-            formData.append('name', name);
-            formData.append('rulesAndGoal', rulesAndGoal);
-            formData.append('imageGenerationPref', imageGenerationPref);
             formData.append('defaultProvider', defaultProvider);
-            formData.append('modelRole', modelRole);
+            if (name) formData.append('name', name);
             if (file) {
                 formData.append('file', file);
             }
@@ -166,7 +163,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                 onClick={() => this.handleSelectProject(project.id)}
                             >
                                 <div className={styles.projectName}>{project.name}</div>
-                                <div className={styles.projectRules}>{project.rulesAndGoal}</div>
+                                <div className={styles.projectDate}>{new Date(project.createdAt).toLocaleDateString()}</div>
                                 <div className={styles.projectFooter}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <span>{project.sessionIds?.length || 0} Sessions</span>
@@ -209,8 +206,8 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
 
                 <ProjectCreationModal
                     isOpen={showCreationModal}
-                    onCreate={async (rules, img, prov, name, role, file) => {
-                        await this.handleCreateProject(rules, img, prov, name, role, file);
+                    onCreate={async (prov, name, file) => {
+                        await this.handleCreateProject(prov, name, file);
                     }}
                     onClose={this.toggleCreationModal}
                 />

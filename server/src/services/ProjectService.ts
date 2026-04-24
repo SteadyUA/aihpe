@@ -19,15 +19,12 @@ export class ProjectService {
         return AppDataSource.getRepository(Project);
     }
 
-    async createProject(rulesAndGoal: string, imageGenerationPref?: string, defaultProvider?: LlmProvider, name?: string, accountId?: number, modelRole?: string, status: ProjectStatus = ProjectStatus.READY, taskId?: string): Promise<Project> {
+    async createProject(defaultProvider?: LlmProvider, name?: string, accountId?: number, status: ProjectStatus = ProjectStatus.READY, taskId?: string): Promise<Project> {
         const project = new Project();
         project.id = randomUUID();
         project.accountId = accountId;
         project.name = name || 'Untitled';
-        project.rulesAndGoal = rulesAndGoal;
-        project.imageGenerationPref = imageGenerationPref;
         project.defaultProvider = defaultProvider;
-        project.modelRole = modelRole || '';
         project.sessionIds = [];
         project.status = status;
         project.taskId = taskId;
@@ -65,7 +62,7 @@ export class ProjectService {
         return await this.projectRepository.findBy({ accountId });
     }
 
-    async updateProject(id: string, updates: Partial<Pick<Project, 'rulesAndGoal' | 'imageGenerationPref' | 'defaultProvider' | 'name' | 'activeSessionId' | 'modelRole' | 'sessionIds'>>): Promise<Project> {
+    async updateProject(id: string, updates: Partial<Pick<Project, 'defaultProvider' | 'name' | 'activeSessionId' | 'sessionIds'>>): Promise<Project> {
         // Use getProject to handle access checks
         const project = await this.getProject(id);
         if (!project) {
@@ -73,12 +70,9 @@ export class ProjectService {
         }
 
         // Apply updates
-        if (updates.rulesAndGoal !== undefined) project.rulesAndGoal = updates.rulesAndGoal;
-        if (updates.imageGenerationPref !== undefined) project.imageGenerationPref = updates.imageGenerationPref;
         if (updates.defaultProvider !== undefined) project.defaultProvider = updates.defaultProvider;
         if (updates.name !== undefined) project.name = updates.name;
         if (updates.activeSessionId !== undefined) project.activeSessionId = updates.activeSessionId;
-        if (updates.modelRole !== undefined) project.modelRole = updates.modelRole;
         if (updates.sessionIds !== undefined) project.sessionIds = updates.sessionIds;
 
         project.updatedAt = new Date(); // Explicit update or let UpdateDateColumn handle it? 

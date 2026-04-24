@@ -15,17 +15,8 @@ export class Project {
     @Column({ nullable: true })
     accountId?: number;
 
-    @Column('text')
-    rulesAndGoal!: string;
-
-    @Column({ nullable: true })
-    imageGenerationPref?: string;
-
     @Column({ type: 'simple-json', nullable: true })
     defaultProvider?: LlmProvider;
-
-    @Column({ nullable: true })
-    modelRole?: string;
 
     // Storing session IDs as a simple JSON array or simple-array
     @Column('simple-json', { default: '[]' })
