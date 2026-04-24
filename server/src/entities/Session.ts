@@ -33,12 +33,6 @@ export class Session {
     subject!: string | null;
 
     @Column({ type: 'text', nullable: true })
-    summary!: string | null;
-
-    @Column({ type: 'integer', nullable: true })
-    summaryTurn!: number | null;
-
-    @Column({ type: 'text', nullable: true })
     errorMessage!: string | null;
 
     @Column({ type: 'datetime' })

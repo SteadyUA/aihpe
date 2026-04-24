@@ -36,8 +36,6 @@ export class SessionService {
                 status: (entity.status as SessionStatus) || SessionStatus.IDLE,
                 errorMessage: entity.errorMessage || undefined,
                 subject: entity.subject || undefined,
-                summary: entity.summary || undefined,
-                summaryTurn: entity.summaryTurn || undefined,
             };
             this.sessions.set(metadata.id, metadata);
             return metadata;
@@ -63,8 +61,6 @@ export class SessionService {
             status: (entity.status as SessionStatus) || SessionStatus.IDLE,
             errorMessage: entity.errorMessage || undefined,
             subject: entity.subject || undefined,
-            summary: entity.summary || undefined,
-            summaryTurn: entity.summaryTurn || undefined,
         };
 
         this.sessions.set(sessionId, metadata);
@@ -84,8 +80,6 @@ export class SessionService {
         entity.status = metadata.status;
         entity.fastMode = metadata.fastMode || false;
         entity.subject = metadata.subject ?? null;
-        entity.summary = metadata.summary ?? null;
-        entity.summaryTurn = metadata.summaryTurn ?? null;
         entity.errorMessage = metadata.errorMessage ?? null;
         entity.updatedAt = metadata.updatedAt;
 

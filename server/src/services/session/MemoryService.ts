@@ -17,12 +17,6 @@ export class MemoryService {
             context += `=== MEMORY FILE: ${file} ===\n${content}\n\n`;
         }
 
-        // Legacy summary fallback
-        const metadata = await this.sessionService.getMetadata(sessionId);
-        if (metadata && metadata.summary) {
-            context += `=== LEGACY SUMMARY ===\n(This is a summary from an older version of the session. Incorporate important details from here into the memory files above if needed)\n${metadata.summary}\n\n`;
-        }
-
         return context;
     }
 

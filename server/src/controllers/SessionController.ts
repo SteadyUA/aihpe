@@ -250,16 +250,6 @@ class GetTurnsResponse {
     turns!: TurnResponse[];
 }
 
-class SessionSummaryResponse {
-    @IsOptional()
-    @IsString()
-    summary?: string;
-
-    @IsOptional()
-    @IsNumber()
-    summaryTurn?: number;
-}
-
 class TokenUsageResponse {
     @IsNumber()
     prompt!: number;
@@ -573,16 +563,6 @@ export class SessionController {
                 beginTime: t.beginTime.toISOString(),
                 endTime: t.endTime?.toISOString(),
             })),
-        };
-    }
-
-    @Get('/api/sessions/:sessionId/summary')
-    @UseBefore(AuthMiddleware)
-    async getSessionSummary(@Param('sessionId') sessionId: string): Promise<SessionSummaryResponse> {
-        const s = await this.sessionService.getMetadata(sessionId);
-        return {
-            summary: s?.summary,
-            summaryTurn: s?.summaryTurn,
         };
     }
 
