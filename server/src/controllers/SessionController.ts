@@ -32,7 +32,6 @@ import { SseService } from '../services/SseService';
 import { SessionService } from '../services/session/SessionService';
 import { TurnService } from '../services/session/TurnService';
 import { TokenUsageService } from '../services/llm/TokenUsageService';
-import { MemoryService } from '../services/session/MemoryService';
 
 import { LlmProvider, SessionMetadata, UnsentData, SessionStatus } from '../types/chat';
 import { UploadService } from '../services/image/UploadService';
@@ -343,7 +342,6 @@ export class SessionController {
         private readonly unsentService: UnsentService,
         private readonly sessionService: SessionService,
         private readonly turnService: TurnService,
-        private readonly memoryService: MemoryService,
     ) {
     }
 
@@ -549,18 +547,6 @@ export class SessionController {
             throw new NotFoundError('Session not found');
         }
         return this.enrichSession(snapshot);
-    }
-
-    @Get('/api/sessions/:sessionId/summary')
-    @UseBefore(AuthMiddleware)
-    async getSessionSummary(@Param('sessionId') sessionId: string): Promise<{ summary: string }> {
-        const snapshot = await this.sessionService.getMetadata(sessionId);
-        if (!snapshot) {
-            throw new NotFoundError('Session not found');
-        }
-        
-        const summary = await this.memoryService.getMemoryContext(sessionId, snapshot.currentVersion);
-        return { summary };
     }
 
     @Get('/api/sessions/:sessionId/turns')

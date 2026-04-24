@@ -11,6 +11,8 @@ import { TabType } from '../../types';
 import { Preview } from './Preview';
 import { Images } from './Images';
 import { Editor } from './Editor';
+import { UiModal } from '../UiModal';
+import { UiButton } from '../UiButton';
 
 import { apiAuth } from '../../utils/api';
 
@@ -46,6 +48,8 @@ interface WorkareaState {
     loading: Record<AssetType, boolean>;
     unsavedContent: Record<AssetType, string | null>;
     isSaving: boolean;
+    showMemoryModal: boolean;
+    memoryContent: string;
 
 
 }
@@ -62,6 +66,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
             unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
             isSaving: false,
+            showMemoryModal: false,
+            memoryContent: '',
         };
         this.previewRef = React.createRef();
     }
@@ -124,6 +130,29 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
     public saveScroll = () => {
         this.previewRef.current?.saveScroll();
     }
+
+    handleVersionClick = async () => {
+        const { sessionId, version } = this.props;
+        if (!sessionId) return;
+        try {
+            const res = await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/memory`);
+            if (res.ok) {
+                const data = await res.json();
+                this.setState({
+                    memoryContent: data.memory || 'No memory available yet.',
+                    showMemoryModal: true
+                });
+            } else {
+                console.error('Failed to fetch memory');
+            }
+        } catch (e) {
+            console.error('Error fetching memory', e);
+        }
+    };
+
+    closeMemoryModal = () => {
+        this.setState({ showMemoryModal: false });
+    };
 
     public restoreScroll = () => {
         this.previewRef.current?.restoreScroll();
@@ -493,7 +522,12 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     >
                         Images
                     </button>
-                    <span className={styles.versionLabel}>
+                    <span 
+                        className={styles.versionLabel} 
+                        style={{ cursor: 'pointer' }}
+                        onClick={this.handleVersionClick}
+                        title="View Memory Files"
+                    >
                         v{version}
                     </span>
 
@@ -548,6 +582,19 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                         );
                     })
                 }
+
+                <UiModal
+                    isOpen={this.state.showMemoryModal}
+                    title="Memory Files"
+                    onClose={this.closeMemoryModal}
+                    actions={
+                        <UiButton onClick={this.closeMemoryModal}>Close</UiButton>
+                    }
+                >
+                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                        {this.state.memoryContent}
+                    </div>
+                </UiModal>
             </div >
         );
     }

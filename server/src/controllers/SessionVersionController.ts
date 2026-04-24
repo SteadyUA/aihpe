@@ -3,6 +3,7 @@ import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
 import { ImageService, ImageMetadata } from '../services/image/ImageService';
+import { MemoryService } from '../services/session/MemoryService';
 import archiver from 'archiver';
 import { Service } from 'typedi';
 import { Readable } from 'stream';
@@ -71,6 +72,7 @@ export class SessionVersionController {
     constructor(
         private readonly filesService: FilesService,
         private readonly imageService: ImageService,
+        private readonly memoryService: MemoryService,
     ) { }
 
     private mapImageToResponse(metadata: ImageMetadata): GalleryImageResponse {
@@ -282,4 +284,13 @@ export class SessionVersionController {
         return new FileStreamResponse(downloadFilename, archive as any, downloadFilename);
     }
 
+    @Get('/api/sessions/:sessionId/:version/memory')
+    @UseBefore(AuthMiddleware)
+    async getMemoryContext(
+        @Params() params: SessionVersionParams,
+    ): Promise<{ memory: string }> {
+        const { sessionId, version } = params;
+        const memory = await this.memoryService.getMemoryContext(sessionId, version);
+        return { memory };
+    }
 }
