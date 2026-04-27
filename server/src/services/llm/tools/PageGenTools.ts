@@ -148,11 +148,12 @@ export function createPageGenTools(
                 parameters: {
                     type: 'object',
                     properties: {
-                        subject: { type: 'string', description: 'The new subject (3-5 words).' }
+                        subject: { type: 'string', description: 'The new subject (3-5 words).' },
+                        summary: { type: 'string', description: 'Explain why you are updating the subject.' }
                     },
-                    required: ['subject']
+                    required: ['subject', 'summary']
                 },
-                execute: async ({ subject }: { subject: string }) => {
+                execute: async ({ subject, summary: _summary }: { subject: string; summary: string }) => {
                     await sessionService.updateMetadata(request.sessionId, { subject });
                     if (request.onPatch) {
                         request.onPatch({ subject });
