@@ -379,15 +379,16 @@ export function createPageGenTools(
             },
             {
                 name: 'save_to_clipboard',
-                description: 'Use this tool to save formatting, color schemes, or specific state nuances the user asks you to remember or copy. IMPORTANT: This information must be saved via this tool ONLY, do NOT save it to memory files.',
+                description: 'Use this tool to save formatting, color schemes, or specific state nuances the user asks you to remember or copy. This information will be saved to the clipboard and can be used in other sessions.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        description: { type: 'string', description: 'Detailed textual description of what the user wants to save or remember.' }
+                        description: { type: 'string', description: 'Detailed textual description of what the user wants to save or remember.' },
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Saving styles to clipboard").' }
                     },
-                    required: ['description']
+                    required: ['description', 'summary']
                 },
-                execute: async ({ description }: { description: string }) => {
+                execute: async ({ description, summary: _summary }: { description: string; summary: string }) => {
                     try {
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
@@ -414,9 +415,15 @@ export function createPageGenTools(
             },
             {
                 name: 'read_clipboard',
-                description: 'Use this tool to read the active clipboard record text.',
-                parameters: { type: 'object', properties: {} },
-                execute: async () => {
+                description: 'Use this tool to read the text from clipboard.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Reading clipboard contents").' }
+                    },
+                    required: ['summary']
+                },
+                execute: async ({ summary: _summary }: { summary: string }) => {
                     try {
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
@@ -438,8 +445,14 @@ export function createPageGenTools(
             {
                 name: 'list_clipboard_files',
                 description: 'Use this tool to get a list of files associated with the active clipboard record. Returns filename, size, and mime-type.',
-                parameters: { type: 'object', properties: {} },
-                execute: async () => {
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Listing files from the clipboard session").' }
+                    },
+                    required: ['summary']
+                },
+                execute: async ({ summary: _summary }: { summary: string }) => {
                     try {
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
@@ -465,7 +478,7 @@ export function createPageGenTools(
                             let size = 0;
                             try {
                                 size = fs.statSync(filePath).size;
-                            } catch (e) {}
+                            } catch (e) { }
 
                             const ext = path.extname(filename).toLowerCase();
                             let mimeType = 'application/octet-stream';
@@ -492,11 +505,12 @@ export function createPageGenTools(
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', description: 'The name of the file to read' }
+                        filename: { type: 'string', description: 'The name of the file to read' },
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Reading [filename] from the clipboard").' }
                     },
-                    required: ['filename']
+                    required: ['filename', 'summary']
                 },
-                execute: async ({ filename }: { filename: string }) => {
+                execute: async ({ filename, summary: _summary }: { filename: string; summary: string }) => {
                     try {
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
