@@ -2,9 +2,13 @@ import crypto from 'node:crypto';
 import { Service } from 'typedi';
 import { AppDataSource } from '../data-source';
 import { Account } from '../entities/Account';
+import { EventBus } from '../utils/bus';
+
+export const AccountDeletedEvent = EventBus.createEvent<{ accountId: number }>('ACCOUNT_DELETED');
 
 @Service()
 export class AccountService {
+    constructor(private eventBus: EventBus) {}
     private get accountRepository() {
         return AppDataSource.getRepository(Account);
     }
@@ -79,4 +83,8 @@ export class AccountService {
         return this.accountRepository.findOneBy({ id });
     }
 
+    async deleteAccount(id: number): Promise<void> {
+        await this.accountRepository.delete(id);
+        this.eventBus.publish(AccountDeletedEvent({ accountId: id }));
+    }
 }

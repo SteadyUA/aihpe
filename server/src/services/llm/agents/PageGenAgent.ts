@@ -9,6 +9,8 @@ import { SessionService } from '../../session/SessionService';
 import { LlmProvider, ChatMessage } from '../../../types/chat';
 import { buildPageGenPrompt } from '../prompts/PageGenPrompt';
 import { createPageGenTools, PageGenContext } from '../tools/PageGenTools';
+import { ProjectService } from '../../ProjectService';
+import { ClipboardService } from '../../ClipboardService';
 
 @Service()
 export class PageGenAgent {
@@ -23,6 +25,12 @@ export class PageGenAgent {
 
     @Inject()
     private memoryService!: MemoryService;
+
+    @Inject()
+    private projectService!: ProjectService;
+
+    @Inject()
+    private clipboardService!: ClipboardService;
 
     public async generatePage(provider: LlmProvider, request: GeneratePageRequest): Promise<GeneratePageResult> {
         const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
@@ -45,7 +53,7 @@ export class PageGenAgent {
             ensureNextVersion
         };
 
-        const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService, this.memoryService)(request as any, context);
+        const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService, this.memoryService, this.projectService, this.clipboardService)(request as any, context);
 
         const systemPrompt = buildPageGenPrompt(request as any);
 

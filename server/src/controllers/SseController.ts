@@ -21,9 +21,9 @@ export class SseController {
                 throw new UnauthorizedError('Token required');
             }
 
-            await this.authService.verifyToken(token);
+            const payload = await this.authService.verifyToken(token);
 
-            this.sseService.addClient(request, response);
+            this.sseService.addClient(request, response, payload.accountId);
         } catch (error: any) {
             console.error('Error in SSE stream:', error.message);
             if (!response.headersSent) {

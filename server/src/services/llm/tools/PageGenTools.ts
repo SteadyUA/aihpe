@@ -2,6 +2,8 @@ import { ImageService } from '../../image/ImageService';
 import { FilesService } from '../../session/FilesService';
 import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
+import { ProjectService } from '../../ProjectService';
+import { ClipboardService } from '../../ClipboardService';
 import { GeneratePageRequest } from '../types';
 
 export interface PageGenContext {
@@ -13,7 +15,9 @@ export function createPageGenTools(
     imageService: ImageService,
     filesService: FilesService,
     sessionService: SessionService,
-    memoryService: MemoryService
+    memoryService: MemoryService,
+    projectService: ProjectService,
+    clipboardService: ClipboardService
 ): (
     request: GeneratePageRequest,
     context: PageGenContext
@@ -370,6 +374,41 @@ export function createPageGenTools(
                         return `Successfully updated memory file: ${filename}`;
                     } catch (error: any) {
                         return `Failed to update memory file: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'save_to_clipboard',
+                description: 'Use this tool to save formatting, color schemes, or specific state nuances the user asks you to remember or copy. IMPORTANT: This information must be saved via this tool ONLY, do NOT save it to memory files.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        description: { type: 'string', description: 'Detailed textual description of what the user wants to save or remember.' }
+                    },
+                    required: ['description']
+                },
+                execute: async ({ description }: { description: string }) => {
+                    try {
+                        const metadata = await sessionService.getMetadata(request.sessionId);
+                        if (!metadata) return 'Session not found';
+
+                        const project = await projectService.getProject(metadata.projectId);
+                        if (!project || project.accountId === undefined || project.accountId === null) {
+                            return 'Project or account not found';
+                        }
+
+                        const version = getTargetVersion() ?? request.currentVersion;
+                        await clipboardService.saveToClipboard(
+                            project.accountId,
+                            description,
+                            metadata.projectId,
+                            request.sessionId,
+                            version
+                        );
+
+                        return 'Successfully saved to clipboard.';
+                    } catch (error: any) {
+                        return `Failed to save to clipboard: ${error.message}`;
                     }
                 }
             }

@@ -12,6 +12,7 @@ export interface ChatStatusPayload {
 
 interface SseClient {
     id: number;
+    accountId: number;
     response: Response;
     heartbeat: NodeJS.Timeout;
 }
@@ -34,7 +35,7 @@ export class SseService {
 
     private nextClientId = 1;
 
-    addClient(request: Request, response: Response): void {
+    addClient(request: Request, response: Response, accountId: number): void {
         if (!response.headersSent) {
             response.setHeader('Content-Type', 'text/event-stream');
             response.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -46,6 +47,7 @@ export class SseService {
 
         const client: SseClient = {
             id: this.nextClientId++,
+            accountId,
             response,
             heartbeat: setInterval(() => {
                 this.pushRaw(client.id, ': keep-alive\n\n');
@@ -112,6 +114,16 @@ export class SseService {
         for (const client of this.clients.values()) {
             this.pushRaw(client.id, `event: ${event}\n`);
             this.pushRaw(client.id, `data: ${serialized}\n\n`);
+        }
+    }
+
+    broadcastToAccount(accountId: number, event: string, data: unknown): void {
+        const serialized = JSON.stringify(data);
+        for (const client of this.clients.values()) {
+            if (client.accountId === accountId) {
+                this.pushRaw(client.id, `event: ${event}\n`);
+                this.pushRaw(client.id, `data: ${serialized}\n\n`);
+            }
         }
     }
 

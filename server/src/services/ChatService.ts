@@ -31,6 +31,11 @@ export const SessionDeletedEvent = EventBus.createEvent<{
 
 export const SessionPatchEvent = EventBus.createEvent<any>('SESSION_PATCH');
 
+export const SessionVersionDeletedEvent = EventBus.createEvent<{
+    sessionId: string;
+    targetVersion: number;
+}>('SESSION_VERSION_DELETED');
+
 export const SessionStatusChangedEvent = EventBus.createEvent<{
     sessionId: string;
     status: SessionStatus;
@@ -870,6 +875,11 @@ export class ChatService {
         }
 
         this.filesService.cleanupHigherVersions(sessionId, targetVersion);
+
+        this.eventBus.publish(SessionVersionDeletedEvent({
+            sessionId,
+            targetVersion,
+        }));
 
         await this.sessionService.updateMetadata(sessionId, {
             currentVersion: targetVersion,

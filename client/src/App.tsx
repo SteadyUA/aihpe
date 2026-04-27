@@ -8,6 +8,7 @@ import ProjectWorkspace from './components/ProjectWorkspace';
 import { MainLayout } from './components/MainLayout';
 import { withRouter, RouterProps } from './components/withRouter';
 import { ConnectionProvider } from './contexts/ConnectionContext';
+import { ClipboardProvider } from './contexts/ClipboardContext';
 import { apiAuth } from './utils/api';
 
 
@@ -122,6 +123,11 @@ class App extends React.Component<RouterProps, AppState> {
             }
         });
 
+        this.evtSource.addEventListener('clipboard-update', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:clipboard-update', { detail: data }));
+        });
+
         this.evtSource.addEventListener('server-stop', () => {
             console.log('Server stopping');
             this.closeSse();
@@ -165,30 +171,32 @@ class App extends React.Component<RouterProps, AppState> {
 
         return (
             <ConnectionProvider isConnected={isConnected}>
-                <Routes>
-                    <Route path="/projects" element={
-                        <MainLayout headerContent={
-                            <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
-                        }>
-                            <Projects
-                                currentProjectId={null}
-                                onSelectProject={(id) => navigate(`/project/${id}`)}
-                            />
-                        </MainLayout>
-                    } />
-                    <Route path="/settings" element={
-                        <MainLayout headerContent={
-                            <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>Settings</div>
-                        }>
-                            <Settings />
-                        </MainLayout>
-                    } />
-                    <Route path="/project/:projectId" element={
-                        <ProjectWorkspace />
-                    } />
-                    <Route path="/" element={<Navigate to="/projects" replace />} />
-                    <Route path="*" element={<Navigate to="/projects" replace />} />
-                </Routes>
+                <ClipboardProvider>
+                    <Routes>
+                        <Route path="/projects" element={
+                            <MainLayout headerContent={
+                                <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
+                            }>
+                                <Projects
+                                    currentProjectId={null}
+                                    onSelectProject={(id) => navigate(`/project/${id}`)}
+                                />
+                            </MainLayout>
+                        } />
+                        <Route path="/settings" element={
+                            <MainLayout headerContent={
+                                <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>Settings</div>
+                            }>
+                                <Settings />
+                            </MainLayout>
+                        } />
+                        <Route path="/project/:projectId" element={
+                            <ProjectWorkspace />
+                        } />
+                        <Route path="/" element={<Navigate to="/projects" replace />} />
+                        <Route path="*" element={<Navigate to="/projects" replace />} />
+                    </Routes>
+                </ClipboardProvider>
             </ConnectionProvider>
         );
     }

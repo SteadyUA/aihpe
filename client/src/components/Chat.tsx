@@ -14,6 +14,7 @@ import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn, Session, Un
 import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
 import { ContextMenu } from './ContextMenu';
+import { withClipboard, ClipboardContextProps } from '../contexts/ClipboardContext';
 
 interface MessageProps {
     msg: MessageData;
@@ -402,6 +403,8 @@ interface ChatProps {
     isVisible?: boolean;
 }
 
+export interface ChatPropsWithContext extends ChatProps, ClipboardContextProps {}
+
 interface ChatState {
     isLoading: boolean;
     error: string | null;
@@ -417,13 +420,13 @@ interface ChatState {
     contextMenu: { type: 'quote' | 'send'; x: number; y: number; text: string } | null;
 }
 
-export class Chat extends React.Component<ChatProps, ChatState> {
+export class ChatInternal extends React.Component<ChatPropsWithContext, ChatState> {
     private fileInputRef: React.RefObject<HTMLInputElement | null>;
     private richInputRef = React.createRef<RichInput>();
     private lastSavedUnsent: UnsentData = {};
     private messagesRef = React.createRef<HTMLDivElement>();
 
-    constructor(props: ChatProps) {
+    constructor(props: ChatPropsWithContext) {
         super(props);
         this.fileInputRef = React.createRef();
         this.state = {
@@ -1388,6 +1391,16 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     <form className={styles.chatForm} onSubmit={this.handleSubmit}>
                         <div className={classNames(styles.inputContainer, { [styles.busy]: status === SessionStatus.BUSY })} onClick={this.handleContainerClick}>
                             <div className={styles.selections}>
+                                {this.props.clipboardRecord && (
+                                    <div className={styles.pickerContainer}>
+                                        <UiTarget onRemove={this.props.clearClipboard} removeTitle="Clear clipboard" disabled={isFormDisabled}>
+                                            <span style={{ fontSize: '0.9rem', marginRight: '6px' }}>📋</span>
+                                            <code className={styles.selectionValue} title={this.props.clipboardRecord.description} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, display: 'inline-block', verticalAlign: 'bottom', minWidth: 0 }}>
+                                                {this.props.clipboardRecord.description}
+                                            </code>
+                                        </UiTarget>
+                                    </div>
+                                )}
                                 {selection && (
                                     <div className={styles.pickerContainer}>
                                         <UiTarget onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
@@ -1720,3 +1733,5 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         );
     }
 }
+
+export const Chat = withClipboard(ChatInternal);
