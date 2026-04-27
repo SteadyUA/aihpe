@@ -175,6 +175,94 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
     };
 
     handleKeyDown = (e: React.KeyboardEvent) => {
+        const selection = window.getSelection();
+        if (selection && selection.isCollapsed) {
+            if (e.key === 'Backspace' || e.key === 'Enter') {
+                const node = selection.anchorNode;
+                if (node) {
+                    const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
+                    const bq = element?.closest('blockquote');
+                    if (bq && bq.textContent?.trim() === '') {
+                        e.preventDefault();
+                        const p = document.createElement('p');
+                        p.innerHTML = '<br>';
+                        bq.replaceWith(p);
+                        
+                        const range = document.createRange();
+                        range.selectNodeContents(p);
+                        range.collapse(true);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        
+                        this.handleInput();
+                        return;
+                    }
+                }
+            }
+
+            if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                const range = selection.getRangeAt(0);
+                const preRange = document.createRange();
+                if (this.mainRef.current) {
+                    preRange.selectNodeContents(this.mainRef.current);
+                    preRange.setEnd(range.startContainer, range.startOffset);
+                    
+                    if (preRange.toString().trim() === '') {
+                        const node = selection.anchorNode;
+                        const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
+                        const block = element?.closest('blockquote, ul, ol, pre');
+                        
+                        if (block && block === this.mainRef.current.firstElementChild) {
+                            e.preventDefault();
+                            const p = document.createElement('p');
+                            p.innerHTML = '<br>';
+                            this.mainRef.current.insertBefore(p, block);
+                            
+                            const newRange = document.createRange();
+                            newRange.selectNodeContents(p);
+                            newRange.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(newRange);
+                            
+                            this.handleInput();
+                            return;
+                        }
+                    }
+                }
+            }
+
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                const range = selection.getRangeAt(0);
+                const postRange = document.createRange();
+                if (this.mainRef.current) {
+                    postRange.selectNodeContents(this.mainRef.current);
+                    postRange.setStart(range.endContainer, range.endOffset);
+                    
+                    if (postRange.toString().trim() === '') {
+                        const node = selection.anchorNode;
+                        const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
+                        const block = element?.closest('blockquote, ul, ol, pre');
+                        
+                        if (block && block === this.mainRef.current.lastElementChild) {
+                            e.preventDefault();
+                            const p = document.createElement('p');
+                            p.innerHTML = '<br>';
+                            block.insertAdjacentElement('afterend', p);
+                            
+                            const newRange = document.createRange();
+                            newRange.selectNodeContents(p);
+                            newRange.collapse(true);
+                            selection.removeAllRanges();
+                            selection.addRange(newRange);
+                            
+                            this.handleInput();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         if (this.props.onKeyDown) {
             this.props.onKeyDown(e);
         }
@@ -185,11 +273,25 @@ export class RichInput extends React.Component<RichInputProps, RichInputState> {
             this.mainRef.current.focus();
             // Move cursor to end
             if (toEnd) {
+                const lastEl = this.mainRef.current.lastElementChild;
+                if (lastEl && (lastEl.tagName === 'BLOCKQUOTE' || lastEl.tagName === 'UL' || lastEl.tagName === 'OL' || lastEl.tagName === 'PRE')) {
+                    const p = document.createElement('p');
+                    p.innerHTML = '<br>';
+                    this.mainRef.current.appendChild(p);
+                    // Don't call handleInput yet; let the user type first.
+                }
+
                 const range = document.createRange();
                 const selection = window.getSelection();
                 if (selection) {
-                    range.selectNodeContents(this.mainRef.current);
-                    range.collapse(false); // collapse to end
+                    const lastChild = this.mainRef.current.lastChild;
+                    if (lastChild) {
+                        range.selectNodeContents(lastChild);
+                        range.collapse(false);
+                    } else {
+                        range.selectNodeContents(this.mainRef.current);
+                        range.collapse(false);
+                    }
                     selection.removeAllRanges();
                     selection.addRange(range);
                 }
