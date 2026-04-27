@@ -297,13 +297,68 @@ export function createPageGenTools(
                 }
             },
             {
+                name: 'edit_memory_file',
+                description: 'Edit a memory file by replacing an exact string match. Use this instead of update_memory_file to add new lines or modify existing lines without rewriting the whole file.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to edit.' },
+                        oldString: { type: 'string', description: 'The exact string to replace. Use empty string "" to append to the end of the file.' },
+                        newString: { type: 'string', description: 'The new string to replace it with (or to append).' },
+                        summary: { type: 'string', description: 'Explain why you are editing this memory file.' }
+                    },
+                    required: ['filename', 'oldString', 'newString', 'summary']
+                },
+                execute: async ({ filename, oldString, newString }: { filename: string; oldString: string; newString: string; summary: string }) => {
+                    try {
+                        const version = getTargetVersion() ?? request.currentVersion;
+                        let content = memoryService.readMemoryFile(request.sessionId, version, filename) || '';
+
+                        if (oldString === '') {
+                            content = content.trim() + (content ? '\n\n' : '') + newString;
+                        } else {
+                            let targetString = oldString;
+                            if (!content.includes(targetString)) {
+                                if (content.includes(targetString.trim())) {
+                                    targetString = targetString.trim();
+                                } else {
+                                    const normalizedContent = content.replace(/\r\n/g, '\n');
+                                    const normalizedTarget = targetString.replace(/\r\n/g, '\n');
+                                    if (normalizedContent.includes(normalizedTarget)) {
+                                        content = normalizedContent;
+                                        targetString = normalizedTarget;
+                                    } else if (normalizedContent.includes(normalizedTarget.trim())) {
+                                        content = normalizedContent;
+                                        targetString = normalizedTarget.trim();
+                                    } else {
+                                        return `Error: oldString not found in ${filename}`;
+                                    }
+                                }
+                            }
+
+                            if (content.split(targetString).length > 2) {
+                                return `Error: oldString found multiple times in ${filename}. Provide more unique context.`;
+                            }
+
+                            content = content.replace(targetString, newString);
+                        }
+
+                        const nextVersion = await ensureNextVersion(request.sessionId);
+                        memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, content);
+                        return `Successfully edited memory file: ${filename}`;
+                    } catch (error: any) {
+                        return `Failed to edit memory file: ${error.message}`;
+                    }
+                }
+            },
+            {
                 name: 'update_memory_file',
                 description: 'Update a memory file to persist new technical decisions, state changes, or user preferences for future turns.',
                 parameters: {
                     type: 'object',
                     properties: {
                         filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to update.' },
-                        content: { type: 'string', description: 'The completely new content of the memory file (this overwrites the existing file).' },
+                        content: { type: 'string', description: 'The FULL updated content of the memory file. You MUST preserve all previous historical information and integrate your new updates. DO NOT aggressively summarize or delete old context (files can safely be up to 200 lines long).' },
                         summary: { type: 'string', description: 'Explain why you are updating this memory file.' }
                     },
                     required: ['filename', 'content', 'summary']

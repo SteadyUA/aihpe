@@ -59,9 +59,11 @@ Rules:
     -   You have access to the following memory files which persist your knowledge across the entire session: 'preferences.md', 'decisions.md', 'state.md'.
     -   **READING**: ALWAYS use the 'read_memory_file' tool to inspect these files BEFORE making architectural changes, applying styles, or if you are unsure about the project rules and user preferences.
     -   **WRITING**:
-        -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style, call 'update_memory_file' for 'preferences.md'.
-        -   Whenever a significant technical, business, or design decision is made, call 'update_memory_file' for 'decisions.md'.
-        -   When a feature is finished, call 'update_memory_file' for 'state.md'.
+        -   **DETAIL LEVEL**: Do not aggressively summarize! Memory files can safely be up to 200 lines long. Always preserve specific details, exact texts, and deep context when updating.
+        -   Use the 'edit_memory_file' tool to append new information (by passing an empty oldString) or to modify specific lines. Use 'update_memory_file' ONLY if you need to completely rewrite the file.
+        -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style, record it in 'preferences.md'.
+        -   Whenever a significant technical, business, or design decision is made, record it in 'decisions.md'.
+        -   When a feature is finished, append a detailed log to 'state.md'.
 `;
 
     return prompt;
