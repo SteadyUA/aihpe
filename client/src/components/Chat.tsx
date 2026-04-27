@@ -79,24 +79,10 @@ const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
     );
 };
 
-const processContent = (text: string, sessionIds: string[] = [], isLastAssistant: boolean = false) => {
+const processContent = (text: string, sessionIds: string[] = []) => {
     if (!text) return '';
 
     let processedText = text;
-
-    if (isLastAssistant) {
-        const parts = processedText.split(/\n\n+/);
-        if (parts.length > 0) {
-            const lastPart = parts.pop() || '';
-            const processedLastPart = lastPart.replace(/(?:«([^»]+)»|"([^"]+)")/g, (match, p1, p2) => {
-                const word = p1 || p2;
-                if (!word) return match;
-                return `<span class="${styles.actionableQuote}" data-quote="${word}">${match}</span>`;
-            });
-            parts.push(processedLastPart);
-            processedText = parts.join('\n\n');
-        }
-    }
 
     // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
     return processedText.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
@@ -207,13 +193,13 @@ class Message extends React.Component<MessageProps> {
                         const target = e.target as HTMLElement;
                         
                         // Check if click was on an actionable quote
-                        const quoteSpan = target.closest(`.${styles.actionableQuote}`) as HTMLElement;
-                        if (quoteSpan && this.props.onQuoteActionClick) {
+                        const quoteAnchor = target.closest('a[href="#send"]') as HTMLAnchorElement;
+                        if (quoteAnchor && this.props.onQuoteActionClick) {
                             e.preventDefault();
                             e.stopPropagation();
-                            const quoteText = quoteSpan.getAttribute('data-quote');
+                            const quoteText = quoteAnchor.textContent || '';
                             if (quoteText) {
-                                this.props.onQuoteActionClick(quoteText, quoteSpan.getBoundingClientRect());
+                                this.props.onQuoteActionClick(quoteText, quoteAnchor.getBoundingClientRect());
                             }
                             return;
                         }
@@ -265,7 +251,7 @@ class Message extends React.Component<MessageProps> {
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds, isLastAssistant)) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
                                 }}
                             />
                         )
@@ -633,7 +619,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         if (target.closest('#chat-context-menu')) {
             return;
         }
-        if (target.closest(`.${styles.actionableQuote}`)) {
+        if (target.closest('a[href="#send"]')) {
             return;
         }
         if (this.state.contextMenu) {
@@ -643,7 +629,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
 
     handleMouseUp = (e: MouseEvent) => {
         const target = e.target as HTMLElement;
-        if (target.closest(`.${styles.actionableQuote}`)) {
+        if (target.closest('a[href="#send"]')) {
             return;
         }
 

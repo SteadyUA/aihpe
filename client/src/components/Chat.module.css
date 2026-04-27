@@ -645,14 +645,15 @@
 }
 
 
-.actionableQuote {
+.messageContent a[href="#send"] {
     cursor: pointer;
     border-bottom: 1px dashed currentColor;
     transition: opacity 0.2s;
     font-weight: 500;
     color: var(--accent);
+    text-decoration: none; /* remove default link underline */
 }
 
-.actionableQuote:hover {
+.messageContent a[href="#send"]:hover {
     opacity: 0.7;
 }
