@@ -168,6 +168,7 @@ class Message extends React.Component<MessageProps> {
             [styles.activeTurn]: isActiveTurn,
             [styles.dimmed]: isDimmed,
             [styles.pending]: isPending,
+            [styles.lastAssistant]: isLastAssistant,
         });
 
         let statusList = statusMessages || [];
@@ -195,6 +196,10 @@ class Message extends React.Component<MessageProps> {
                         // Check if click was on an actionable quote
                         const quoteAnchor = target.closest('a[href="#send"]') as HTMLAnchorElement;
                         if (quoteAnchor && this.props.onQuoteActionClick) {
+                            if (!this.props.isLastAssistant) {
+                                e.preventDefault();
+                                return;
+                            }
                             e.preventDefault();
                             e.stopPropagation();
                             const quoteText = quoteAnchor.textContent || '';
