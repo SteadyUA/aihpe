@@ -411,6 +411,115 @@ export function createPageGenTools(
                         return `Failed to save to clipboard: ${error.message}`;
                     }
                 }
+            },
+            {
+                name: 'read_clipboard',
+                description: 'Use this tool to read the active clipboard record text.',
+                parameters: { type: 'object', properties: {} },
+                execute: async () => {
+                    try {
+                        const metadata = await sessionService.getMetadata(request.sessionId);
+                        if (!metadata) return 'Session not found';
+
+                        const project = await projectService.getProject(metadata.projectId);
+                        if (!project || project.accountId === undefined || project.accountId === null) {
+                            return 'Project or account not found';
+                        }
+
+                        const activeRecord = await clipboardService.getActive(project.accountId);
+                        if (!activeRecord) return 'Clipboard is empty';
+
+                        return activeRecord.description;
+                    } catch (error: any) {
+                        return `Failed to read clipboard: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'list_clipboard_files',
+                description: 'Use this tool to get a list of files associated with the active clipboard record. Returns filename, size, and mime-type.',
+                parameters: { type: 'object', properties: {} },
+                execute: async () => {
+                    try {
+                        const metadata = await sessionService.getMetadata(request.sessionId);
+                        if (!metadata) return 'Session not found';
+
+                        const project = await projectService.getProject(metadata.projectId);
+                        if (!project || project.accountId === undefined || project.accountId === null) {
+                            return 'Project or account not found';
+                        }
+
+                        const activeRecord = await clipboardService.getActive(project.accountId);
+                        if (!activeRecord) return 'Clipboard is empty';
+                        if (!activeRecord.sessionId || activeRecord.version === undefined) {
+                            return 'Clipboard does not reference any specific files or session.';
+                        }
+
+                        const filenames = filesService.listVersionFiles(activeRecord.sessionId, activeRecord.version);
+                        if (filenames.length === 0) return 'No files found for the clipboard session context.';
+
+                        const fileInfos = filenames.map(filename => {
+                            const filePath = filesService.resolveVersionFilePath(activeRecord.sessionId!, activeRecord.version!, filename);
+                            const fs = require('fs');
+                            const path = require('path');
+                            let size = 0;
+                            try {
+                                size = fs.statSync(filePath).size;
+                            } catch (e) {}
+
+                            const ext = path.extname(filename).toLowerCase();
+                            let mimeType = 'application/octet-stream';
+                            if (ext === '.html') mimeType = 'text/html';
+                            else if (ext === '.css') mimeType = 'text/css';
+                            else if (ext === '.js') mimeType = 'application/javascript';
+                            else if (ext === '.json') mimeType = 'application/json';
+                            else if (ext === '.png') mimeType = 'image/png';
+                            else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+                            else if (ext === '.svg') mimeType = 'image/svg+xml';
+
+                            return { filename, size, mimeType };
+                        });
+
+                        return JSON.stringify(fileInfos, null, 2);
+                    } catch (error: any) {
+                        return `Failed to list clipboard files: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'read_clipboard_file',
+                description: 'Use this tool to read the contents of a specific file from the active clipboard context.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filename: { type: 'string', description: 'The name of the file to read' }
+                    },
+                    required: ['filename']
+                },
+                execute: async ({ filename }: { filename: string }) => {
+                    try {
+                        const metadata = await sessionService.getMetadata(request.sessionId);
+                        if (!metadata) return 'Session not found';
+
+                        const project = await projectService.getProject(metadata.projectId);
+                        if (!project || project.accountId === undefined || project.accountId === null) {
+                            return 'Project or account not found';
+                        }
+
+                        const activeRecord = await clipboardService.getActive(project.accountId);
+                        if (!activeRecord) return 'Clipboard is empty';
+                        if (!activeRecord.sessionId || activeRecord.version === undefined) {
+                            return 'Clipboard does not reference any specific files or session.';
+                        }
+
+                        const content = filesService.readVersionFile(activeRecord.sessionId, activeRecord.version, filename);
+                        if (content === undefined) return `File ${filename} not found or is empty in the clipboard context.`;
+
+                        return content;
+                    } catch (error: any) {
+                        return `Failed to read clipboard file: ${error.message}`;
+                    }
+                }
             }
         ];
 
