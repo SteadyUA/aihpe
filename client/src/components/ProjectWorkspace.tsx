@@ -178,7 +178,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                     initialProjectSessions={this.state.sessions}
                     initialActiveSessionId={this.state.activeSessionId}
                     
-                    onCreateProject={async (prov, name, file) => {
+                    onCreateProject={async (_prov, _name, _file) => {
                         // Not implemented at workspace level yet, usually done in Projects
                     }}
                     fetchProject={this.fetchProject}
