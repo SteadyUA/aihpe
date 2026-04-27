@@ -632,6 +632,9 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         if (target.closest('a[href="#send"]')) {
             return;
         }
+        if (target.closest('#chat-context-menu')) {
+            return;
+        }
 
         setTimeout(() => {
             const selection = window.getSelection();
