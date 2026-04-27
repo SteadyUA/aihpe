@@ -399,7 +399,7 @@ export function createPageGenTools(
                             return 'Project or account not found';
                         }
 
-                        const version = await ensureNextVersion(request.sessionId);
+                        const version = getTargetVersion() ?? request.currentVersion;
                         await clipboardService.saveToClipboard(
                             project.accountId,
                             description,
