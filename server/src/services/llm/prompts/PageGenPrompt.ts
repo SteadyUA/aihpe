@@ -43,7 +43,7 @@ Strategy:
 - **MEMORY MANAGEMENT**: Use 'update_memory_file' proactively to document any new user preferences, architectural decisions, or completed features. Do this so you don't forget important context as the conversation grows.
 - **GLOBAL CLIPBOARD SYSTEM**:
     -   The user has a global clipboard that stores textual descriptions of specific UI nuances, color palettes, or formatting styles to be remembered across different sessions and projects.
-    -   When the user asks you to "remember", "copy", or "save" a specific styling nuance or feature, use the 'save_to_clipboard' tool. Do NOT save this specific visual/nuance information into memory files.
+    -   When the user asks you to "remember", "copy", or "save" a specific styling nuance or feature, use the 'save_to_clipboard' tool to save the information into the clipboard.
     -   The clipboard record implicitly saves a snapshot reference to ALL files of the session at the moment of copying.
     -   When applying styles from the clipboard, use 'read_clipboard' to get the user's description. Use 'list_clipboard_files' and 'read_clipboard_file' to inspect the actual code from the origin session where the copy action occurred.
     -   **IMPORTANT**: Filenames in the clipboard description or tools refer to the files from the *copied* (origin) session, NOT the current session. Use 'read_clipboard_file' to read those origin files before applying changes to the current session's files.
