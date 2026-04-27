@@ -13,6 +13,7 @@ import { RichInput } from './RichInput';
 import { MessageData, LlmProvider, ChatAttachment, TokenUsage, Turn, Session, UnsentData, SessionStatus, ChatRole } from '../types';
 import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
+import { ContextMenu } from './ContextMenu';
 
 interface MessageProps {
     msg: MessageData;
@@ -32,6 +33,7 @@ interface MessageProps {
     startTime?: number;
     sessionId: string;
     onImageLoad?: () => void;
+    onQuoteActionClick?: (quoteText: string, rect: DOMRect) => void;
 }
 
 const formatTime = (dateString?: string) => {
@@ -76,11 +78,27 @@ const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
     );
 };
 
-const processContent = (text: string, sessionIds: string[] = []) => {
+const processContent = (text: string, sessionIds: string[] = [], isLastAssistant: boolean = false) => {
     if (!text) return '';
 
+    let processedText = text;
+
+    if (isLastAssistant) {
+        const parts = processedText.split(/\n\n+/);
+        if (parts.length > 0) {
+            const lastPart = parts.pop() || '';
+            const processedLastPart = lastPart.replace(/(?:«([^»]+)»|"([^"]+)")/g, (match, p1, p2) => {
+                const word = p1 || p2;
+                if (!word) return match;
+                return `<span class="${styles.actionableQuote}" data-quote="${word}">${match}</span>`;
+            });
+            parts.push(processedLastPart);
+            processedText = parts.join('\n\n');
+        }
+    }
+
     // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
-    return text.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
+    return processedText.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
         // Case insensitive check
         const matchLower = id.toLowerCase();
 
@@ -185,8 +203,21 @@ class Message extends React.Component<MessageProps> {
                 <div
                     className={styles.messageContent}
                     onClick={(e) => {
-                        // Check if click was on a session link
                         const target = e.target as HTMLElement;
+                        
+                        // Check if click was on an actionable quote
+                        const quoteSpan = target.closest(`.${styles.actionableQuote}`) as HTMLElement;
+                        if (quoteSpan && this.props.onQuoteActionClick) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const quoteText = quoteSpan.getAttribute('data-quote');
+                            if (quoteText) {
+                                this.props.onQuoteActionClick(quoteText, quoteSpan.getBoundingClientRect());
+                            }
+                            return;
+                        }
+
+                        // Check if click was on a session link
                         if (target.tagName === 'A') {
                             const href = target.getAttribute('href');
                             if (href && href.startsWith('#session-')) {
@@ -233,7 +264,7 @@ class Message extends React.Component<MessageProps> {
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
+                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds, isLastAssistant)) as string,
                                 }}
                             />
                         )
@@ -383,6 +414,7 @@ interface ChatState {
     turns: Turn[];
     statusMessages: string[];
     startTime: number | null;
+    contextMenu: { type: 'quote' | 'send'; x: number; y: number; text: string } | null;
 }
 
 export class Chat extends React.Component<ChatProps, ChatState> {
@@ -406,7 +438,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
             turns: [],
             statusMessages: [],
-            startTime: null
+            startTime: null,
+            contextMenu: null
         };
 
         this.lastSavedUnsent = {
@@ -429,6 +462,8 @@ export class Chat extends React.Component<ChatProps, ChatState> {
 
         window.addEventListener('processed-chat-event', this.handleServerMessage as EventListener);
         window.addEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
+        document.addEventListener('mouseup', this.handleMouseUp);
+        document.addEventListener('mousedown', this.handleMouseDown);
     }
 
     handleTurnCompleted = (event: CustomEvent) => {
@@ -586,7 +621,71 @@ export class Chat extends React.Component<ChatProps, ChatState> {
     componentWillUnmount() {
         window.removeEventListener('processed-chat-event', this.handleServerMessage as EventListener);
         window.removeEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
+        document.removeEventListener('mouseup', this.handleMouseUp);
+        document.removeEventListener('mousedown', this.handleMouseDown);
     }
+
+    handleMouseDown = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('#chat-context-menu')) {
+            return;
+        }
+        if (target.closest(`.${styles.actionableQuote}`)) {
+            return;
+        }
+        if (this.state.contextMenu) {
+            this.setState({ contextMenu: null });
+        }
+    };
+
+    handleMouseUp = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        if (target.closest(`.${styles.actionableQuote}`)) {
+            return;
+        }
+
+        setTimeout(() => {
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim() !== '' && selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const node = selection.anchorNode;
+                
+                if (this.messagesRef.current && node && this.messagesRef.current.contains(node)) {
+                    const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
+                    if (element && element.closest('[id$="-assistant"]')) {
+                        const rect = range.getBoundingClientRect();
+                        this.setState({
+                            contextMenu: {
+                                type: 'quote',
+                                x: rect.right,
+                                y: rect.bottom,
+                                text: selection.toString()
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
+            if (this.state.contextMenu) {
+                this.setState({ contextMenu: null });
+            }
+        }, 10);
+    };
+
+    handleQuoteActionClick = (quoteText: string, rect: DOMRect) => {
+        if (this.state.contextMenu && this.state.contextMenu.text === quoteText) {
+            this.setState({ contextMenu: null });
+        } else {
+            this.setState({
+                contextMenu: {
+                    type: 'send',
+                    x: rect.right,
+                    y: rect.bottom,
+                    text: quoteText
+                }
+            });
+        }
+    };
 
     handleUndo = () => {
         this.setState({ showUndoConfirmation: true });
@@ -820,15 +919,17 @@ export class Chat extends React.Component<ChatProps, ChatState> {
         }
     };
 
-    handleParallelGeneration = async (count: number) => {
+    handleParallelGeneration = async (count: number, overrideText?: string) => {
         const { sessionId, provider, fastMode, selection, attachment } = this.props;
         if (!sessionId) return;
 
         const selectionData = selection ? { selector: selection } : undefined;
-        const text = this.state.input;
+        const text = overrideText !== undefined ? overrideText : this.state.input;
 
         // Clear UI state as the messages are sent
-        this.setState({ input: '' });
+        if (overrideText === undefined) {
+            this.setState({ input: '' });
+        }
         this.props.onUpdateSession({
             selection: null,
             attachment: undefined,
@@ -1235,6 +1336,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                         statusMessages={this.state.statusMessages}
                                         startTime={this.state.startTime ?? undefined}
                                         onSwitchSession={onSwitchSession}
+                                        onQuoteActionClick={this.handleQuoteActionClick}
                                     />
                                 );
                             })}
@@ -1261,6 +1363,7 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                                 onPreviewTurn={onPreviewTurn}
                                 sessionIds={sessionIds}
                                 onSwitchSession={onSwitchSession}
+                                onQuoteActionClick={this.handleQuoteActionClick}
                             />
                         )}
                     </div>
@@ -1538,6 +1641,81 @@ export class Chat extends React.Component<ChatProps, ChatState> {
                     onCancel={this.cancelUndo}
                 />
 
+                {this.state.contextMenu && (
+                    <ContextMenu
+                        x={this.state.contextMenu.x + 5}
+                        y={this.state.contextMenu.y + 5}
+                        onClose={() => this.setState({ contextMenu: null })}
+                        items={(() => {
+                            const text = this.state.contextMenu?.text || '';
+                            if (this.state.contextMenu?.type === 'send') {
+                                return [
+                                    {
+                                        id: 'send',
+                                        label: 'Send',
+                                        icon: (
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                            </svg>
+                                        ),
+                                        onClick: () => {
+                                            this.setState({ contextMenu: null }, () => this.submit(text));
+                                        }
+                                    },
+                                    {
+                                        id: 'run-parallel',
+                                        label: 'Run parallel',
+                                        icon: (
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                                <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                            </svg>
+                                        ),
+                                        subItems: [1, 2, 3, 4, 5].map(num => ({
+                                            id: `parallel-${num}`,
+                                            label: `${num} sessions`,
+                                            onClick: () => {
+                                                this.setState({ contextMenu: null }, () => {
+                                                    this.handleParallelGeneration(num, text);
+                                                });
+                                            }
+                                        }))
+                                    }
+                                ];
+                            } else {
+                                return [
+                                    {
+                                        id: 'quote',
+                                        label: 'Quote',
+                                        icon: (
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                                                <path d="M8 12a2 2 0 0 0 2-2V8H8"/>
+                                                <path d="M14 12a2 2 0 0 0 2-2V8h-2"/>
+                                            </svg>
+                                        ),
+                                        onClick: () => {
+                                            if (text) {
+                                                const quoteLines = text.split('\n').map(line => `> ${line}`).join('\n');
+                                                const quoteMd = `${quoteLines}\n\n`;
+                                                const currentInput = this.state.input.trim();
+                                                const newInput = currentInput ? `${currentInput}\n\n${quoteMd}` : quoteMd;
+                                                
+                                                this.setState({ input: newInput, contextMenu: null }, () => {
+                                                    this.handleSaveUnsent({ input: newInput });
+                                                    this.richInputRef.current?.focus(true);
+                                                });
+                                            } else {
+                                                this.setState({ contextMenu: null });
+                                            }
+                                        }
+                                    }
+                                ];
+                            }
+                        })()}
+                    />
+                )}
             </div>
         );
     }
