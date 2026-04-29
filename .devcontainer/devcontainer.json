@@ -6,7 +6,8 @@
     "forwardPorts": [
         5000,
         5173,
-        4000
+        4000,
+        3001
     ],
     "customizations": {
         "vscode": {

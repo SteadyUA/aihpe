@@ -11,3 +11,13 @@ services:
     restart: always
     env_file:
       - .env
+
+  screenshot:
+    build:
+      context: ./screenshot-service
+    ports:
+      - "3001:3001"
+    shm_size: '1gb'
+    volumes:
+      - "./server/data:/app/shared:ro"
+    restart: always

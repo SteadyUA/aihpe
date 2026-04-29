@@ -20,3 +20,15 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  screenshot:
+    build:
+      context: ../screenshot-service
+    command: node --watch index.js
+    ports:
+      - "3001:3001"
+    shm_size: '1gb'
+    volumes:
+      - "../server/data:/app/shared:ro"
+      - "../screenshot-service/index.js:/app/index.js"
+    restart: always
