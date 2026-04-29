@@ -36,7 +36,7 @@ import { TurnService } from '../services/session/TurnService';
 import { TokenUsageService } from '../services/llm/TokenUsageService';
 
 import { LlmProvider, SessionMetadata, UnsentData, SessionStatus } from '../types/chat';
-import { UploadService } from '../services/image/UploadService';
+import { UploadService } from '../services/session/UploadService';
 import { UnsentService } from '../services/session/UnsentService';
 import { FileResponse, FileResponseHandler } from '../interceptors/FileResponseHandler';
 

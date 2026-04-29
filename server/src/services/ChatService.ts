@@ -10,7 +10,7 @@ import { ProjectService } from './ProjectService';
 import { SessionImageService } from './session/SessionImageService';
 import { calculateContextStartTurn } from '../utils/chat';
 import { UnsentService } from './session/UnsentService';
-import { UploadService } from './image/UploadService';
+import { UploadService } from './session/UploadService';
 import { EventBus } from '../utils/bus';
 import { MemoryService } from './session/MemoryService';
 
