@@ -189,7 +189,7 @@ export class HtmlImportService {
                     }
                 }
             }
-            this.filesService.initFirstVersion(sessionId);
+            this.chatService.initFirstVersion(sessionId);
             await getFilesRec(tempDir, tempDir);
             this.filesService.writeVersionFile(sessionId, 0, 'index.html', files['index.html'] || '');
             this.filesService.writeVersionFile(sessionId, 0, 'styles.css', files['styles.css'] || '');

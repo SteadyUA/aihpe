@@ -51,7 +51,7 @@ export function createPageGenTools(
                     if (content !== undefined) return content;
 
                     // Fallback to initial files if not found
-                    const { EMPTY_FILES } = await import('../../session/FilesService');
+                    const { EMPTY_FILES } = await import('../../ChatService');
                     const emptyContent = EMPTY_FILES[file];
                     if (emptyContent !== undefined) return emptyContent;
 
@@ -90,7 +90,7 @@ export function createPageGenTools(
                     let content = filesService.readVersionFile(request.sessionId, nextVersion, file);
 
                     if (content === undefined) {
-                        const { EMPTY_FILES } = await import('../../session/FilesService');
+                        const { EMPTY_FILES } = await import('../../ChatService');
                         content = EMPTY_FILES[file];
                     }
 

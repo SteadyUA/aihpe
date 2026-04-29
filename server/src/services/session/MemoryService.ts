@@ -1,5 +1,7 @@
 import { Service } from 'typedi';
-import { FilesService, MEMORY_FILES } from './FilesService';
+import { FilesService } from './FilesService';
+
+export const MEMORY_FILES = ['preferences.md', 'state.md', 'decisions.md'];
 
 @Service()
 export class MemoryService {
@@ -11,7 +13,7 @@ export class MemoryService {
         let context = '';
 
         for (const file of MEMORY_FILES) {
-            const content = this.filesService.readMemoryFile(sessionId, version, file) || '';
+            const content = this.filesService.readVersionFile(sessionId, version, `.memory/${file}`) || '';
             context += `### ${file}\n${content}\n`;
         }
 
@@ -22,13 +24,19 @@ export class MemoryService {
         if (!MEMORY_FILES.includes(filename)) {
             throw new Error(`Invalid memory file: ${filename}. Allowed files: ${MEMORY_FILES.join(', ')}`);
         }
-        this.filesService.writeMemoryFile(sessionId, version, filename, content);
+        this.filesService.writeVersionFile(sessionId, version, `.memory/${filename}`, content);
     }
 
     public readMemoryFile(sessionId: string, version: number, filename: string): string {
         if (!MEMORY_FILES.includes(filename)) {
             throw new Error(`Invalid memory file: ${filename}. Allowed files: ${MEMORY_FILES.join(', ')}`);
         }
-        return this.filesService.readMemoryFile(sessionId, version, filename) || '';
+        return (this.filesService.readVersionFile(sessionId, version, `.memory/${filename}`) as string) || '';
+    }
+
+    public initMemory(sessionId: string): void {
+        for (const file of MEMORY_FILES) {
+            this.filesService.writeVersionFile(sessionId, 0, `.memory/${file}`, '');
+        }
     }
 }

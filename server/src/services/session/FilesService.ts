@@ -4,48 +4,7 @@ import { Readable } from 'node:stream';
 import { Service } from 'typedi';
 import { getSessionsDir } from '../../utils/pathUtils';
 
-const DEFAULT_SESSION_SCRIPT = `(() => {
-  const MODIFIER_KEYS = ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'];
 
-  document.addEventListener('click', (event) => {
-    if (event.defaultPrevented || event.button !== 0) {
-      return;
-    }
-    if (MODIFIER_KEYS.some((key) => event[key])) {
-      return;
-    }
-
-    const anchor = (event.target)?.closest?.('a');
-    if (!anchor || anchor.hasAttribute('download')) {
-      return;
-    }
-
-    const href = anchor.getAttribute('href')?.trim() ?? '';
-    if (!href.startsWith('#')) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const hash = href.slice(1);
-    if (!hash) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-
-    const destination = document.getElementById(hash) ?? document.querySelector('[name="' + hash + '"]');
-    destination?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, true);
-})();\n`;
-
-export const EMPTY_FILES: Record<string, string> = {
-    'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
-    'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
-    'script.js': DEFAULT_SESSION_SCRIPT,
-};
-
-export const MEMORY_FILES = ['preferences.md', 'state.md', 'decisions.md'];
 
 const VERSION_DIRNAME = 'versions';
 
@@ -72,15 +31,10 @@ export class FilesService {
     }
 
     public resolveVersionFilePath(sessionId: string, version: number, filename: string): string {
-        return path.join(this.resolveVersionDir(sessionId, version), path.basename(filename));
-    }
-
-    public resolveMemoryDir(sessionId: string, version: number): string {
-        return path.join(this.resolveVersionDir(sessionId, version), '.memory');
-    }
-
-    public resolveMemoryFilePath(sessionId: string, version: number, filename: string): string {
-        return path.join(this.resolveMemoryDir(sessionId, version), path.basename(filename));
+        if (filename.includes('..')) {
+            throw new Error('Invalid filename: path traversal is not allowed');
+        }
+        return path.join(this.resolveVersionDir(sessionId, version), filename);
     }
 
     public ensureDirectory(dir: string): void {
@@ -140,6 +94,7 @@ export class FilesService {
 
     public writeVersionFile(sessionId: string, version: number, filename: string, content: Buffer | string): void {
         const filePath = this.resolveVersionFilePath(sessionId, version, filename);
+        this.ensureDirectory(path.dirname(filePath));
         fs.writeFileSync(filePath, content);
     }
 
@@ -165,21 +120,6 @@ export class FilesService {
         } catch (error) {
             console.error(`Failed to create read stream for ${filePath}`, error);
             return undefined;
-        }
-    }
-
-    public initFirstVersion(sessionId: string): void {
-        const versionDir = this.resolveVersionDir(sessionId, 0);
-        this.ensureDirectory(versionDir);
-        fs.writeFileSync(path.join(versionDir, 'index.html'), EMPTY_FILES['index.html'], 'utf-8');
-        fs.writeFileSync(path.join(versionDir, 'styles.css'), EMPTY_FILES['styles.css'], 'utf-8');
-        fs.writeFileSync(path.join(versionDir, 'script.js'), EMPTY_FILES['script.js'], 'utf-8');
-
-        // Initialize memory files
-        const memoryDir = this.resolveMemoryDir(sessionId, 0);
-        this.ensureDirectory(memoryDir);
-        for (const file of MEMORY_FILES) {
-            fs.writeFileSync(path.join(memoryDir, file), '', 'utf-8');
         }
     }
 
@@ -247,11 +187,6 @@ export class FilesService {
         this.removeDirectory(sessionDir);
     }
 
-    public clearVersions(sessionId: string): void {
-        const versionRootDir = path.join(this.resolveSessionDir(sessionId), VERSION_DIRNAME);
-        this.removeDirectory(versionRootDir);
-    }
-
     public cleanupHigherVersions(sessionId: string, targetVersion: number): void {
         const versionRootDir = path.join(this.resolveSessionDir(sessionId), VERSION_DIRNAME);
         if (fs.existsSync(versionRootDir)) {
@@ -263,25 +198,5 @@ export class FilesService {
                 }
             }
         }
-    }
-
-    public readMemoryFile(sessionId: string, version: number, filename: string): string | undefined {
-        const filePath = this.resolveMemoryFilePath(sessionId, version, filename);
-        if (!fs.existsSync(filePath)) {
-            return undefined;
-        }
-        try {
-            return fs.readFileSync(filePath, 'utf-8');
-        } catch (error) {
-            console.error(`Failed to read memory file ${filePath}`, error);
-            return undefined;
-        }
-    }
-
-    public writeMemoryFile(sessionId: string, version: number, filename: string, content: string): void {
-        const memoryDir = this.resolveMemoryDir(sessionId, version);
-        this.ensureDirectory(memoryDir);
-        const filePath = this.resolveMemoryFilePath(sessionId, version, filename);
-        fs.writeFileSync(filePath, content, 'utf-8');
     }
 }

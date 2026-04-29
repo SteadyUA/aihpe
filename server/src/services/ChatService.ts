@@ -12,6 +12,7 @@ import { calculateContextStartTurn } from '../utils/chat';
 import { UnsentService } from './session/UnsentService';
 import { UploadService } from './image/UploadService';
 import { EventBus } from '../utils/bus';
+import { MemoryService } from './session/MemoryService';
 
 export const SessionCreatedEvent = EventBus.createEvent<{
     sessionId: string;
@@ -53,6 +54,47 @@ export const ChatTokenUsedEvent = EventBus.createEvent<{
     total: number;
 }>('CHAT_TOKEN_USED');
 
+export const DEFAULT_SESSION_SCRIPT = `(() => {
+  const MODIFIER_KEYS = ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'];
+
+  document.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0) {
+      return;
+    }
+    if (MODIFIER_KEYS.some((key) => event[key])) {
+      return;
+    }
+
+    const anchor = (event.target)?.closest?.('a');
+    if (!anchor || anchor.hasAttribute('download')) {
+      return;
+    }
+
+    const href = anchor.getAttribute('href')?.trim() ?? '';
+    if (!href.startsWith('#')) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const hash = href.slice(1);
+    if (!hash) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const destination = document.getElementById(hash) ?? document.querySelector('[name="' + hash + '"]');
+    destination?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, true);
+})();\n`;
+
+export const EMPTY_FILES: Record<string, string> = {
+    'index.html': '<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>New Page</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <script src="script.js"></script>\n  </body>\n</html>',
+    'styles.css': '/* Add your styles here */\nbody {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background-color: #f5f5f5;\n}\n',
+    'script.js': DEFAULT_SESSION_SCRIPT,
+};
+
 @Service()
 export class ChatService {
     constructor(
@@ -66,6 +108,7 @@ export class ChatService {
         private readonly unsentService: UnsentService,
         private readonly uploadService: UploadService,
         private readonly eventBus: EventBus,
+        private readonly memoryService: MemoryService,
     ) { }
 
     private activeGenerations = new Map<string, AbortController>();
@@ -624,6 +667,13 @@ export class ChatService {
         return content;
     }
 
+    public initFirstVersion(sessionId: string): void {
+        this.filesService.writeVersionFile(sessionId, 0, 'index.html', EMPTY_FILES['index.html']);
+        this.filesService.writeVersionFile(sessionId, 0, 'styles.css', EMPTY_FILES['styles.css']);
+        this.filesService.writeVersionFile(sessionId, 0, 'script.js', EMPTY_FILES['script.js']);
+        this.memoryService.initMemory(sessionId);
+    }
+
     public async createSession(
         sessionId: string,
         projectId: string,
@@ -648,7 +698,7 @@ export class ChatService {
         await this.sessionService.saveMetadata(metadata);
         await this.contextService.saveContext(sessionId, []);
         await this.turnService.saveTurns(sessionId, []);
-        this.filesService.initFirstVersion(sessionId);
+        this.initFirstVersion(sessionId);
 
         this.eventBus.publish(SessionCreatedEvent({
             sessionId,
