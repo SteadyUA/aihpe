@@ -6,8 +6,6 @@ export class SessionImage {
     @PrimaryGeneratedColumn()
     id!: number;
 
-
-
     @Column()
     sessionId!: string;
 
