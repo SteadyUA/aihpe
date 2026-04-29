@@ -76,7 +76,7 @@ export class FilesService {
     }
 
     public resolveMemoryDir(sessionId: string, version: number): string {
-        return path.join(this.resolveVersionDir(sessionId, version), 'memory');
+        return path.join(this.resolveVersionDir(sessionId, version), '.memory');
     }
 
     public resolveMemoryFilePath(sessionId: string, version: number, filename: string): string {
