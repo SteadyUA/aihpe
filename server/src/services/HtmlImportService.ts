@@ -10,7 +10,7 @@ import { Turn , TaskStatus , ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import extract from 'extract-zip';
-import { ImageService } from './image/ImageService';
+import { SessionImageService } from './session/SessionImageService';
 import crypto from 'crypto';
 import beautify from 'js-beautify';
 
@@ -26,7 +26,7 @@ export class HtmlImportService {
         @Inject() private chatService: ChatService,
         @Inject() private taskManagerService: TaskManagerService,
         @Inject() private htmlConversionAgent: HtmlConversionAgent,
-        @Inject() private imageService: ImageService
+        @Inject() private imageService: SessionImageService
     ) { }
 
     async importArchive(projectId: string, zipPath: string, providedTaskId: string): Promise<void> {

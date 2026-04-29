@@ -2,7 +2,7 @@ import { Service, Inject } from 'typedi';
 import { GeneratePageRequest, GeneratePageResult } from '../types';
 import { OpenaiRawClient } from '../core/OpenaiRawClient';
 import { LlmMessage, LlmRequest, LlmContentPart, LlmRole } from '../core/types';
-import { ImageService } from '../../image/ImageService';
+import { SessionImageService } from '../../session/SessionImageService';
 import { FilesService } from '../../session/FilesService';
 import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
@@ -14,8 +14,7 @@ import { ClipboardService } from '../../ClipboardService';
 
 @Service()
 export class PageGenAgent {
-    @Inject()
-    private imageService!: ImageService;
+    @Inject() private imageService!: SessionImageService;
 
     @Inject()
     private filesService!: FilesService;

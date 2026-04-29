@@ -7,7 +7,7 @@ import { ContextService } from './session/ContextService';
 import { TurnService } from './session/TurnService';
 import { PageGenAgent } from './llm/agents/PageGenAgent';
 import { ProjectService } from './ProjectService';
-import { ImageService } from './image/ImageService';
+import { SessionImageService } from './session/SessionImageService';
 import { calculateContextStartTurn } from '../utils/chat';
 import { UnsentService } from './session/UnsentService';
 import { UploadService } from './image/UploadService';
@@ -103,7 +103,7 @@ export class ChatService {
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
         private readonly pageGenAgent: PageGenAgent,
-        private readonly imageService: ImageService,
+        private readonly imageService: SessionImageService,
         private readonly projectService: ProjectService,
         private readonly unsentService: UnsentService,
         private readonly uploadService: UploadService,

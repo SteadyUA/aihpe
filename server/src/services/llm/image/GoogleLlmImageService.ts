@@ -1,15 +1,9 @@
 import { Service } from 'typedi';
-import { ImageService, TokenUsageData } from './ImageService';
-
-import { FilesService } from '../session/FilesService';
+import { LlmImageService, TokenUsageData } from './LlmImageService';
 
 @Service()
-export class GoogleImageService extends ImageService {
-    constructor(filesService: FilesService) {
-        super(filesService);
-    }
-
-    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
+export class GoogleLlmImageService extends LlmImageService {
+    public async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -65,7 +59,7 @@ export class GoogleImageService extends ImageService {
         return { base64: base64Data, usage };
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, _currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
+    public async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, _currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -130,10 +124,6 @@ export class GoogleImageService extends ImageService {
             throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
         }
 
-        if (!newBase64Data) {
-            throw new Error(`No image data found in response. Raw response: ${JSON.stringify(data).substring(0, 200)}...`);
-        }
-
         let usage: TokenUsageData | undefined;
         if (data.usageMetadata) {
             usage = {
@@ -148,7 +138,7 @@ export class GoogleImageService extends ImageService {
         return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
+    public async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');

@@ -1,19 +1,17 @@
 import { Service } from 'typedi';
-import { ImageService, TokenUsageData } from './ImageService';
-
-import { FilesService } from '../session/FilesService';
+import { LlmImageService, TokenUsageData } from './LlmImageService';
 
 @Service()
-export class LiteLLMImageService extends ImageService {
-    constructor(filesService: FilesService) {
-        super(filesService);
+export class LiteLLMLlmImageService extends LlmImageService {
+    constructor() {
+        super();
         const envModelId = process.env.LITELLM_IMAGE_MODEL;
         if (envModelId) {
             this.modelId = envModelId;
         }
     }
 
-    protected async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
+    public async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -76,7 +74,7 @@ export class LiteLLMImageService extends ImageService {
         return { base64: base64Data, usage };
     }
 
-    protected async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
+    public async editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -187,7 +185,7 @@ The image has been edited according to the instruction. Provide a new, descripti
         return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    protected async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
+    public async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 

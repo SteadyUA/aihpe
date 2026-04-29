@@ -2,7 +2,7 @@ import { Body, Delete, Get, JsonController, Params, Post, UseBefore, NotFoundErr
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
-import { ImageService, ImageMetadata } from '../services/image/ImageService';
+import { SessionImageService, ImageMetadata } from '../services/session/SessionImageService';
 import { MemoryService } from '../services/session/MemoryService';
 import archiver from 'archiver';
 import { Service } from 'typedi';
@@ -71,7 +71,7 @@ class OkResponse {
 export class SessionVersionController {
     constructor(
         private readonly filesService: FilesService,
-        private readonly imageService: ImageService,
+        private readonly imageService: SessionImageService,
         private readonly memoryService: MemoryService,
     ) { }
 

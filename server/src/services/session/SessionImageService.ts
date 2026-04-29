@@ -1,14 +1,14 @@
-import { Service } from 'typedi';
+import { Service, Inject } from 'typedi';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { imageSize } from 'image-size';
-import { ImageServiceFactory } from './ImageServiceFactory';
-import { SessionImage } from '../../entities/SessionImage';
 import { AppDataSource } from '../../data-source';
-import { FilesService } from '../session/FilesService';
-import { MoreThan, LessThanOrEqual } from 'typeorm';
-import { Inject } from 'typedi';
+import { SessionImage } from '../../entities/SessionImage';
+import { FilesService } from './FilesService';
 import { EventBus } from '../../utils/bus';
+import { MoreThan, LessThanOrEqual } from 'typeorm';
+import { LlmImageServiceFactory } from '../llm/image/LlmImageServiceFactory';
+import { LlmImageService } from '../llm/image/LlmImageService';
 
 export const ImageTokenUsedEvent = EventBus.createEvent<{
     sessionId: string;
@@ -29,31 +29,23 @@ export interface ImageMetadata {
     isUsed?: boolean;
 }
 
-export interface TokenUsageData {
-    prompt: number;
-    completion: number;
-    total: number;
-    model: string;
-    agent: string;
-}
-
-@Service({ factory: [ImageServiceFactory, 'create'] })
-export abstract class ImageService {
-    protected modelId = 'gemini-2.5-flash-image';
-    protected agentName = 'image';
+@Service()
+export class SessionImageService {
     protected readonly repository = AppDataSource.getRepository(SessionImage);
+    private llmImageService: LlmImageService;
 
     @Inject()
     protected readonly eventBus!: EventBus;
 
-    constructor(protected readonly filesService: FilesService) { }
-
-    protected abstract generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }>;
-    protected abstract editRaw(imageBuffer: Buffer, mimeType: string, prompt: string, currentDescription?: string, abortSignal?: AbortSignal): Promise<{ base64: string, description?: string, usage?: TokenUsageData }>;
-    protected abstract describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }>;
+    constructor(
+        private readonly filesService: FilesService,
+        private readonly llmImageServiceFactory: LlmImageServiceFactory
+    ) {
+        this.llmImageService = this.llmImageServiceFactory.create();
+    }
 
     async generateAndSave(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined): Promise<string> {
-        const result = await this.generateRaw(description, abortSignal);
+        const result = await this.llmImageService.generateRaw(description, abortSignal);
         const base64Data = result.base64;
 
         if (result.usage) {
@@ -88,7 +80,7 @@ export abstract class ImageService {
             filename,
             description,
             createdAt: new Date().toISOString(),
-            model: this.modelId,
+            model: this.llmImageService.modelId,
             width,
             height,
             isUsed: false,
@@ -114,7 +106,7 @@ export abstract class ImageService {
         const info = await this.getImageInfo(sessionId, sourceVersion, filename);
         const currentDescription = info?.description;
 
-        const result = await this.editRaw(buffer, mimeType, prompt, currentDescription, abortSignal);
+        const result = await this.llmImageService.editRaw(buffer, mimeType, prompt, currentDescription, abortSignal);
         const newBase64Data = result.base64;
         const newDescription = result.description;
 
@@ -148,7 +140,7 @@ export abstract class ImageService {
             filename,
             description: newDescription || prompt,
             createdAt: new Date().toISOString(),
-            model: this.modelId,
+            model: this.llmImageService.modelId,
             width,
             height,
             isUsed: true,
@@ -165,7 +157,7 @@ export abstract class ImageService {
         }
         const mimeType = this.getMimeType(filename);
 
-        const result = await this.describeRaw(buffer, mimeType, abortSignal);
+        const result = await this.llmImageService.describeRaw(buffer, mimeType, abortSignal);
 
         if (result.usage) {
             this.eventBus.publish(ImageTokenUsedEvent({
@@ -313,8 +305,6 @@ export abstract class ImageService {
             await this.repository.remove(image);
         }
     }
-
-
 
     async migrateToVersion(sessionId: string, sourceVersion: number, targetVersion: number): Promise<void> {
         const sourceImages = await this.repository.find({ where: { sessionId, version: sourceVersion } });

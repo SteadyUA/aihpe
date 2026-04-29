@@ -1,7 +1,7 @@
 import { Service } from 'typedi';
 import { Subscribe } from '../utils/bus';
 import { ChatTokenUsedEvent } from '../services/ChatService';
-import { ImageTokenUsedEvent } from '../services/image/ImageService';
+import { ImageTokenUsedEvent } from '../services/session/SessionImageService';
 import { TokenUsageService } from '../services/llm/TokenUsageService';
 import { SessionService } from '../services/session/SessionService';
 

@@ -1,4 +1,4 @@
-import { ImageService } from '../../image/ImageService';
+import { SessionImageService } from '../../session/SessionImageService';
 import { FilesService } from '../../session/FilesService';
 import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
@@ -12,7 +12,7 @@ export interface PageGenContext {
 }
 
 export function createPageGenTools(
-    imageService: ImageService,
+    imageService: SessionImageService,
     filesService: FilesService,
     sessionService: SessionService,
     memoryService: MemoryService,
