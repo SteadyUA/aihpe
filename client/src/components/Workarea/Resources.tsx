@@ -9,6 +9,39 @@ import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Resources.module.css';
 
+const ThumbnailImage: React.FC<{ src: string; alt: string; className?: string }> = ({ src, alt, className }) => {
+    const [loading, setLoading] = React.useState(true);
+
+    return (
+        <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent' }}>
+            {loading && (
+                <div style={{
+                    position: 'absolute',
+                    width: '18px',
+                    height: '18px',
+                    border: '2px solid var(--text-secondary, #64748b)',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                }} />
+            )}
+            <img
+                src={src}
+                alt={alt}
+                className={className}
+                onLoad={() => setLoading(false)}
+                onError={() => setLoading(false)}
+                style={loading ? { opacity: 0, position: 'absolute' } : {}}
+            />
+            {loading && (
+                <style>{`
+                    @keyframes spin { 100% { transform: rotate(360deg); } }
+                `}</style>
+            )}
+        </div>
+    );
+};
+
 interface ResourceMetadata {
     mimetype?: string;
     filename: string;
@@ -516,7 +549,7 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                                 className={styles.editImagePreview}
                             />
                         ) : (
-                            <img
+                            <ThumbnailImage
                                 src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/resources/${editingImage.filename}/thumbnail`}
                                 alt={editingImage.filename}
                                 className={styles.editImagePreview}
@@ -622,7 +655,7 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                                                 className={styles.imageThumb}
                                             />
                                         ) : (
-                                            <img
+                                            <ThumbnailImage
                                                 src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/resources/${img.filename}/thumbnail`}
                                                 alt={img.description}
                                                 className={styles.imageThumb}

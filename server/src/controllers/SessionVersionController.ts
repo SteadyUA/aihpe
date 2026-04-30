@@ -1,5 +1,6 @@
 import { Body, Delete, Get, JsonController, Params, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
+import { ImmutableCacheMiddleware } from '../middlewares/ImmutableCacheMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
 import { SessionResourceService, ResourceMetadata } from '../services/session/SessionResourceService';
@@ -268,10 +269,11 @@ export class SessionVersionController {
     }
 
     @Get('/api/sessions/:sessionId/:version/resources/:filename/thumbnail')
+    @UseBefore(ImmutableCacheMiddleware)
     @UseInterceptor(FileResponseHandler)
     async getResourceThumbnail(
         @Params() params: SessionVersionFileParams,
-    ): Promise<FileStreamResponse | FileResponse> {
+    ): Promise<FileStreamResponse | FileResponse | any> {
         const { sessionId, version, filename } = params;
 
         const thumbnailFilename = `.thumbnail/${filename}.png`;
