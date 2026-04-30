@@ -1,4 +1,4 @@
-import { SessionImageService } from '../../session/SessionImageService';
+import { SessionResourceService } from '../../session/SessionResourceService';
 import { FilesService } from '../../session/FilesService';
 import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
@@ -12,7 +12,7 @@ export interface PageGenContext {
 }
 
 export function createPageGenTools(
-    imageService: SessionImageService,
+    resourceService: SessionResourceService,
     filesService: FilesService,
     sessionService: SessionService,
     memoryService: MemoryService,
@@ -189,7 +189,7 @@ export function createPageGenTools(
                 },
                 execute: async (_args: { summary: string }) => {
                     try {
-                        const images = await imageService.listImages(request.sessionId, request.currentVersion);
+                        const images = await resourceService.listImages(request.sessionId, request.currentVersion);
                         const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
 
                         if (unusedImages.length === 0) {
@@ -220,7 +220,7 @@ export function createPageGenTools(
                 },
                 execute: async ({ filename }: { filename: string; summary: string }) => {
                     try {
-                        const info = await imageService.getImageInfo(request.sessionId, request.currentVersion, filename);
+                        const info = await resourceService.getResourceInfo(request.sessionId, request.currentVersion, filename);
                         if (!info) {
                             return `Image not found: ${filename}`;
                         }
@@ -250,7 +250,7 @@ export function createPageGenTools(
                 execute: async ({ description }: { description: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
-                        const filename = await imageService.generateAndSave(request.sessionId, description, nextVersion, undefined, request.abortSignal);
+                        const filename = await resourceService.generateAndSaveImage(request.sessionId, description, nextVersion, undefined, request.abortSignal);
                         return `Image generated successfully: ${filename}`;
                     } catch (error: any) {
                         return `Failed to generate image: ${error.message}`;
@@ -273,7 +273,7 @@ export function createPageGenTools(
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         // Use currentVersion as source, nextVersion as target
-                        const savedFilename = await imageService.editAndSave(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal);
+                        const savedFilename = await resourceService.editAndSaveImage(request.sessionId, filename, description, request.currentVersion, nextVersion, request.abortSignal);
                         return `Image edited successfully: ${savedFilename}`;
                     } catch (error: any) {
                         return `Failed to edit image: ${error.message}`;

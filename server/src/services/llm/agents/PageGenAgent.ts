@@ -2,7 +2,7 @@ import { Service, Inject } from 'typedi';
 import { GeneratePageRequest, GeneratePageResult } from '../types';
 import { OpenaiRawClient } from '../core/OpenaiRawClient';
 import { LlmMessage, LlmRequest, LlmContentPart, LlmRole } from '../core/types';
-import { SessionImageService } from '../../session/SessionImageService';
+import { SessionResourceService } from '../../session/SessionResourceService';
 import { FilesService } from '../../session/FilesService';
 import { MemoryService } from '../../session/MemoryService';
 import { SessionService } from '../../session/SessionService';
@@ -14,7 +14,7 @@ import { ClipboardService } from '../../ClipboardService';
 
 @Service()
 export class PageGenAgent {
-    @Inject() private imageService!: SessionImageService;
+    @Inject() private resourceService!: SessionResourceService;
 
     @Inject()
     private filesService!: FilesService;
@@ -42,7 +42,7 @@ export class PageGenAgent {
                 const metadata = await this.sessionService.getMetadata(sessionId);
                 const currentVersion = metadata?.currentVersion || 0;
                 targetVersion = await this.filesService.initNextVersion(sessionId, currentVersion);
-                await this.imageService.migrateToVersion(sessionId, currentVersion, targetVersion);
+                await this.resourceService.migrateResourcesToVersion(sessionId, currentVersion, targetVersion);
             }
             return targetVersion;
         };
@@ -52,7 +52,7 @@ export class PageGenAgent {
             ensureNextVersion
         };
 
-        const domainTools = createPageGenTools(this.imageService, this.filesService, this.sessionService, this.memoryService, this.projectService, this.clipboardService)(request as any, context);
+        const domainTools = createPageGenTools(this.resourceService, this.filesService, this.sessionService, this.memoryService, this.projectService, this.clipboardService)(request as any, context);
 
         const systemPrompt = buildPageGenPrompt(request as any);
 

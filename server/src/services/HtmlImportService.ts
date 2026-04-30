@@ -10,7 +10,7 @@ import { Turn , TaskStatus , ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import extract from 'extract-zip';
-import { SessionImageService } from './session/SessionImageService';
+import { SessionResourceService } from './session/SessionResourceService';
 import crypto from 'crypto';
 import beautify from 'js-beautify';
 
@@ -26,7 +26,7 @@ export class HtmlImportService {
         @Inject() private chatService: ChatService,
         @Inject() private taskManagerService: TaskManagerService,
         @Inject() private htmlConversionAgent: HtmlConversionAgent,
-        @Inject() private imageService: SessionImageService
+        @Inject() private resourceService: SessionResourceService
     ) { }
 
     async importArchive(projectId: string, zipPath: string, providedTaskId: string): Promise<void> {
@@ -152,7 +152,7 @@ export class HtmlImportService {
             const files: Record<string, string> = {};
             const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.heic']);
 
-            // Needs to capture 'this' for imageService
+            // Needs to capture 'this' for resourceService
             const self = this;
 
             async function getFilesRec(dir: string, baseDir: string) {
@@ -166,7 +166,7 @@ export class HtmlImportService {
                         const ext = path.extname(res).toLowerCase();
 
                         if (imageExtensions.has(ext)) {
-                            // It's an image, save it using ImageService
+                            // It's an image, save it using ResourceService
                             try {
                                 const buffer = await fs.readFile(res);
                                 // Construct a fake Multer.File object for the service
@@ -174,7 +174,7 @@ export class HtmlImportService {
                                     originalname: relPath,
                                     buffer: buffer,
                                 };
-                                await self.imageService.saveUploadedImage(sessionId, 0, fileObj, true);
+                                await self.resourceService.saveUploadedFile(sessionId, 0, fileObj, true);
                                 console.log(`Saved image ${relPath} to session ${sessionId}`);
                             } catch (err) {
                                 console.error(`Failed to save image ${relPath}:`, err);
@@ -194,7 +194,7 @@ export class HtmlImportService {
             this.filesService.writeVersionFile(sessionId, 0, 'index.html', files['index.html'] || '');
             this.filesService.writeVersionFile(sessionId, 0, 'styles.css', files['styles.css'] || '');
             this.filesService.writeVersionFile(sessionId, 0, 'script.js', files['script.js'] || '');
-            await this.imageService.updateImagesUsage(sessionId, 0);
+            await this.resourceService.updateResourcesUsage(sessionId, 0);
 
             // 6. Add First Turn
             const now = new Date();

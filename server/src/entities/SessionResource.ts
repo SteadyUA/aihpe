@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 
 
 @Index(['sessionId', 'version'])
 @Entity()
-export class SessionImage {
+export class SessionResource {
     @PrimaryGeneratedColumn()
     id!: number;
 
@@ -15,21 +15,12 @@ export class SessionImage {
     @Column()
     filename!: string;
 
-    @Column('text')
-    description!: string;
+    @Column()
+    mimetype!: string;
+
+    @Column('simple-json', { nullable: true, default: '{}' })
+    metadata!: Record<string, any>;
 
     @CreateDateColumn()
     createdAt!: Date;
-
-    @Column()
-    model!: string;
-
-    @Column({ nullable: true })
-    width?: number;
-
-    @Column({ nullable: true })
-    height?: number;
-
-    @Column()
-    isUsed!: boolean;
 }

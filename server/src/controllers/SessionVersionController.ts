@@ -2,7 +2,7 @@ import { Body, Delete, Get, JsonController, Params, Post, UseBefore, NotFoundErr
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
-import { SessionImageService, ImageMetadata } from '../services/session/SessionImageService';
+import { SessionResourceService, ResourceMetadata } from '../services/session/SessionResourceService';
 import { MemoryService } from '../services/session/MemoryService';
 import archiver from 'archiver';
 import { Service } from 'typedi';
@@ -23,6 +23,35 @@ class SessionVersionParams {
 class SessionVersionFileParams extends SessionVersionParams {
     @IsString()
     filename!: string;
+}
+
+class ResourceResponse {
+    @IsString()
+    filename!: string;
+
+    @IsString()
+    mimetype!: string;
+
+    @IsString()
+    description!: string;
+
+    @IsString()
+    createdAt!: string;
+
+    @IsString()
+    model!: string;
+
+    @IsOptional()
+    @IsNumber()
+    width?: number;
+
+    @IsOptional()
+    @IsNumber()
+    height?: number;
+
+    @IsOptional()
+    @IsBoolean()
+    isUsed?: boolean;
 }
 
 class GalleryImageResponse {
@@ -71,16 +100,29 @@ class OkResponse {
 export class SessionVersionController {
     constructor(
         private readonly filesService: FilesService,
-        private readonly imageService: SessionImageService,
+        private readonly resourceService: SessionResourceService,
         private readonly memoryService: MemoryService,
     ) { }
 
-    private mapImageToResponse(metadata: ImageMetadata): GalleryImageResponse {
+    private mapImageToResponse(metadata: ResourceMetadata): GalleryImageResponse {
         return {
             filename: metadata.filename,
-            description: metadata.description,
+            description: metadata.description || '',
             createdAt: metadata.createdAt,
-            model: metadata.model,
+            model: metadata.model || 'unknown',
+            width: metadata.width,
+            height: metadata.height,
+            isUsed: metadata.isUsed,
+        };
+    }
+
+    private mapResourceToResponse(metadata: ResourceMetadata): ResourceResponse {
+        return {
+            filename: metadata.filename,
+            mimetype: metadata.mimetype || 'application/octet-stream',
+            description: metadata.description || '',
+            createdAt: metadata.createdAt,
+            model: metadata.model || 'unknown',
             width: metadata.width,
             height: metadata.height,
             isUsed: metadata.isUsed,
@@ -148,6 +190,16 @@ export class SessionVersionController {
         return new FileStreamResponse(filename, stream);
     }
 
+    @Get('/api/sessions/:sessionId/:version/resources')
+    @UseBefore(AuthMiddleware)
+    async getResources(
+        @Params() params: SessionVersionParams,
+    ): Promise<ResourceResponse[]> {
+        const { sessionId, version } = params;
+        const resources = await this.resourceService.listResources(sessionId, version);
+        return resources.map(res => this.mapResourceToResponse(res));
+    }
+
     @Get('/api/sessions/:sessionId/:version/images')
     @UseBefore(AuthMiddleware)
     async getImages(
@@ -155,7 +207,7 @@ export class SessionVersionController {
     ): Promise<GalleryImageResponse[]> {
         const { sessionId, version } = params;
 
-        const images = await this.imageService.listImages(sessionId, version);
+        const images = await this.resourceService.listImages(sessionId, version);
         return images.map(img => this.mapImageToResponse(img));
     }
 
@@ -173,13 +225,13 @@ export class SessionVersionController {
         }
 
         try {
-            const metadata = await this.imageService.saveUploadedImage(sessionId, version, file);
+            const metadata = await this.resourceService.saveUploadedFile(sessionId, version, file);
 
             const generateDescription = body.generateDescription === 'true';
             if (generateDescription) {
                 try {
-                    const description = await this.imageService.describeImage(sessionId, version, metadata.filename, undefined);
-                    await this.imageService.updateImageDescription(sessionId, version, metadata.filename, description);
+                    const description = await this.resourceService.describeImage(sessionId, version, metadata.filename, undefined);
+                    await this.resourceService.updateResourceDescription(sessionId, version, metadata.filename, description);
                     metadata.description = description;
                 } catch (descError) {
                     console.error('Failed to generate description during upload', descError);
@@ -188,8 +240,8 @@ export class SessionVersionController {
 
             return this.mapImageToResponse(metadata);
         } catch (error) {
-            console.error('Failed to save uploaded image', error);
-            throw new InternalServerError('Failed to save image');
+            console.error('Failed to save uploaded file', error);
+            throw new InternalServerError('Failed to save file');
         }
     }
 
@@ -201,7 +253,7 @@ export class SessionVersionController {
         const { sessionId, version, filename } = params;
 
         try {
-            await this.imageService.deleteImage(sessionId, version, filename);
+            await this.resourceService.deleteResource(sessionId, version, filename);
             return { message: 'Image deleted' };
         } catch (error: any) {
             console.error('Failed to delete image', error);
@@ -224,7 +276,7 @@ export class SessionVersionController {
         const { sessionId, version, filename } = params;
 
         try {
-            await this.imageService.updateImageDescription(sessionId, version, filename, body.description);
+            await this.resourceService.updateResourceDescription(sessionId, version, filename, body.description);
             return { message: 'Description updated' };
         } catch (error: any) {
             console.error('Failed to update image description', error);
@@ -243,7 +295,7 @@ export class SessionVersionController {
         const { sessionId, version, filename } = params;
 
         try {
-            const description = await this.imageService.describeImage(sessionId, version, filename, undefined);
+            const description = await this.resourceService.describeImage(sessionId, version, filename, undefined);
             return { description };
         } catch (error: any) {
             console.error('Failed to generate image description', error);

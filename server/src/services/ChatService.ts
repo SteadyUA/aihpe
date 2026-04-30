@@ -7,7 +7,7 @@ import { ContextService } from './session/ContextService';
 import { TurnService } from './session/TurnService';
 import { PageGenAgent } from './llm/agents/PageGenAgent';
 import { ProjectService } from './ProjectService';
-import { SessionImageService } from './session/SessionImageService';
+import { SessionResourceService } from './session/SessionResourceService';
 import { calculateContextStartTurn } from '../utils/chat';
 import { UnsentService } from './session/UnsentService';
 import { UploadService } from './session/UploadService';
@@ -103,7 +103,7 @@ export class ChatService {
         private readonly contextService: ContextService,
         private readonly turnService: TurnService,
         private readonly pageGenAgent: PageGenAgent,
-        private readonly imageService: SessionImageService,
+        private readonly resourceService: SessionResourceService,
         private readonly projectService: ProjectService,
         private readonly unsentService: UnsentService,
         private readonly uploadService: UploadService,
@@ -387,7 +387,7 @@ export class ChatService {
                     });
                 }
 
-                await this.imageService.updateImagesUsage(sessionId, generation.targetVersion);
+                await this.resourceService.updateResourcesUsage(sessionId, generation.targetVersion);
             }
 
             // Re-fetch strict session state
@@ -853,7 +853,7 @@ export class ChatService {
             }
         });
 
-        await this.imageService.copySessionImages(sourceId, targetId, turn === undefined ? undefined : targetVersion).catch(err => {
+        await this.resourceService.copySessionResources(sourceId, targetId, turn === undefined ? undefined : targetVersion).catch(err => {
             console.error(`Failed to copy images for session ${targetId}`, err);
         });
 
@@ -947,7 +947,7 @@ export class ChatService {
         });
 
         try {
-            await this.imageService.deleteImagesAfterVersion(sessionId, targetVersion);
+            await this.resourceService.deleteResourcesAfterVersion(sessionId, targetVersion);
         } catch (e) {
             console.error(`Failed to cleanup images for session ${sessionId} after undo`, e);
         }
@@ -975,7 +975,7 @@ export class ChatService {
             this.sessionService.deleteFromDb(sessionId),
             this.contextService.deleteContext(sessionId),
             this.turnService.deleteTurns(sessionId),
-            this.imageService.deleteSessionImages(sessionId).catch(e => console.error(`Failed to delete images`, e)),
+            this.resourceService.deleteSessionResources(sessionId).catch(e => console.error(`Failed to delete images`, e)),
             this.unsentService.deleteUnsent(sessionId).catch(e => console.error(`Failed to delete unsent`, e)),
             this.uploadService.deleteSessionUploads(sessionId).catch(e => console.error(`Failed to delete uploads`, e)),
         ]);
