@@ -211,13 +211,13 @@ export class SessionVersionController {
         return images.map(img => this.mapImageToResponse(img));
     }
 
-    @Post('/api/sessions/:sessionId/:version/images')
+    @Post('/api/sessions/:sessionId/:version/resources')
     @UseBefore(AuthMiddleware)
-    async uploadGalleryImage(
+    async uploadResource(
         @Params() params: SessionVersionParams,
         @UploadedFile('file') file: Express.Multer.File,
         @Body() body: { generateDescription?: string }
-    ): Promise<GalleryImageResponse> {
+    ): Promise<ResourceResponse> {
         const { sessionId, version } = params;
 
         if (!file) {
@@ -238,16 +238,16 @@ export class SessionVersionController {
                 }
             }
 
-            return this.mapImageToResponse(metadata);
+            return this.mapResourceToResponse(metadata);
         } catch (error) {
             console.error('Failed to save uploaded file', error);
             throw new InternalServerError('Failed to save file');
         }
     }
 
-    @Delete('/api/sessions/:sessionId/:version/images/:filename')
+    @Delete('/api/sessions/:sessionId/:version/resources/:filename')
     @UseBefore(AuthMiddleware)
-    async deleteImage(
+    async deleteResource(
         @Params() params: SessionVersionFileParams,
     ): Promise<OkResponse> {
         const { sessionId, version, filename } = params;
@@ -267,9 +267,54 @@ export class SessionVersionController {
         }
     }
 
-    @Post('/api/sessions/:sessionId/:version/images/:filename/description')
+    @Get('/api/sessions/:sessionId/:version/resources/:filename/thumbnail')
+    @UseInterceptor(FileResponseHandler)
+    async getResourceThumbnail(
+        @Params() params: SessionVersionFileParams,
+    ): Promise<FileStreamResponse | FileResponse> {
+        const { sessionId, version, filename } = params;
+
+        const thumbnailFilename = `.thumbnail/${filename}.png`;
+        const thumbnailStream = this.filesService.getVersionFileStream(sessionId, version, thumbnailFilename);
+
+        if (thumbnailStream) {
+            return new FileStreamResponse(thumbnailFilename, thumbnailStream);
+        }
+
+        if (!this.filesService.versionFileExists(sessionId, version, filename)) {
+            throw new NotFoundError('Original resource not found');
+        }
+
+        const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+        const targetUrl = `file://sessions/${sessionId}/versions/${version}/${filename}`;
+        
+        try {
+            const response = await fetch(`${screenshotServiceUrl}/thumbnail?url=${encodeURIComponent(targetUrl)}&resultWidth=250&resultHeight=250`);
+            
+            if (!response.ok) {
+                throw new Error(`Screenshot service returned ${response.status}`);
+            }
+            
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            
+            this.filesService.writeVersionFile(sessionId, version, thumbnailFilename, buffer);
+            
+            const newStream = this.filesService.getVersionFileStream(sessionId, version, thumbnailFilename);
+            if (!newStream) {
+                throw new Error('Failed to read saved thumbnail');
+            }
+            
+            return new FileStreamResponse(thumbnailFilename, newStream);
+        } catch (error: any) {
+            console.error('Failed to generate thumbnail:', error);
+            throw new InternalServerError('Failed to generate thumbnail');
+        }
+    }
+
+    @Post('/api/sessions/:sessionId/:version/resources/:filename/description')
     @UseBefore(AuthMiddleware)
-    async updateImageDescription(
+    async updateResourceDescription(
         @Params() params: SessionVersionFileParams,
         @Body() body: UpdateDescriptionRequest,
     ): Promise<OkResponse> {
@@ -287,9 +332,9 @@ export class SessionVersionController {
         }
     }
 
-    @Get('/api/sessions/:sessionId/:version/images/:filename/describe')
+    @Get('/api/sessions/:sessionId/:version/resources/:filename/describe')
     @UseBefore(AuthMiddleware)
-    async generateImageDescription(
+    async generateResourceDescription(
         @Params() params: SessionVersionFileParams,
     ): Promise<DescriptionResponse> {
         const { sessionId, version, filename } = params;

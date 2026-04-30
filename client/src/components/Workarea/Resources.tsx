@@ -7,9 +7,10 @@ import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
-import styles from './Images.module.css';
+import styles from './Resources.module.css';
 
-interface ImageMetadata {
+interface ResourceMetadata {
+    mimetype?: string;
     filename: string;
     description: string;
     createdAt: string;
@@ -19,14 +20,14 @@ interface ImageMetadata {
     isUsed?: boolean;
 }
 
-interface ImagesProps {
+interface ResourcesProps {
     sessionId: string | null;
     version: number;
     active: boolean;
 }
 
-interface ImagesState {
-    images: ImageMetadata[];
+interface ResourcesState {
+    resources: ResourceMetadata[];
     loading: boolean;
     showUnusedOnly: boolean;
 
@@ -36,7 +37,7 @@ interface ImagesState {
     uploadProgress: number; // 0-100, -1 if idle
 
     // Description Edit State
-    editingImage: ImageMetadata | null;
+    editingImage: ResourceMetadata | null;
     editDescriptionValue: string;
     isSavingDescription: boolean;
     isGeneratingDescription: boolean;
@@ -48,15 +49,15 @@ interface ImagesState {
     generateDescriptionOnUpload: boolean;
 }
 
-export class Images extends React.Component<ImagesProps, ImagesState> {
+export class Resources extends React.Component<ResourcesProps, ResourcesState> {
     componentWillUnmount() {
         window.removeEventListener('paste', this.handlePaste);
     }
 
-    constructor(props: ImagesProps) {
+    constructor(props: ResourcesProps) {
         super(props);
         this.state = {
-            images: [],
+            resources: [],
             loading: false,
             showUnusedOnly: false,
 
@@ -83,15 +84,15 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         }
     }
 
-    componentDidUpdate(prevProps: ImagesProps) {
+    componentDidUpdate(prevProps: ResourcesProps) {
         // If became active, fetch if empty
-        if (!prevProps.active && this.props.active && this.state.images.length === 0) {
+        if (!prevProps.active && this.props.active && this.state.resources.length === 0) {
             this.fetchImages();
         }
 
         // If version changed, refill
         if (prevProps.version !== this.props.version || prevProps.sessionId !== this.props.sessionId) {
-            this.setState({ images: [] }, () => {
+            this.setState({ resources: [] }, () => {
                 if (this.props.active) {
                     this.fetchImages();
                 }
@@ -108,14 +109,14 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         try {
             const res = await apiAuth.fetch(
-                `/api/sessions/${sessionId}/${this.props.version}/images`,
+                `/api/sessions/${sessionId}/${this.props.version}/resources`,
             );
             if (!res.ok) throw new Error('Failed to fetch images');
-            const images = await res.json();
-            this.setState({ images, loading: false });
+            const resources = await res.json();
+            this.setState({ resources, loading: false });
         } catch (error) {
             console.error('Failed to load images', error);
-            this.setState({ images: [], loading: false });
+            this.setState({ resources: [], loading: false });
         }
     };
 
@@ -158,7 +159,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
     addFiles = (newFiles: File[]) => {
         this.setState((prev) => {
             const existingNames = new Set(prev.filesToUpload.map(f => f.name));
-            const uniqueNewFiles = newFiles.filter(f => !existingNames.has(f.name) && f.type !== 'image/svg+xml');
+            const uniqueNewFiles = newFiles.filter(f => !existingNames.has(f.name));
             if (uniqueNewFiles.length === 0) return null;
             return { filesToUpload: [...prev.filesToUpload, ...uniqueNewFiles] };
         });
@@ -212,7 +213,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             }
             formData.append('file', file);
             try {
-                await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/images`, {
+                await apiAuth.fetch(`/api/sessions/${sessionId}/${version}/resources`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -229,7 +230,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     // --- Edit Description Logic ---
 
-    handleImageClick = (img: ImageMetadata) => {
+    handleImageClick = (img: ResourceMetadata) => {
         this.setState({
             editingImage: img,
             editDescriptionValue: img.description || '',
@@ -258,7 +259,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         try {
             const res = await apiAuth.fetch(
-                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/description`,
+                `/api/sessions/${sessionId}/${version}/resources/${editingImage.filename}/description`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -269,7 +270,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
             if (!res.ok) throw new Error('Failed to update description');
 
             this.setState(prev => ({
-                images: prev.images.map(img =>
+                resources: prev.resources.map(img =>
                     img.filename === editingImage.filename
                         ? { ...img, description: editDescriptionValue }
                         : img
@@ -299,7 +300,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         try {
             const res = await apiAuth.fetch(
-                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}/describe`,
+                `/api/sessions/${sessionId}/${version}/resources/${editingImage.filename}/describe`,
                 { method: 'GET' }
             );
 
@@ -341,7 +342,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
         try {
             const res = await apiAuth.fetch(
-                `/api/sessions/${sessionId}/${version}/images/${editingImage.filename}`,
+                `/api/sessions/${sessionId}/${version}/resources/${editingImage.filename}`,
                 {
                     method: 'DELETE',
                 }
@@ -349,19 +350,19 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
             if (!res.ok) {
                 const text = await res.text();
-                throw new Error(text || 'Failed to delete image');
+                throw new Error(text || 'Failed to delete resource');
             }
 
             // Success
             this.setState((prev) => ({
-                images: prev.images.filter((img) => img.filename !== editingImage.filename),
+                resources: prev.resources.filter((img) => img.filename !== editingImage.filename),
                 editingImage: null,
                 isDeleting: false,
                 isConfirmingDelete: false,
             }));
         } catch (error) {
-            console.error('Error deleting image', error);
-            alert(`Failed to delete image: ${error instanceof Error ? error.message : String(error)}`);
+            console.error('Error deleting resource', error);
+            alert(`Failed to delete resource: ${error instanceof Error ? error.message : String(error)}`);
             this.setState({ isDeleting: false, isConfirmingDelete: false });
         }
     };
@@ -390,7 +391,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         return (
             <UiModal
                 isOpen={isUploadModalOpen}
-                title="Upload Images"
+                title="Upload Resources"
                 onClose={() => !isUploading && this.closeUploadModal()}
                 actions={actions}
             >
@@ -404,12 +405,12 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                         onClick={() => !isUploading && document.getElementById('image-upload-input')?.click()}
                         style={isUploading ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                     >
-                        <p>{isUploading ? 'Uploading files...' : 'Drag & drop images here, paste from clipboard, or click to select'}</p>
+                        <p>{isUploading ? 'Uploading files...' : 'Drag & drop files here, paste from clipboard, or click to select'}</p>
                         <input
                             type="file"
                             id="image-upload-input"
                             multiple
-                            accept="image/png, image/jpeg, image/gif, image/webp"
+                            accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml, .svg, video/mp4, video/webm, font/woff, font/woff2, font/ttf, .ttf, .woff, .woff2"
                             style={{ display: 'none' }}
                             onChange={this.handleFileSelect}
                             disabled={isUploading}
@@ -429,16 +430,28 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                                 <UiTarget
                                     key={`${file.name}-${index}`}
                                     onRemove={() => this.removeFile(index)}
-                                    removeTitle="Remove image"
+                                    removeTitle="Remove resource"
                                     disabled={isUploading}
                                 >
                                     <div className={styles.uploadFileItem}>
-                                        <img
-                                            src={URL.createObjectURL(file)}
-                                            alt={file.name}
-                                            className={styles.uploadFilePreview}
-                                            onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)}
-                                        />
+                                        {file.type.startsWith('video/') ? (
+                                            <video
+                                                src={URL.createObjectURL(file)}
+                                                className={styles.uploadFilePreview}
+                                                onLoadedData={(e) => URL.revokeObjectURL((e.target as HTMLVideoElement).src)}
+                                            />
+                                        ) : file.type.startsWith('image/') ? (
+                                            <img
+                                                src={URL.createObjectURL(file)}
+                                                alt={file.name}
+                                                className={styles.uploadFilePreview}
+                                                onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)}
+                                            />
+                                        ) : (
+                                            <div className={styles.uploadFilePreview} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e2e8f0', fontSize: '12px' }}>
+                                                {file.name.split('.').pop()?.toUpperCase()}
+                                            </div>
+                                        )}
                                         <span>{file.name}</span>
                                     </div>
                                 </UiTarget>
@@ -484,17 +497,31 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
         return (
             <UiModal
                 isOpen={!!editingImage}
-                title="Edit Image Description"
+                title="Edit Resource Description"
                 onClose={() => !isBusy && this.closeEditModal()}
                 actions={actions}
             >
                 <div className={styles.editModalContent}>
                     <div className={styles.editImageContainer}>
-                        <img
-                            src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
-                            alt={editingImage.filename}
-                            className={styles.editImagePreview}
-                        />
+                        {editingImage.mimetype?.startsWith('video/') ? (
+                            <video
+                                src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
+                                className={styles.editImagePreview}
+                                controls
+                            />
+                        ) : editingImage.mimetype?.startsWith('image/') || !editingImage.mimetype ? (
+                            <img
+                                src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${editingImage.filename}`}
+                                alt={editingImage.filename}
+                                className={styles.editImagePreview}
+                            />
+                        ) : (
+                            <img
+                                src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/resources/${editingImage.filename}/thumbnail`}
+                                alt={editingImage.filename}
+                                className={styles.editImagePreview}
+                            />
+                        )}
                     </div>
                     <div className={styles.editFormGroup}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -531,11 +558,11 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
     render() {
         const { sessionId, version, active } = this.props;
-        const { loading, images, showUnusedOnly } = this.state;
+        const { loading, resources, showUnusedOnly } = this.state;
 
         const visibleImages = showUnusedOnly
-            ? images.filter(img => !img.isUsed)
-            : images;
+            ? resources.filter(img => !img.isUsed)
+            : resources;
 
         return (
             <div className={styles.previewContainer} style={{ display: active ? 'flex' : 'none' }}>
@@ -552,7 +579,7 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                             variant={ButtonVariant.SECONDARY}
                             size={ButtonSize.ICON}
                             onClick={this.openUploadModal}
-                            title="Upload images"
+                            title="Upload resources"
                         >
                             <svg
                                 width="14"
@@ -573,10 +600,10 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                 />
                 <div className={styles.imagesPanel}>
                     {loading ? (
-                        <div className={styles.loading}>Loading images...</div>
+                        <div className={styles.loading}>Loading resources...</div>
                     ) : visibleImages.length === 0 ? (
                         <div className={styles.noImages}>
-                            No images found for this version
+                            No resources found for this version
                         </div>
                     ) : (
                         <div className={styles.imageGrid}>
@@ -588,11 +615,19 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
                                     style={{ cursor: 'pointer' }}
                                 >
                                     <div className={styles.imageThumbContainer}>
-                                        <img
-                                            src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${img.filename}`}
-                                            alt={img.description}
-                                            className={styles.imageThumb}
-                                        />
+                                        {img.mimetype?.startsWith('image/') || !img.mimetype ? (
+                                            <img
+                                                src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/files/${img.filename}`}
+                                                alt={img.description}
+                                                className={styles.imageThumb}
+                                            />
+                                        ) : (
+                                            <img
+                                                src={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/resources/${img.filename}/thumbnail`}
+                                                alt={img.description}
+                                                className={styles.imageThumb}
+                                            />
+                                        )}
                                     </div>
                                     <div className={styles.imageDesc}>
                                         <div className={styles.imageMeta}>
@@ -629,8 +664,8 @@ export class Images extends React.Component<ImagesProps, ImagesState> {
 
                 <ConfirmationModal
                     isOpen={this.state.isConfirmingDelete}
-                    title="Delete Image"
-                    message="Are you sure you want to delete this image? This action cannot be undone."
+                    title="Delete Resource"
+                    message="Are you sure you want to delete this resource? This action cannot be undone."
                     onConfirm={this.handleDeleteConfirm}
                     onCancel={this.handleDeleteCancel}
                 />

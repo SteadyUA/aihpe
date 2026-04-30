@@ -9,7 +9,7 @@ interface IDisposable {
 
 import { TabType } from '../../types';
 import { Preview } from './Preview';
-import { Images } from './Images';
+import { Resources } from './Resources';
 import { Editor } from './Editor';
 import { MemoryModal } from './MemoryModal';
 
@@ -114,7 +114,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
     loadContent = () => {
         const { activeTab } = this.props;
-        if (activeTab === TabType.PREVIEW || activeTab === TabType.IMAGES) return;
+        if (activeTab === TabType.PREVIEW || activeTab === TabType.RESOURCES) return;
 
         this.fetchFile(activeTab as unknown as AssetType);
     };
@@ -172,7 +172,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
 
 
-            if (version === currentVersion && activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES && sessionId) {
+            if (version === currentVersion && activeTab !== TabType.PREVIEW && activeTab !== TabType.RESOURCES && sessionId) {
                 // Standard file fetch
                 if (filename) {
                     const type = (Object.keys(FILENAME_MAP) as AssetType[]).find(k => FILENAME_MAP[k] === filename);
@@ -249,7 +249,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         const { activeTab } = this.props;
         const { unsavedContent } = this.state;
         // activeTab is the OLD tab
-        if (activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES && unsavedContent[activeTab as unknown as AssetType] !== null) {
+        if (activeTab !== TabType.PREVIEW && activeTab !== TabType.RESOURCES && unsavedContent[activeTab as unknown as AssetType] !== null) {
             await this.handleSave(activeTab as unknown as AssetType);
         }
 
@@ -276,7 +276,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         // Use targetType if provided, otherwise activeTab
         const typeToSave = targetType || activeTab as unknown as AssetType;
 
-        if (typeToSave === TabType.PREVIEW as unknown as AssetType || typeToSave === TabType.IMAGES as unknown as AssetType) return;
+        if (typeToSave === TabType.PREVIEW as unknown as AssetType || typeToSave === TabType.RESOURCES as unknown as AssetType) return;
         const content = unsavedContent[typeToSave as AssetType];
         if (content === null) return; // No changes
 
@@ -477,7 +477,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             unsavedContent,
             iframeKey,
         } = this.state;
-        const isCodeView = activeTab !== TabType.PREVIEW && activeTab !== TabType.IMAGES;
+        const isCodeView = activeTab !== TabType.PREVIEW && activeTab !== TabType.RESOURCES;
 
         // Resolve content for current version
         const currentFiles = versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
@@ -499,12 +499,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     </button>
                     <button
                         className={classNames(styles.assetTab, {
-                            [styles.active]: activeTab === TabType.IMAGES,
+                            [styles.active]: activeTab === TabType.RESOURCES,
                         })}
-                        onClick={() => this.handleTabChange(TabType.IMAGES)}
-                    >
-                        Images
-                    </button>
+                        onClick={() => this.handleTabChange(TabType.RESOURCES)}
+                    >Resources</button>
                     <span 
                         className={styles.versionLabel} 
                         style={{ cursor: 'pointer' }}
@@ -539,10 +537,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     isResizing={this.props.isResizing}
                 />
 
-                <Images
+                <Resources
                     sessionId={sessionId}
                     version={version}
-                    active={activeTab === TabType.IMAGES}
+                    active={activeTab === TabType.RESOURCES}
                 />
 
 

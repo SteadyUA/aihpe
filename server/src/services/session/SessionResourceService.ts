@@ -314,6 +314,12 @@ export class SessionResourceService {
             console.error(`Failed to delete resource file ${filename}`, e);
         }
 
+        try {
+            this.filesService.deleteVersionFile(sessionId, version, `.thumbnail/${filename}.png`);
+        } catch (e) {
+            // ignore
+        }
+
         if (resource) {
             await this.repository.remove(resource);
         }

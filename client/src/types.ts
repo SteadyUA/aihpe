@@ -1,6 +1,6 @@
 export enum TabType {
     PREVIEW = 'preview',
-    IMAGES = 'images',
+    RESOURCES = 'resources',
     HTML = 'html',
     CSS = 'css',
     JS = 'js',
