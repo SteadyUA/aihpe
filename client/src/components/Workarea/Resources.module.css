@@ -76,13 +76,21 @@
 }
 
 .imageMeta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.25rem;
     font-size: 0.8em;
     color: #666;
 }
 
 .resolutionBadge {
-    margin-right: 8px;
-    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    background-color: #f1f5f9;
+    color: #475569;
 }
 
 .usageBadge {
@@ -113,7 +121,6 @@
 .badgeNoDescription {
     background-color: rgba(220, 38, 38, 0.1);
     color: #ef4444;
-    margin-left: 0.5rem;
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 500;
@@ -186,7 +193,7 @@
     background-color: #f8fafc;
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    padding: 1rem;
+    padding: 0.5rem;
     display: flex;
     justify-content: center;
     align-items: center;

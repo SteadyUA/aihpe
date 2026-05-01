@@ -2,12 +2,20 @@ import React from 'react';
 import classNames from 'classnames';
 import { UiCheckbox, CheckboxVariant } from '../UiCheckbox';
 import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
+import { UiDropdown, DropdownVariant } from '../UiDropdown';
 import { UiModal } from '../UiModal';
 import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Resources.module.css';
+
+const formatDuration = (seconds: number) => {
+    if (seconds < 60) return `${Math.round(seconds * 10) / 10}s`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+};
 
 const ThumbnailImage: React.FC<{ src: string; alt: string; className?: string }> = ({ src, alt, className }) => {
     const [loading, setLoading] = React.useState(true);
@@ -50,6 +58,8 @@ interface ResourceMetadata {
     model: string;
     width?: number;
     height?: number;
+    duration?: number;
+    fontFamily?: string;
     isUsed?: boolean;
 }
 
@@ -63,6 +73,7 @@ interface ResourcesState {
     resources: ResourceMetadata[];
     loading: boolean;
     showUnusedOnly: boolean;
+    filterType: string;
 
     // Upload State
     isUploadModalOpen: boolean;
@@ -93,6 +104,7 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
             resources: [],
             loading: false,
             showUnusedOnly: false,
+            filterType: 'all',
 
             isUploadModalOpen: false,
             filesToUpload: [],
@@ -155,6 +167,10 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
 
     toggleShowUnusedOnly = (checked: boolean) => {
         this.setState({ showUnusedOnly: checked });
+    };
+
+    handleFilterTypeChange = (value: string) => {
+        this.setState({ filterType: value });
     };
 
     // --- Upload Logic ---
@@ -530,9 +546,10 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
         return (
             <UiModal
                 isOpen={!!editingImage}
-                title="Edit Resource Description"
+                title={editingImage.filename}
                 onClose={() => !isBusy && this.closeEditModal()}
                 actions={actions}
+                style={{ maxWidth: '600px' }}
             >
                 <div className={styles.editModalContent}>
                     <div className={styles.editImageContainer}>
@@ -591,21 +608,42 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
 
     render() {
         const { sessionId, version, active } = this.props;
-        const { loading, resources, showUnusedOnly } = this.state;
+        const { loading, resources, showUnusedOnly, filterType } = this.state;
 
-        const visibleImages = showUnusedOnly
-            ? resources.filter(img => !img.isUsed)
-            : resources;
+        const visibleImages = resources.filter(img => {
+            if (showUnusedOnly && img.isUsed) return false;
+            if (filterType !== 'all') {
+                if (filterType === 'images' && img.mimetype && !img.mimetype.startsWith('image/')) return false;
+                if (filterType === 'videos' && (!img.mimetype || !img.mimetype.startsWith('video/'))) return false;
+                if (filterType === 'fonts' && (!img.mimetype || !img.mimetype.startsWith('font/'))) return false;
+            }
+            return true;
+        });
+
+        const filterOptions = [
+            { value: 'all', label: 'All Types' },
+            { value: 'images', label: 'Images' },
+            { value: 'videos', label: 'Videos' },
+            { value: 'fonts', label: 'Fonts' }
+        ];
 
         return (
             <div className={styles.previewContainer} style={{ display: active ? 'flex' : 'none' }}>
                 <Toolbar
                     left={
-                        <UiCheckbox
-                            checked={showUnusedOnly}
-                            onChange={this.toggleShowUnusedOnly}
-                            label="Unused only"
-                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <UiCheckbox
+                                checked={showUnusedOnly}
+                                onChange={this.toggleShowUnusedOnly}
+                                label="Unused only"
+                            />
+                            <UiDropdown
+                                value={filterType}
+                                options={filterOptions}
+                                onChange={this.handleFilterTypeChange}
+                                variant={DropdownVariant.STANDARD}
+                            />
+                        </div>
                     }
                     right={
                         <UiButton
@@ -664,11 +702,17 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                                     </div>
                                     <div className={styles.imageDesc}>
                                         <div className={styles.imageMeta}>
-                                            {img.width && img.height && (
-                                                <div className={styles.resolutionBadge}>
-                                                    {img.width}x{img.height}
-                                                </div>
-                                            )}
+                                            {img.fontFamily ? (
+                                                <span className={styles.resolutionBadge}>
+                                                    {img.fontFamily}
+                                                </span>
+                                            ) : (img.width && img.height) || img.duration ? (
+                                                <span className={styles.resolutionBadge}>
+                                                    {img.width && img.height ? `${img.width}x${img.height}` : ''}
+                                                    {img.width && img.height && img.duration ? ' • ' : ''}
+                                                    {img.duration ? formatDuration(img.duration) : ''}
+                                                </span>
+                                            ) : null}
                                             {img.isUsed !== undefined && (
                                                 <span
                                                     className={classNames(styles.usageBadge, {
