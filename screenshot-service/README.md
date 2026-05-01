@@ -6,7 +6,7 @@ A standalone microservice for taking screenshots of web pages, rendering SVG fil
 
 - **Web Screenshots**: Capture full or viewport-sized screenshots of URLs.
 - **Video Thumbnails**: Extract specific frames from video files (via URL or local shared folder).
-- **Font Thumbnails**: Generate text previews for font files (`.ttf`, `.woff`, `.woff2`, etc.).
+- **Font Thumbnails**: Generate 2x2 grid text previews for font files (`.ttf`, `.woff`, `.woff2`, etc.).
 - **Image Resizing**: Resize any output image using `sharp`.
 - **Local File Access**: Safe access to local files via `file://` URLs mounted in a read-only volume.
 
@@ -28,8 +28,7 @@ Captures a screenshot of a web page using Puppeteer.
 - `url` (required): HTTP/HTTPS or `file://` URL to capture.
 - `viewportWidth` (optional, default: 1280): Width of the browser viewport.
 - `viewportHeight` (optional, default: 800): Height of the browser viewport.
-- `resultWidth` (optional): Resize the final image to this width.
-- `resultHeight` (optional): Resize the final image to this height.
+- `size` (optional): Resize the final image so its maximum dimension is `size` (aspect ratio preserved).
 
 ### 2. `GET /thumbnail`
 Generates a thumbnail for a video, image, or font file.
@@ -37,8 +36,31 @@ Generates a thumbnail for a video, image, or font file.
 **Query Parameters:**
 - `url` (required): HTTP/HTTPS or `file://` URL of the media file.
 - `timestamp` (optional, default: `00:00:01`): Timecode to extract a frame from a video.
-- `resultWidth` (optional): Resize the final thumbnail to this width.
-- `resultHeight` (optional): Resize the final thumbnail to this height.
+- `size` (optional, default: 480): Resize the final thumbnail so its maximum dimension is `size` (aspect ratio preserved). For font thumbnails, this produces a strictly square `size`x`size` image.
+
+### 3. `GET /preview`
+Generates a full preview image for media, optimized for fonts. For text fonts, it generates an extended character layout. For icon fonts, it generates a grid of icons, allowing a comprehensive visual evaluation.
+
+**Query Parameters:**
+- `url` (required): HTTP/HTTPS or `file://` URL of the media file.
+- `timestamp` (optional, default: `00:00:01`): Timecode to extract a frame from a video.
+- `size` (optional): For videos, the maximum dimension of a **single frame**. For font icon grids, leaving this empty allows the service to automatically scale the image width to create a perfectly square grid layout.
+- `frames` (optional, default: 5): The number of frames to extract and composite for video previews.
+- `range` (optional): For icon fonts, filter the icons rendered in the preview grid. Accepts a hex string (e.g., `F000`), a range (`F000-F0FF`), or multiple comma-separated values (`F000-F0FF,F100`).
+- `text` (optional): Provide custom text to render instead of the default layout. Supports literal newlines (`\n`) and Unicode hex codes (e.g., `\uF000`) to render specific icons mixed with words. When used, the image width is automatically cropped to precisely fit the text.
+
+
+### 4. `GET /info`
+Analyzes a media file and returns detailed JSON metadata without generating an image.
+
+**Query Parameters:**
+- `url` (required): HTTP/HTTPS or `file://` URL of the media file.
+
+**Responses:**
+- **Images:** Returns `format`, `width`, `height`.
+- **Videos:** Returns `width`, `height`, `duration`, `videoCodec`, `audioCodec`, and `container`.
+- **Icon Fonts:** Returns `type: "icons"`, `fontFamily`, `glyphCount`, and `puaRanges` (an array of hex ranges).
+- **Text Fonts:** Returns `type: "font"`, `fontFamily`, `style` (`serif`, `sans-serif`, or `unknown`), and `glyphCount`.
 
 ---
 
@@ -53,7 +75,7 @@ curl "http://localhost:3001/screenshot?url=https://example.com" > example_screen
 ### 2. Video Thumbnail (via HTTP URL)
 Extract a frame at the 5-second mark from an online video:
 ```bash
-curl "http://localhost:3001/thumbnail?url=https://media.w3.org/2010/05/sintel/trailer.mp4&timestamp=00:00:05&resultWidth=640" > video_thumb.png
+curl "http://localhost:3001/thumbnail?url=https://media.w3.org/2010/05/sintel/trailer.mp4&timestamp=00:00:05&size=640" > video_thumb.png
 ```
 
 ### 3. Local File Thumbnail (via `file://`)
@@ -65,5 +87,17 @@ curl "http://localhost:3001/thumbnail?url=file://video.mp4" > local_video_thumb.
 ### 4. Font Thumbnail (Google Fonts)
 Generate a preview for a font file directly from Google Fonts (Roboto Regular):
 ```bash
-curl "http://localhost:3001/thumbnail?url=https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2&resultWidth=400" > font_roboto.png
+curl "http://localhost:3001/thumbnail?url=https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2&size=400" > font_roboto.png
+```
+
+### 5. Font Full Preview
+Generate an extended preview image showing the alphabet, pangrams, and numbers for a font file:
+```bash
+curl "http://localhost:3001/preview?url=https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2" > font_preview.png
+```
+
+### 6. Video Full Preview (Storyboard)
+Generate an extended preview image showing 5 extracted frames from a video file:
+```bash
+curl "http://localhost:3001/preview?url=https://media.w3.org/2010/05/sintel/trailer.mp4&size=480&frames=5" > video_preview.png
 ```
