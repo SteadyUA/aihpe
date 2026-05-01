@@ -573,8 +573,10 @@ app.get('/preview', async (req, res) => {
             const mimeType = await getMimeType(targetFilePath);
             const isVideo = mimeType.startsWith('video/');
             const isFont = mimeType.includes('font') || mimeType.includes('opentype') || mimeType.includes('truetype');
+            const isImage = mimeType.startsWith('image/');
 
             let finalBuffer;
+            let contentType = 'image/png';
 
             if (isVideo) {
                 const metadata = await getVideoMetadata(targetFilePath);
@@ -641,11 +643,31 @@ app.get('/preview', async (req, res) => {
             } else if (isFont) {
                 finalBuffer = await renderFont(targetFilePath, mimeType, size, null, 'preview', range, text);
                 // No sharp resizing needed; renderFont already sets the correct viewport width.
+            } else if (isImage) {
+                const imageSize = size || 1000;
+                const metadata = await sharp(targetFilePath).metadata();
+                const isSvg = mimeType.includes('svg');
+
+                if (metadata.width <= imageSize && metadata.height <= imageSize) {
+                    if (isSvg) {
+                        finalBuffer = await sharp(targetFilePath).png().toBuffer();
+                        contentType = 'image/png';
+                    } else {
+                        finalBuffer = await fs.promises.readFile(targetFilePath);
+                        contentType = mimeType;
+                    }
+                } else {
+                    finalBuffer = await sharp(targetFilePath)
+                        .resize(imageSize, imageSize, { fit: 'inside' })
+                        .jpeg()
+                        .toBuffer();
+                    contentType = 'image/jpeg';
+                }
             } else {
-                throw new Error('Preview is currently only supported for font and video files');
+                throw new Error('Preview is currently only supported for image, font and video files');
             }
 
-            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Content-Type', contentType);
             res.send(finalBuffer);
         } finally {
             semaphore.release();

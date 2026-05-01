@@ -39,12 +39,12 @@ Generates a thumbnail for a video, image, or font file.
 - `size` (optional, default: 480): Resize the final thumbnail so its maximum dimension is `size` (aspect ratio preserved). For font thumbnails, this produces a strictly square `size`x`size` image.
 
 ### 3. `GET /preview`
-Generates a full preview image for media, optimized for fonts. For text fonts, it generates an extended character layout. For icon fonts, it generates a grid of icons, allowing a comprehensive visual evaluation.
+Generates a full preview image for media, optimized for fonts, videos, and images. For text fonts, it generates an extended character layout. For icon fonts, it generates a grid of icons, allowing a comprehensive visual evaluation. For images, it provides a scaled-down version or rasterized format for SVGs.
 
 **Query Parameters:**
 - `url` (required): HTTP/HTTPS or `file://` URL of the media file.
 - `timestamp` (optional, default: `00:00:01`): Timecode to extract a frame from a video.
-- `size` (optional): For videos, the maximum dimension of a **single frame**. For font icon grids, leaving this empty allows the service to automatically scale the image width to create a perfectly square grid layout.
+- `size` (optional): For videos, the maximum dimension of a **single frame**. For font icon grids, leaving this empty allows the service to automatically scale the image width to create a perfectly square grid layout. For images, the default size is `1000`; images larger than `size` are proportionally resized and returned as JPEG. SVGs smaller than `size` are rasterized to PNG.
 - `frames` (optional, default: 5): The number of frames to extract and composite for video previews.
 - `range` (optional): For icon fonts, filter the icons rendered in the preview grid. Accepts a hex string (e.g., `F000`), a range (`F000-F0FF`), or multiple comma-separated values (`F000-F0FF,F100`).
 - `text` (optional): Provide custom text to render instead of the default layout. Supports literal newlines (`\n`) and Unicode hex codes (e.g., `\uF000`) to render specific icons mixed with words. When used, the image width is automatically cropped to precisely fit the text.
