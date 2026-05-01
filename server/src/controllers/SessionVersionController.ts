@@ -51,6 +51,14 @@ class ResourceResponse {
     height?: number;
 
     @IsOptional()
+    @IsNumber()
+    duration?: number;
+
+    @IsOptional()
+    @IsString()
+    fontFamily?: string;
+
+    @IsOptional()
     @IsBoolean()
     isUsed?: boolean;
 }
@@ -75,6 +83,14 @@ class GalleryImageResponse {
     @IsOptional()
     @IsNumber()
     height?: number;
+
+    @IsOptional()
+    @IsNumber()
+    duration?: number;
+
+    @IsOptional()
+    @IsString()
+    fontFamily?: string;
 
     @IsOptional()
     @IsBoolean()
@@ -113,6 +129,8 @@ export class SessionVersionController {
             model: metadata.model || 'unknown',
             width: metadata.width,
             height: metadata.height,
+            duration: metadata.duration,
+            fontFamily: metadata.fontFamily,
             isUsed: metadata.isUsed,
         };
     }
@@ -126,6 +144,8 @@ export class SessionVersionController {
             model: metadata.model || 'unknown',
             width: metadata.width,
             height: metadata.height,
+            duration: metadata.duration,
+            fontFamily: metadata.fontFamily,
             isUsed: metadata.isUsed,
         };
     }
@@ -289,24 +309,24 @@ export class SessionVersionController {
 
         const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
         const targetUrl = `file://sessions/${sessionId}/versions/${version}/${filename}`;
-        
+
         try {
-            const response = await fetch(`${screenshotServiceUrl}/thumbnail?url=${encodeURIComponent(targetUrl)}&resultWidth=250&resultHeight=250`);
-            
+            const response = await fetch(`${screenshotServiceUrl}/thumbnail?url=${encodeURIComponent(targetUrl)}&size=250`);
+
             if (!response.ok) {
                 throw new Error(`Screenshot service returned ${response.status}`);
             }
-            
+
             const arrayBuffer = await response.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
-            
+
             this.filesService.writeVersionFile(sessionId, version, thumbnailFilename, buffer);
-            
+
             const newStream = this.filesService.getVersionFileStream(sessionId, version, thumbnailFilename);
             if (!newStream) {
                 throw new Error('Failed to read saved thumbnail');
             }
-            
+
             return new FileStreamResponse(thumbnailFilename, newStream);
         } catch (error: any) {
             console.error('Failed to generate thumbnail:', error);

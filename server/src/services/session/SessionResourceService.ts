@@ -1,7 +1,6 @@
 import { Service, Inject } from 'typedi';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { imageSize } from 'image-size';
 import { AppDataSource } from '../../data-source';
 import { SessionResource } from '../../entities/SessionResource';
 import { FilesService } from './FilesService';
@@ -26,6 +25,8 @@ export interface ResourceMetadata {
     model: string;
     width?: number;
     height?: number;
+    duration?: number;
+    fontFamily?: string;
     isUsed?: boolean;
     [key: string]: any;
 }
@@ -66,25 +67,16 @@ export class SessionResourceService {
         const buffer = Buffer.from(base64Data, 'base64');
         this.filesService.writeVersionFile(sessionId, version, filename, buffer);
 
-        // Calculate dimensions
-        let width, height;
-        try {
-            const dimensions = imageSize(buffer);
-            width = dimensions.width;
-            height = dimensions.height;
-        } catch (e) {
-            console.warn('Failed to calculate image dimensions', e);
-        }
-
         const mimetype = this.getMimeType(filename);
+
+        const extraMeta = await this.fetchResourceMetadata(sessionId, version, filename, mimetype);
 
         // Save metadata
         await this.saveMetadata(sessionId, version, filename, mimetype, {
             description,
             model: this.llmImageService.modelId,
-            width,
-            height,
             isUsed: false,
+            ...extraMeta
         });
 
         return filename;
@@ -126,23 +118,14 @@ export class SessionResourceService {
         const newBuffer = Buffer.from(newBase64Data, 'base64');
         this.filesService.writeVersionFile(sessionId, targetVersion, filename, newBuffer);
 
-        // Calculate dimensions of new image
-        let width, height;
-        try {
-            const dimensions = imageSize(newBuffer);
-            width = dimensions.width;
-            height = dimensions.height;
-        } catch (e) {
-            console.warn('Failed to calculate new image dimensions', e);
-        }
+        const extraMeta = await this.fetchResourceMetadata(sessionId, targetVersion, filename, mimeType);
 
         // Save metadata
         await this.saveMetadata(sessionId, targetVersion, filename, mimeType, {
             description: newDescription || prompt,
             model: this.llmImageService.modelId,
-            width,
-            height,
             isUsed: true,
+            ...extraMeta
         });
 
         return filename;
@@ -194,19 +177,8 @@ export class SessionResourceService {
             isUsed: false,
         };
 
-        // If it's an image, calculate dimensions
-        if (mimetype.startsWith('image/')) {
-            try {
-                const buffer = this.filesService.readVersionFileBuffer(sessionId, version, filename);
-                if (buffer) {
-                    const dimensions = imageSize(buffer);
-                    metadataObj.width = dimensions.width;
-                    metadataObj.height = dimensions.height;
-                }
-            } catch (e) {
-                console.warn('Failed to calculate image dimensions', e);
-            }
-        }
+        const extraMeta = await this.fetchResourceMetadata(sessionId, version, filename, mimetype);
+        Object.assign(metadataObj, extraMeta);
 
         await this.saveMetadata(sessionId, version, filename, mimetype, metadataObj);
 
@@ -214,6 +186,24 @@ export class SessionResourceService {
     }
 
     // Shared Helper Methods
+
+    private async fetchResourceMetadata(sessionId: string, version: number, filename: string, mimetype: string): Promise<any> {
+        if (!mimetype.startsWith('image/') && !mimetype.startsWith('video/') && !mimetype.startsWith('font/')) {
+            return {};
+        }
+
+        try {
+            const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+            const targetUrl = `file://sessions/${sessionId}/versions/${version}/${filename}`;
+            const response = await fetch(`${screenshotServiceUrl}/info?url=${encodeURIComponent(targetUrl)}`);
+            if (response.ok) {
+                return await response.json();
+            }
+        } catch (e) {
+            console.warn('Failed to fetch resource metadata from screenshot service', e);
+        }
+        return {};
+    }
 
     private getMimeType(filename: string): string {
         const ext = path.extname(filename).toLowerCase();
