@@ -45,7 +45,7 @@ Generates a full preview image for media, optimized for fonts, videos, and image
 - `url` (required): HTTP/HTTPS or `file://` URL of the media file.
 - `timestamp` (optional, default: `00:00:01`): Timecode to extract a frame from a video.
 - `size` (optional): For videos, the maximum dimension of a **single frame**. For font icon grids, leaving this empty allows the service to automatically scale the image width to create a perfectly square grid layout. For images, the default size is `1000`; images larger than `size` are proportionally resized and returned as JPEG. SVGs smaller than `size` are rasterized to PNG.
-- `frames` (optional, default: 5): The number of frames to extract and composite for video previews.
+- `frames` (optional, default: 5): The number of frames to extract and composite for video previews. Frames are selected at evenly distributed intervals across the video duration (dividing the timeline into `frames + 1` parts), which avoids capturing blank screens at the very beginning or end.
 - `range` (optional): For icon fonts, filter the icons rendered in the preview grid. Accepts a hex string (e.g., `F000`), a range (`F000-F0FF`), or multiple comma-separated values (`F000-F0FF,F100`).
 - `text` (optional): Provide custom text to render instead of the default layout. Supports literal newlines (`\n`) and Unicode hex codes (e.g., `\uF000`) to render specific icons mixed with words. When used, the image width is automatically cropped to precisely fit the text.
 
