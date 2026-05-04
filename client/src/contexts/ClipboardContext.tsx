@@ -63,11 +63,11 @@ export const ClipboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     );
 };
 
-export const withClipboard = <P extends object>(
-    WrappedComponent: React.ComponentType<P & ClipboardContextProps>
+export const withClipboard = <P extends ClipboardContextProps, R = any>(
+    WrappedComponent: React.ComponentType<P>
 ) => {
-    return function WithClipboard(props: P) {
+    return React.forwardRef<R, Omit<P, keyof ClipboardContextProps>>((props, ref) => {
         const clipboardProps = useClipboard();
-        return <WrappedComponent {...props} {...clipboardProps} />;
-    };
+        return <WrappedComponent {...(props as any)} {...clipboardProps} ref={ref} />;
+    });
 };

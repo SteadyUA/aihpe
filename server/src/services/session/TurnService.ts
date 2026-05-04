@@ -32,6 +32,7 @@ export class TurnService {
             provider: entry.provider as LlmProvider,
             fastMode: entry.fastMode,
             selection: entry.selection ? { selector: entry.selection } : undefined,
+            resource: entry.resource || undefined,
             attachment: entry.attachment ? {
                 type: 'image',
                 id: entry.attachment.id.toString(),
@@ -57,6 +58,7 @@ export class TurnService {
             entity.provider = t.provider;
             entity.fastMode = t.fastMode;
             entity.selection = t.selection?.selector || null;
+            entity.resource = t.resource || null;
             entity.uploadId = t.attachment?.id ? parseInt(t.attachment.id, 10) : null;
             entity.version = t.version;
             return entity;
@@ -90,6 +92,7 @@ export class TurnService {
         entity.provider = turn.provider;
         entity.fastMode = turn.fastMode;
         entity.selection = turn.selection?.selector || null;
+        entity.resource = turn.resource || null;
         entity.uploadId = turn.attachment?.id ? parseInt(turn.attachment.id, 10) : null;
         entity.version = turn.version;
 

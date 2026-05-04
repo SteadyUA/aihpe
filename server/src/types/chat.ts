@@ -30,6 +30,7 @@ export interface ChatMessage {
     content: any;
     selection?: { selector: string };
     attachment?: ChatAttachment;
+    resource?: string;
     version: number;
     turn: number;
     createdAt: Date;
@@ -89,6 +90,7 @@ export interface Turn {
     fastMode: boolean;
     selection?: { selector: string };
     attachment?: ChatAttachment;
+    resource?: string;
     version: number;
 }
 
@@ -109,6 +111,7 @@ export interface UnsentData {
     input?: string | null;
     attachment?: ChatAttachment | null;
     selection?: string | null;
+    resource?: string | null;
     provider?: LlmProvider | null;
     fastMode?: boolean | null;
 }

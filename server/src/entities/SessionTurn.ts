@@ -34,6 +34,9 @@ export class SessionTurn {
     @Column({ type: 'text', nullable: true })
     selection!: string | null;
 
+    @Column({ type: 'text', nullable: true })
+    resource!: string | null;
+
     @Column({ nullable: true })
     uploadId!: number | null;
 

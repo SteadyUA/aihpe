@@ -100,6 +100,10 @@ class ChatRequest {
 
     @IsOptional()
     @IsString()
+    resource?: string;
+
+    @IsOptional()
+    @IsString()
     provider?: LlmProvider;
 
     @IsOptional()
@@ -133,6 +137,10 @@ class UnsentDataRequest {
     @IsOptional()
     @IsString()
     selection?: string;
+
+    @IsOptional()
+    @IsString()
+    resource?: string;
 
     @IsOptional()
     @IsString()
@@ -208,6 +216,10 @@ class StopGenerationResponse {
     restoredSelection?: string;
 
     @IsOptional()
+    @IsString()
+    restoredResource?: string;
+
+    @IsOptional()
     @ValidateNested()
     @Type(() => AttachmentRequest)
     restoredAttachment?: AttachmentRequest;
@@ -243,6 +255,10 @@ class TurnResponse {
     @ValidateNested()
     @Type(() => SelectionRequest)
     selection?: SelectionRequest;
+
+    @IsOptional()
+    @IsString()
+    resource?: string;
 
     @IsOptional()
     @ValidateNested()
@@ -285,6 +301,10 @@ class UnsentDataResponse {
     @IsOptional()
     @IsString()
     selection?: string | null;
+
+    @IsOptional()
+    @IsString()
+    resource?: string | null;
 
     @IsOptional()
     @IsString()
@@ -427,7 +447,7 @@ export class SessionController {
         // This is crucial for partial updates (e.g. saving input shouldn't clear selection)
         const updates: Partial<UnsentData> = {};
 
-        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'provider', 'fastMode'];
+        const fields: (keyof UnsentDataRequest)[] = ['input', 'attachment', 'selection', 'resource', 'provider', 'fastMode'];
 
         for (const field of fields) {
             const value = body[field];
@@ -453,6 +473,7 @@ export class SessionController {
             body.message ?? '',
             body.attachment,
             body.selection,
+            body.resource,
             body.provider,
             body.fastMode,
         );
@@ -496,6 +517,7 @@ export class SessionController {
                     body.message ?? '',
                     body.attachment,
                     body.selection,
+                    body.resource,
                     body.provider,
                     body.fastMode,
                     true // allowVariants
@@ -522,6 +544,7 @@ export class SessionController {
             restoredInput: result.restoredInput,
             restoredSelection: result.restoredSelection,
             restoredAttachment: result.restoredAttachment,
+            restoredResource: result.restoredResource,
             previousTurn: result.previousTurn
         }
     }
@@ -634,6 +657,7 @@ export class SessionController {
             restoredInput: result.restoredInput,
             restoredSelection: result.restoredSelection,
             restoredAttachment: result.restoredAttachment,
+            restoredResource: result.restoredResource,
             previousTurn: result.previousTurn,
         };
     }

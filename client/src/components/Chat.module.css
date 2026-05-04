@@ -145,13 +145,22 @@
 }
 
 
-.selectionChip {
-    display: inline-block;
+.contextChipsContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+}
+
+.contextChip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     background: rgba(255, 255, 255, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 4px;
-    padding: 0.1rem 0.4rem;
-    margin-top: 0.75rem;
+    padding: 0.2rem 0.5rem;
     font-family: var(--font-mono);
     font-size: 0.8em;
     color: white;
@@ -161,9 +170,22 @@
         border-color 0.2s;
 }
 
-.selectionChip:hover {
+.contextChip:hover {
     background: rgba(255, 255, 255, 0.3);
     border-color: rgba(255, 255, 255, 0.5);
+}
+
+.contextChipWithImage {
+    padding: 0.2rem;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.contextChipImage {
+    max-width: 80px;
+    max-height: 80px;
+    object-fit: contain;
+    border-radius: 2px;
+    display: block;
 }
 
 .assistant .messageContent {
@@ -385,7 +407,7 @@
     display: block;
     /* 3:4 aspect ratio handled by image or container? */
     /* Set max dimensions to keep it reasonable while centered */
-    max-width: 100%;
+    max-width: 150px;
     max-height: 150px;
     object-fit: contain;
     /* Ensure full image is visible */
@@ -401,8 +423,8 @@
 .messageThumbnail {
     display: block;
     margin: 0.75rem 0;
-    max-width: 150px;
-    max-height: 150px;
+    max-width: 80px;
+    max-height: 80px;
     border-radius: 4px;
     border: 1px solid var(--border-color);
     cursor: pointer;
@@ -651,7 +673,8 @@
     transition: opacity 0.2s;
     font-weight: 500;
     color: var(--accent);
-    text-decoration: none; /* remove default link underline */
+    text-decoration: none;
+    /* remove default link underline */
 }
 
 .lastAssistant .messageContent a[href="#send"]:hover {
@@ -664,4 +687,39 @@
     color: inherit;
     text-decoration: none;
     pointer-events: none;
+}
+
+/* Resource Link Tile in Chat */
+.resourceLinkTile {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem;
+    margin: 0.25rem;
+    text-decoration: none !important;
+    background: transparent;
+    border-radius: 6px;
+    vertical-align: middle;
+    transition: background 0.2s;
+}
+
+.resourceLinkTile:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+.resourceLinkThumbContainer {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+}
+
+.resourceLinkThumb {
+    max-width: 80px;
+    max-height: 80px;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 4px;
 }

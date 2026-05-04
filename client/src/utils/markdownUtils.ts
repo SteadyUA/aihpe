@@ -5,16 +5,16 @@ export interface ColorPreviewStyles {
     colorSwatch: string;
 }
 
-const escapeHtml = (unsafe: string) => {
-    return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-};
 
-export const createMarkedInstance = (styles: ColorPreviewStyles) => {
+
+export interface ChatMarkedContext {
+    styles: any;
+    sessionId?: string;
+    version?: number;
+}
+
+export const createMarkedInstance = (context: ChatMarkedContext) => {
+    const styles = context.styles;
     return new Marked({
         breaks: true, // Preserve breaks like in Chat.tsx
         extensions: [{
@@ -45,7 +45,23 @@ export const createMarkedInstance = (styles: ColorPreviewStyles) => {
                 if (typeof code === 'string' && rule.test(code)) {
                     return `<code class="${styles.colorContainer}"><span class="${styles.colorSwatch}" style="background-color: ${code}"></span>${code}</code>`;
                 }
-                return `<code>${escapeHtml(String(code))}</code>`;
+                return false;
+            },
+            link(token: any) {
+                if (token.href === '#resource' && context.sessionId && context.version !== undefined) {
+                    const filename = token.text;
+                    const thumbnailUrl = `${import.meta.env.BASE_URL}api/sessions/${context.sessionId}/${context.version}/resources/${filename}/thumbnail`;
+                    const fileUrl = `${import.meta.env.BASE_URL}api/sessions/${context.sessionId}/${context.version}/files/${filename}`;
+
+                    return `
+                        <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" class="${styles.resourceLinkTile}" contenteditable="false" data-resource-filename="${filename}">
+                            <span class="${styles.resourceLinkThumbContainer}">
+                                <img src="${thumbnailUrl}" alt="${filename}" class="${styles.resourceLinkThumb}" />
+                            </span>
+                        </a>
+                    `;
+                }
+                return false;
             }
         }
     });

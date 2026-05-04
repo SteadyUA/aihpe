@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Chat } from './Chat';
+import { Chat, ChatInternal } from './Chat';
 import { Workarea } from './Workarea';
 import { Session, SessionStatus } from '../types';
 import { ResizeHandle } from './ResizeHandle';
@@ -24,7 +24,7 @@ interface WorkSessionState {
 export class WorkSession extends React.Component<WorkSessionProps, WorkSessionState> {
     private picker: ElementPicker;
     private previewRef: React.RefObject<Workarea | null>;
-    private chatRef: React.RefObject<Chat | null>;
+    private chatRef: React.RefObject<ChatInternal | null>;
     private hasInitialScrollHappened = false;
 
     constructor(props: WorkSessionProps) {
@@ -263,12 +263,14 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                 <Chat
                     ref={this.chatRef}
                     sessionId={session.id}
+                    version={session.currentVersion ?? 0}
                     onUpdateSession={this.props.onUpdateSession}
                     status={session.status || SessionStatus.IDLE}
                     isVisible={isVisible}
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
                     selection={session.selection || null}
+                    resource={session.resource || null}
                     isPicking={session.isPicking || false}
                     onClearSelection={this.clearSelection}
                     onSelectChip={this.restoreSelection}

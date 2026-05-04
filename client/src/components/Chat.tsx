@@ -35,6 +35,7 @@ interface MessageProps {
     sessionId: string;
     onImageLoad?: () => void;
     onQuoteActionClick?: (quoteText: string, rect: DOMRect) => void;
+    onSelectResource?: (filename: string) => void;
 }
 
 const formatTime = (dateString?: string) => {
@@ -43,6 +44,31 @@ const formatTime = (dateString?: string) => {
     if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
+
+interface ContextChipProps {
+    icon?: React.ReactNode;
+    label?: string;
+    imageUrl?: string;
+    onClick?: (e: React.MouseEvent) => void;
+    title?: string;
+}
+
+const ContextChip: React.FC<ContextChipProps> = ({ icon, label, imageUrl, onClick, title }) => (
+    <div
+        className={classNames(styles.contextChip, { [styles.contextChipWithImage]: !!imageUrl })}
+        onClick={onClick}
+        title={title}
+    >
+        {imageUrl ? (
+            <img src={imageUrl} alt={title || label} className={styles.contextChipImage} />
+        ) : (
+            <>
+                {icon && <span style={{ display: 'inline-flex', alignItems: 'center' }}>{icon}</span>}
+                {label && <span>{label}</span>}
+            </>
+        )}
+    </div>
+);
 
 const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
     const [elapsed, setElapsed] = React.useState(0);
@@ -209,6 +235,18 @@ class Message extends React.Component<MessageProps> {
                             return;
                         }
 
+                        // Check if click was on a resource tile
+                        const resourceAnchor = target.closest(`a[data-resource-filename]`) as HTMLAnchorElement;
+                        if (resourceAnchor) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const filename = resourceAnchor.getAttribute('data-resource-filename');
+                            if (filename && this.props.onSelectResource) {
+                                this.props.onSelectResource(filename);
+                            }
+                            return;
+                        }
+
                         // Check if click was on a session link
                         if (target.tagName === 'A') {
                             const href = target.getAttribute('href');
@@ -223,15 +261,38 @@ class Message extends React.Component<MessageProps> {
                         }
                     }}
                 >
-                    {msg.selection && (
-                        <div
-                            className={styles.selectionChip}
-                            onClick={() =>
-                                onSelectChip?.(msg.selection!.selector)
-                            }
-                            title="Click to restore selection"
-                        >
-                            {msg.selection.selector}
+                    {(msg.selection || msg.resource || msg.attachment) && (
+                        <div className={styles.contextChipsContainer}>
+                            {msg.selection && (
+                                <ContextChip
+                                    label={msg.selection.selector}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectChip?.(msg.selection!.selector);
+                                    }}
+                                    title="Click to restore selection"
+                                />
+                            )}
+                            {msg.resource && (
+                                <ContextChip
+                                    imageUrl={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${msg.version || 0}/resources/${msg.resource}/thumbnail`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${msg.version || 0}/files/${msg.resource}`, '_blank');
+                                    }}
+                                    title={`Resource: ${msg.resource}`}
+                                />
+                            )}
+                            {msg.attachment && (
+                                <ContextChip
+                                    imageUrl={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment!.filename}`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment!.filename}`, '_blank');
+                                    }}
+                                    title={msg.attachment.originalName || msg.attachment.filename}
+                                />
+                            )}
                         </div>
                     )}
 
@@ -256,30 +317,17 @@ class Message extends React.Component<MessageProps> {
                             <div
                                 className="message-text"
                                 dangerouslySetInnerHTML={{
-                                    __html: createMarkedInstance(styles as any).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
+                                    __html: createMarkedInstance({
+                                        styles: styles as any,
+                                        sessionId: this.props.sessionId,
+                                        version: msg.version
+                                    }).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
                                 }}
                             />
                         )
                     )}
 
-                    {/* Render Attachment as Thumbnail */}
-                    {msg.attachment && (
-                        <div className={styles.messageAttachments}>
-                            <img
-                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`}
-                                alt={msg.attachment.originalName || msg.attachment.filename}
-                                className={styles.messageThumbnail}
-                                title={msg.attachment.originalName || msg.attachment.filename}
-                                onLoad={this.props.onImageLoad}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (msg.attachment) {
-                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment.filename}`, '_blank');
-                                    }
-                                }}
-                            />
-                        </div>
-                    )}
+
 
                 </div>
                 {/* Message Actions */}
@@ -371,9 +419,11 @@ class Message extends React.Component<MessageProps> {
 interface ChatProps {
     status: SessionStatus;
     sessionId: string;
+    version: number;
     onPickElement?: () => void;
     onCancelPick?: () => void;
     selection?: string | null;
+    resource?: string | null;
     isPicking?: boolean;
     onClearSelection?: () => void;
     onSelectChip?: (selector: string) => void;
@@ -553,6 +603,9 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         if (prevProps.selection !== this.props.selection) {
             this.handleSaveUnsent({ selection: this.props.selection });
         }
+        if (prevProps.resource !== this.props.resource) {
+            this.handleSaveUnsent({ resource: this.props.resource });
+        }
 
         const statusMessagesChanged = !areArraysEqual(prevState.statusMessages, this.state.statusMessages);
         if (statusMessagesChanged && this.isLastTurn()) {
@@ -684,6 +737,10 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         }
     };
 
+    handleSelectResource = (filename: string) => {
+        this.props.onUpdateSession({ resource: filename });
+    };
+
     handleUndo = () => {
         this.setState({ showUndoConfirmation: true });
     };
@@ -715,19 +772,15 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                 // If successful, we arguably don't need to refetch if our optimistic update was correct.
                 // But we should sync the input/selection state.
 
-                if (data.restoredInput) {
-                    this.setState({ input: data.restoredInput });
-                }
+                const updates: Partial<Session> = { status: SessionStatus.IDLE };
 
-                if (data.restoredSelection) {
-                    this.props.onUpdateSession({ selection: data.restoredSelection });
-                }
+                this.setState({ input: data.restoredInput || '' });
+                updates.input = data.restoredInput || '';
+                updates.selection = data.restoredSelection || null;
+                updates.attachment = data.restoredAttachment || undefined;
+                updates.resource = data.restoredResource || null;
 
-                if (data.restoredAttachment) {
-                    this.props.onUpdateSession({ attachment: data.restoredAttachment });
-                }
-
-                this.props.onUpdateSession({ status: SessionStatus.IDLE });
+                this.props.onUpdateSession(updates);
                 this.syncVersion(null);
             } else {
                 // Revert optimistic update?
@@ -790,7 +843,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         }
     };
 
-    handleSaveUnsent = async (data: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, provider?: LlmProvider | null, fastMode?: boolean }) => {
+    handleSaveUnsent = async (data: { input?: string | null, attachment?: ChatAttachment | null, selection?: string | null, resource?: string | null, provider?: LlmProvider | null, fastMode?: boolean }) => {
         const { sessionId } = this.props;
         if (!sessionId) return;
 
@@ -848,7 +901,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
     };
 
     sendMessage = async (text: string) => {
-        const { sessionId, provider, fastMode, selection, attachment } = this.props;
+        const { sessionId, provider, fastMode, selection, resource, attachment } = this.props;
         if (!sessionId) return;
 
         const selectionData = selection ? { selector: selection } : undefined;
@@ -863,6 +916,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
             fastMode: fastMode,
             selection: selectionData,
             attachment: attachment,
+            resource: resource || undefined,
             version: (this.state.turns.find(t => t.turn === this.props.lastTurn)?.version || 0)
         };
 
@@ -873,6 +927,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         this.props.onUpdateSession({
             status: SessionStatus.BUSY,
             selection: null,
+            resource: null,
             activeTurn: nextTurn,
             lastTurn: nextTurn,
             attachment: undefined,
@@ -889,6 +944,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                     message: text,
                     attachment,
                     selection: selectionData,
+                    resource: resource || undefined,
                     provider: provider,
                     fastMode: fastMode,
                 }),
@@ -917,7 +973,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
     };
 
     handleParallelGeneration = async (count: number, overrideText?: string) => {
-        const { sessionId, provider, fastMode, selection, attachment } = this.props;
+        const { sessionId, provider, fastMode, selection, resource, attachment } = this.props;
         if (!sessionId) return;
 
         const selectionData = selection ? { selector: selection } : undefined;
@@ -929,6 +985,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         }
         this.props.onUpdateSession({
             selection: null,
+            resource: null,
             attachment: undefined,
             input: undefined
         });
@@ -941,6 +998,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                     message: text,
                     attachment,
                     selection: selectionData,
+                    resource: resource || undefined,
                     provider: provider,
                     fastMode: fastMode,
                     count: count
@@ -1110,6 +1168,9 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                 if (data.restoredSelection) {
                     this.props.onUpdateSession({ selection: data.restoredSelection });
                 }
+                if (data.restoredResource) {
+                    this.props.onUpdateSession({ resource: data.restoredResource });
+                }
 
                 if (data.restoredAttachment) {
                     this.props.onUpdateSession({ attachment: data.restoredAttachment });
@@ -1233,7 +1294,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
             sessionIds,
             onSwitchSession,
             sessionTitle,
-
+            resource,
         } = this.props;
         const { input, isUploading, isLoading, showSummaryModal, summaryContent, turns } = this.state;
         const isFormDisabled = status === SessionStatus.BUSY || disabled;
@@ -1246,7 +1307,9 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                 turn: t.turn,
                 createdAt: t.beginTime,
                 selection: t.selection,
-                attachment: t.attachment
+                attachment: t.attachment,
+                resource: t.resource,
+                version: t.version
             });
             if (t.response || t.endTime) {
                 messages.push({
@@ -1334,6 +1397,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         startTime={this.state.startTime ?? undefined}
                                         onSwitchSession={onSwitchSession}
                                         onQuoteActionClick={this.handleQuoteActionClick}
+                                        onSelectResource={this.handleSelectResource}
                                     />
                                 );
                             })}
@@ -1361,6 +1425,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                 sessionIds={sessionIds}
                                 onSwitchSession={onSwitchSession}
                                 onQuoteActionClick={this.handleQuoteActionClick}
+                                onSelectResource={this.handleSelectResource}
                             />
                         )}
                     </div>
@@ -1411,6 +1476,18 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                                 alt={attachment.originalName || attachment.filename}
                                                 className={styles.imagePreview}
                                                 title={attachment.originalName || attachment.filename}
+                                            />
+                                        </UiTarget>
+                                    </div>
+                                )}
+                                {resource && (
+                                    <div className={styles.attachmentList}>
+                                        <UiTarget onRemove={() => this.props.onUpdateSession({ resource: null })} removeTitle="Remove selected resource" disabled={isFormDisabled}>
+                                            <img
+                                                src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/${this.props.version}/resources/${resource}/thumbnail`}
+                                                alt={resource}
+                                                className={styles.imagePreview}
+                                                title={`Resource: ${resource}`}
                                             />
                                         </UiTarget>
                                     </div>

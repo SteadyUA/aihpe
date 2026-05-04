@@ -15,6 +15,7 @@ export interface MessageData {
     createdAt?: string;
     selection?: { selector: string };
     attachment?: ChatAttachment;
+    resource?: string;
 }
 
 export interface ImageAttachment {
@@ -42,6 +43,7 @@ export interface UnsentData {
     input?: string | null;
     attachment?: ChatAttachment | null;
     selection?: string | null;
+    resource?: string | null;
     provider?: LlmProvider | null;
     fastMode?: boolean;
 }
@@ -103,6 +105,7 @@ export interface Session {
     // UI selections per session
     selection: string | null;
     attachment?: ChatAttachment | null;
+    resource?: string | null;
     isPicking: boolean;
     input?: string;
 
@@ -120,6 +123,7 @@ export interface Turn {
     fastMode?: boolean;
     selection?: { selector: string };
     attachment?: ChatAttachment;
+    resource?: string;
     version?: number;
 }
 

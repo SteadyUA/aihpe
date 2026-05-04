@@ -118,6 +118,7 @@ export class ChatService {
         userMessage: string,
         attachment?: ChatAttachment,
         selection?: { selector: string },
+        resource?: string,
         provider?: LlmProvider,
         fastMode?: boolean,
     ): Promise<{
@@ -126,6 +127,7 @@ export class ChatService {
             message: string;
             attachment?: ChatAttachment;
             selection?: { selector: string };
+            resource?: string;
             createdAt?: Date;
         };
         skipped: boolean;
@@ -175,10 +177,11 @@ export class ChatService {
 
         const contextEntry: ChatMessage = {
             role: ChatRole.USER,
-            content: this.enrichContentWithSelection(userContentForHistory, selection),
+            content: this.enrichContentWithSelectionAndResource(userContentForHistory, selection, resource),
             createdAt: now,
             selection,
             attachment: normalizedAttachment,
+            resource,
             version: currentMetadata.currentVersion,
             turn: newTurn,
         };
@@ -193,6 +196,7 @@ export class ChatService {
             fastMode: fastMode ?? currentMetadata.fastMode ?? false,
             selection,
             attachment: normalizedAttachment,
+            resource,
             version: currentMetadata.currentVersion,
         };
 
@@ -217,6 +221,7 @@ export class ChatService {
                 message: trimmed,
                 attachment: normalizedAttachment,
                 selection,
+                resource,
                 createdAt: now,
             },
             skipped: false,
@@ -229,6 +234,7 @@ export class ChatService {
             message: string;
             attachment?: ChatAttachment;
             selection?: { selector: string };
+            resource?: string;
             createdAt?: Date;
         },
         turn: number,
@@ -298,10 +304,16 @@ export class ChatService {
         const selectionContext = promptData.selection
             ? `Selected element: ${promptData.selection.selector}.`
             : '';
+        const resourceContext = promptData.resource
+            ? `[Selected resource: ${promptData.resource}]`
+            : '';
 
         let effectiveInstructions = promptData.message;
         if (selectionContext) {
             effectiveInstructions = `${selectionContext} ${effectiveInstructions}`;
+        }
+        if (resourceContext) {
+            effectiveInstructions = `${resourceContext} ${effectiveInstructions}`;
         }
         if (!effectiveInstructions && selectorsSummary) {
             effectiveInstructions = `Process attached screenshots of selected elements: ${selectorsSummary}.`;
@@ -368,6 +380,7 @@ export class ChatService {
                         instruction,
                         undefined, // attachment
                         undefined, // selection
+                        undefined, // resource
                         undefined, // provider
                         undefined, // fastMode
                         false,     // allowVariants = false to prevent infinite recursion
@@ -459,6 +472,7 @@ export class ChatService {
     async stopGeneration(sessionId: string): Promise<{
         restoredInput?: string;
         restoredSelection?: string;
+        restoredResource?: string;
         restoredAttachment?: ChatAttachment;
         previousTurn: number;
     }> {
@@ -656,15 +670,21 @@ export class ChatService {
         return attachment;
     }
 
-    private enrichContentWithSelection(
+    private enrichContentWithSelectionAndResource(
         content: any,
         selection?: { selector: string },
+        resource?: string
     ): any {
-        if (!selection) return content;
-        if (typeof content === 'string') {
-            return `[Selected element: ${selection.selector}] ${content}`;
+        if (typeof content !== 'string') return content;
+
+        let enriched = content;
+        if (selection) {
+            enriched = `[Selected element: ${selection.selector}] ${enriched}`;
         }
-        return content;
+        if (resource) {
+            enriched = `[Selected resource: ${resource}] ${enriched}`;
+        }
+        return enriched;
     }
 
     public initFirstVersion(sessionId: string): void {
@@ -720,6 +740,7 @@ export class ChatService {
         message: string,
         attachment?: ChatAttachment,
         selection?: { selector: string },
+        resource?: string,
         provider?: LlmProvider,
         fastMode?: boolean,
         allowVariants: boolean = true,
@@ -730,7 +751,7 @@ export class ChatService {
         if (!sourceMetadata) throw new Error(`Session ${sourceSessionId} not found`);
 
         const newSessionId = this.sessionService.getNextId();
-        
+
         // 1. Clone session (do NOT emit SessionCreatedEvent yet)
         const newSession = await this.performCloneSession(newSessionId, sourceSessionId, targetTurn, true, targetGroup);
 
@@ -745,6 +766,7 @@ export class ChatService {
             message,
             attachment,
             selection,
+            resource,
             provider,
             fastMode
         );
@@ -880,6 +902,7 @@ export class ChatService {
     public async undoLastTurn(sessionId: string): Promise<{
         restoredInput?: string;
         restoredSelection?: string;
+        restoredResource?: string;
         restoredAttachment?: ChatAttachment;
         previousTurn: number;
     }> {
@@ -907,6 +930,7 @@ export class ChatService {
 
         const restoredInput = turnToRemove.request;
         const restoredSelection = turnToRemove.selection?.selector;
+        const restoredResource = turnToRemove.resource;
         const restoredAttachment = turnToRemove.attachment;
 
         const currentContext = await this.contextService.loadContext(sessionId);
@@ -943,6 +967,7 @@ export class ChatService {
         await this.unsentService.saveUnsent(sessionId, {
             input: restoredInput,
             selection: restoredSelection,
+            resource: restoredResource,
             attachment: restoredAttachment,
         });
 
@@ -955,6 +980,7 @@ export class ChatService {
         return {
             restoredInput,
             restoredSelection,
+            restoredResource,
             restoredAttachment,
             previousTurn: currentTurn - 1
         };
