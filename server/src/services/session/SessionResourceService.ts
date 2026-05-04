@@ -190,9 +190,9 @@ export class SessionResourceService {
         const isVideo = mimeType.startsWith('video/');
 
         if (isIconFont && metadata.puaRanges && metadata.puaRanges.length > 0) {
-            const chunkSizeStr = process.env.ICON_FONT_CHUNK_SIZE || '12';
+            const chunkSizeStr = process.env.ICON_FONT_CHUNK_SIZE || '16';
             let chunkSize = parseInt(chunkSizeStr, 10);
-            if (isNaN(chunkSize) || chunkSize <= 0) chunkSize = 12;
+            if (isNaN(chunkSize) || chunkSize <= 0) chunkSize = 16;
 
             const hexCodes = this.parsePuaRanges(metadata.puaRanges);
             if (hexCodes.length > 0) {
@@ -204,7 +204,7 @@ export class SessionResourceService {
                     const chunk = hexCodes.slice(i, i + chunkSize);
                     const rangeParam = chunk.join(',');
                     const previewUrl = `${screenshotServiceUrl}/preview?url=${encodeURIComponent(targetUrl)}&range=${encodeURIComponent(rangeParam)}`;
-                    
+
                     let chunkBuffer: Buffer | null = null;
                     let chunkMimeType = 'image/png';
                     try {
@@ -223,7 +223,7 @@ export class SessionResourceService {
                     }
 
                     let prompt = "This image shows a grid of icons from an icon font. The hex code is written directly below each icon. Carefully read the grid row by row, from left to right, and provide a list of the icons and their corresponding hex codes. Make sure to match each icon strictly with the code directly beneath it. Do not guess or hallucinate codes. Describe each icon in detail using a short phrase (more than one word if possible) rather than just a single word. Format the list strictly as '* [HEX]: [Description]' and do NOT output any conversational text, introductory remarks, or concluding sentences.";
-                    
+
                     if (i === 0) {
                         prompt = "This image is a preview of an icon font file. The hex code is written directly below each icon. First, write exactly one sentence starting with 'This font file contains icons in a...' to describe the overall visual style, aesthetic, and characteristics of the icons (e.g., minimalist, line-art, solid, rounded, detailed). Do not mention the image itself. Then, carefully read the grid row by row, from left to right, and provide a list of the icons and their corresponding hex codes. Make sure to match each icon strictly with the code directly beneath it. Do not guess or hallucinate codes. Describe each icon in detail using a short phrase (more than one word if possible) rather than just a single word. Format the list strictly as '* [HEX]: [Description]' and do NOT output any conversational text, introductory remarks, or concluding sentences.";
                     }
@@ -243,7 +243,7 @@ export class SessionResourceService {
 
                     accumulatedDescription += result.description + '\n';
                 }
-                
+
                 return accumulatedDescription.trim();
             }
         }
