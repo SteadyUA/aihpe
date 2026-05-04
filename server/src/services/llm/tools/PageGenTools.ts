@@ -178,66 +178,79 @@ export function createPageGenTools(
                 },
             },
             {
-                name: 'list_images',
-                description: 'List available UNUSED images in the current session.',
+                name: 'resource_list',
+                description: 'List available resources in the current session. You can filter by resource type. Note: this tool does NOT return the description/contents of the resources. Use resource_info to get the description.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        summary: { type: 'string', description: 'Explain why you are listing images.' }
+                        type: { type: 'string', enum: ['images', 'videos', 'fonts', 'all'], description: 'Filter by resource type.' },
+                        summary: { type: 'string', description: 'Explain why you are listing resources.' }
                     },
-                    required: ['summary']
+                    required: ['type', 'summary']
                 },
-                execute: async (_args: { summary: string }) => {
+                execute: async ({ type, summary: _summary }: { type: 'images' | 'videos' | 'fonts' | 'all'; summary: string }) => {
                     try {
-                        const images = await resourceService.listImages(request.sessionId, request.currentVersion);
-                        const unusedImages = images.filter((img) => !img.isUsed && img.description && img.description.trim() !== '');
+                        const resources = await resourceService.listResources(request.sessionId, request.currentVersion);
+                        
+                        let filtered = resources;
+                        if (type === 'images') filtered = filtered.filter(res => res.mimetype?.startsWith('image/'));
+                        else if (type === 'videos') filtered = filtered.filter(res => res.mimetype?.startsWith('video/'));
+                        else if (type === 'fonts') filtered = filtered.filter(res => res.mimetype?.startsWith('font/'));
 
-                        if (unusedImages.length === 0) {
-                            return 'No unused images found in this session.';
+                        if (filtered.length === 0) {
+                            return `No unused ${type} found in this session.`;
                         }
-                        return JSON.stringify(unusedImages.map((img) => ({
-                            filename: img.filename,
-                            description: img.description,
-                            width: img.width,
-                            height: img.height,
-                            model: img.model
-                        })));
+                        return JSON.stringify(filtered.map((res) => {
+                            const base = {
+                                filename: res.filename,
+                                mimetype: res.mimetype,
+                                model: res.model,
+                                isUsed: res.isUsed
+                            };
+                            if (res.mimetype?.startsWith('image/')) {
+                                return { ...base, width: res.width, height: res.height, format: res.format };
+                            } else if (res.mimetype?.startsWith('video/')) {
+                                return { ...base, width: res.width, height: res.height, duration: res.duration, videoCodec: res.videoCodec };
+                            } else if (res.mimetype?.startsWith('font/')) {
+                                return { ...base, type: res.type, fontFamily: res.fontFamily, style: res.style, glyphCount: res.glyphCount };
+                            }
+                            return base;
+                        }));
                     } catch (error: any) {
-                        return `Failed to list images: ${error.message}`;
+                        return `Failed to list resources: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'image_info',
-                description: 'Get details about a specific image.',
+                name: 'resource_info',
+                description: 'Get details about a specific resource file (image, video, font). If the description is missing, this tool will automatically generate and save one before returning it.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', description: 'The filename of the image.' },
+                        filename: { type: 'string', description: 'The filename of the resource.' },
                         summary: { type: 'string', description: 'Explain why you are requesting info.' }
                     },
                     required: ['filename', 'summary']
                 },
-                execute: async ({ filename }: { filename: string; summary: string }) => {
+                execute: async ({ filename, summary: _summary }: { filename: string; summary: string }) => {
                     try {
                         const info = await resourceService.getResourceInfo(request.sessionId, request.currentVersion, filename);
                         if (!info) {
-                            return `Image not found: ${filename}`;
+                            return `Resource not found: ${filename}`;
                         }
-                        return JSON.stringify({
-                            filename: info.filename,
-                            description: info.description,
-                            width: info.width,
-                            height: info.height,
-                            model: info.model
-                        });
+                        if (!info.description || info.description.trim() === '') {
+                            const newDescription = await resourceService.describeResource(request.sessionId, request.currentVersion, filename, request.abortSignal);
+                            await resourceService.updateResourceDescription(request.sessionId, request.currentVersion, filename, newDescription);
+                            info.description = newDescription;
+                        }
+                        return JSON.stringify(info);
                     } catch (error: any) {
-                        return `Failed to get image info: ${error.message}`;
+                        return `Failed to get resource info: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'generate_image',
+                name: 'resource_generate_image',
                 description: 'Generate an image based on a description.',
                 parameters: {
                     type: 'object',
@@ -248,10 +261,10 @@ export function createPageGenTools(
                     },
                     required: ['description', 'summary']
                 },
-                execute: async ({ description }: { description: string; summary: string }) => {
+                execute: async ({ description, aspectRatio, summary: _summary }: { description: string; aspectRatio?: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
-                        const filename = await resourceService.generateAndSaveImage(request.sessionId, description, nextVersion, undefined, request.abortSignal);
+                        const filename = await resourceService.generateAndSaveImage(request.sessionId, description, nextVersion, undefined, request.abortSignal, aspectRatio);
                         return `Image generated successfully: ${filename}`;
                     } catch (error: any) {
                         return `Failed to generate image: ${error.message}`;
@@ -259,7 +272,7 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'edit_image',
+                name: 'resource_edit_image',
                 description: 'Edit an existing image based on a description.',
                 parameters: {
                     type: 'object',
@@ -270,7 +283,7 @@ export function createPageGenTools(
                     },
                     required: ['filename', 'description', 'summary']
                 },
-                execute: async ({ filename, description }: { filename: string; description: string; summary: string }) => {
+                execute: async ({ filename, description, summary: _summary }: { filename: string; description: string; summary: string }) => {
                     try {
                         const nextVersion = await ensureNextVersion(request.sessionId);
                         // Use currentVersion as source, nextVersion as target
