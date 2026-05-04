@@ -729,7 +729,9 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                                                 </span>
                                             )}
                                         </div>
-                                        {img.description}
+                                        <div className={styles.imageDescText}>
+                                            {img.description}
+                                        </div>
                                     </div>
                                 </div>
                             ))}

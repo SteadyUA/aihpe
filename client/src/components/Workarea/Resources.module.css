@@ -75,6 +75,16 @@
     line-height: 1.4;
 }
 
+.imageDescText {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word;
+}
+
 .imageMeta {
     display: flex;
     flex-wrap: wrap;
