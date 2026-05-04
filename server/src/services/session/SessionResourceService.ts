@@ -70,8 +70,8 @@ export class SessionResourceService {
         this.llmImageService = this.llmImageServiceFactory.create();
     }
 
-    async generateAndSaveImage(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined): Promise<string> {
-        const result = await this.llmImageService.generateRaw(description, abortSignal);
+    async generateAndSaveImage(sessionId: string, description: string, version: number, targetFilename: string | undefined, abortSignal: AbortSignal | undefined, aspectRatio?: string): Promise<string> {
+        const result = await this.llmImageService.generateRaw(description, abortSignal, aspectRatio);
         const base64Data = result.base64;
 
         if (result.usage) {

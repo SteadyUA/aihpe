@@ -243,6 +243,7 @@ export function createPageGenTools(
                     type: 'object',
                     properties: {
                         description: { type: 'string', description: 'Detailed description of the image.' },
+                        aspectRatio: { type: 'string', enum: ['1:1', '16:9', '9:16', '4:3', '3:4'], description: 'The aspect ratio of the generated image. Default is 1:1.' },
                         summary: { type: 'string', description: 'Explain why you are generating this image.' }
                     },
                     required: ['description', 'summary']

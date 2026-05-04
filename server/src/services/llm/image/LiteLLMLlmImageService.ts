@@ -11,7 +11,7 @@ export class LiteLLMLlmImageService extends LlmImageService {
         }
     }
 
-    public async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
+    public async generateRaw(prompt: string, abortSignal?: AbortSignal, aspectRatio?: string): Promise<{ base64: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -24,6 +24,13 @@ export class LiteLLMLlmImageService extends LlmImageService {
 
         console.log(`Generating image via LiteLLM for description: ${prompt}`);
 
+        let size = "1024x1024";
+        if (aspectRatio === '16:9' || aspectRatio === '4:3') {
+            size = "1792x1024";
+        } else if (aspectRatio === '9:16' || aspectRatio === '3:4') {
+            size = "1024x1792";
+        }
+
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -35,7 +42,7 @@ export class LiteLLMLlmImageService extends LlmImageService {
                 prompt: prompt,
                 model: this.modelId, // Pass the model ID, proxy should handle mapping if needed
                 n: 1,
-                size: "1024x1024" // specific size might be needed or ignored depending on model
+                size: size // specific size might be needed or ignored depending on model
             })
         });
 

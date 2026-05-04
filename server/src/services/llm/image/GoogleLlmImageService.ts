@@ -3,7 +3,7 @@ import { LlmImageService, TokenUsageData } from './LlmImageService';
 
 @Service()
 export class GoogleLlmImageService extends LlmImageService {
-    public async generateRaw(prompt: string, abortSignal?: AbortSignal): Promise<{ base64: string, usage?: TokenUsageData }> {
+    public async generateRaw(prompt: string, abortSignal?: AbortSignal, aspectRatio?: string): Promise<{ base64: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -12,11 +12,20 @@ export class GoogleLlmImageService extends LlmImageService {
         console.log(`Generating image via Google for description: ${prompt}`);
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelId}:generateContent?key=${apiKey}`;
-        const body = {
+        const body: any = {
             contents: [{
                 parts: [{ text: prompt }]
             }]
         };
+
+        if (aspectRatio) {
+            // For gemini imagen models, it expects aspectRatio in generationConfig
+            // Note: different models might have different config schemas, 
+            // but typical gemini API uses generationConfig
+            body.generationConfig = {
+                aspectRatio: aspectRatio
+            };
+        }
 
         const response = await fetch(url, {
             method: 'POST',
