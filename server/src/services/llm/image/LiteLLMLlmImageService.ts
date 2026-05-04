@@ -185,7 +185,7 @@ The image has been edited according to the instruction. Provide a new, descripti
         return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    public async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
+    public async describeRaw(imageBuffer: Buffer, mimeType: string, prompt: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const litellmUrl = process.env.LITELLM_API_URL;
         const litellmKey = process.env.LITELLM_API_KEY;
 
@@ -203,7 +203,7 @@ The image has been edited according to the instruction. Provide a new, descripti
                 {
                     role: "user",
                     content: [
-                        { type: "text", text: "Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image." },
+                        { type: "text", text: prompt },
                         { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
                     ]
                 }

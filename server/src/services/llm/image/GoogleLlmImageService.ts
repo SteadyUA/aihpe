@@ -138,7 +138,7 @@ export class GoogleLlmImageService extends LlmImageService {
         return { base64: newBase64Data, description: newDescription, usage };
     }
 
-    public async describeRaw(imageBuffer: Buffer, mimeType: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
+    public async describeRaw(imageBuffer: Buffer, mimeType: string, prompt: string, abortSignal?: AbortSignal): Promise<{ description: string, usage?: TokenUsageData }> {
         const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!apiKey) {
             throw new Error('GEMINI_API_KEY not configured');
@@ -150,7 +150,7 @@ export class GoogleLlmImageService extends LlmImageService {
         const body = {
             contents: [{
                 parts: [
-                    { text: 'Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image.' },
+                    { text: prompt },
                     {
                         inlineData: {
                             mimeType: mimeType,

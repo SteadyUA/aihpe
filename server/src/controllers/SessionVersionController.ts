@@ -251,7 +251,7 @@ export class SessionVersionController {
             const generateDescription = body.generateDescription === 'true';
             if (generateDescription) {
                 try {
-                    const description = await this.resourceService.describeImage(sessionId, version, metadata.filename, undefined);
+                    const description = await this.resourceService.describeResource(sessionId, version, metadata.filename, undefined);
                     await this.resourceService.updateResourceDescription(sessionId, version, metadata.filename, description);
                     metadata.description = description;
                 } catch (descError) {
@@ -362,7 +362,7 @@ export class SessionVersionController {
         const { sessionId, version, filename } = params;
 
         try {
-            const description = await this.resourceService.describeImage(sessionId, version, filename, undefined);
+            const description = await this.resourceService.describeResource(sessionId, version, filename, undefined);
             return { description };
         } catch (error: any) {
             console.error('Failed to generate image description', error);

@@ -18,17 +18,41 @@ export const ImageTokenUsedEvent = EventBus.createEvent<{
     total: number;
 }>('IMAGE_TOKEN_USED');
 
+export enum ResourceFontType {
+    ICONS = 'icons',
+    FONT = 'font'
+}
+
+export enum ResourceFontStyle {
+    SERIF = 'serif',
+    SANS_SERIF = 'sans-serif',
+    MONOSPACE = 'monospace',
+    HANDWRITING = 'handwriting',
+    DISPLAY = 'display',
+    UNKNOWN = 'unknown'
+}
+
 export interface ResourceMetadata {
     filename: string;
     description: string;
     createdAt: string;
     model: string;
+    isUsed?: boolean;
+    mimetype?: string;
+
+    // Metadata from screenshot-service /info API
+    format?: string;
     width?: number;
     height?: number;
     duration?: number;
-    fontFamily?: string;
-    isUsed?: boolean;
-    [key: string]: any;
+    videoCodec?: string;
+    audioCodec?: string;
+    container?: string;
+    type?: ResourceFontType; // e.g., 'icons', 'font'
+    fontFamily?: string; // font family string or 'unknown'
+    glyphCount?: number; // null for regular fonts
+    puaRanges?: string[]; // array of unicode ranges and/or codepoints in hex format e.g. ['E000-EFFF', 'F001', 'F400'] or null for regular fonts
+    style?: ResourceFontStyle; // e.g., 'serif', 'sans-serif', 'monospace', 'handwriting', 'display', 'unknown'
 }
 
 @Service()
@@ -131,15 +155,137 @@ export class SessionResourceService {
         return filename;
     }
 
-    async describeImage(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal): Promise<string> {
-        const buffer = this.filesService.readVersionFileBuffer(sessionId, version, filename);
-
-        if (!buffer) {
-            throw new Error(`Image file not found: ${filename}`);
+    private parsePuaRanges(puaRanges: string[] | undefined): string[] {
+        if (!puaRanges || !Array.isArray(puaRanges)) return [];
+        const result: string[] = [];
+        for (const range of puaRanges) {
+            if (range.includes('-')) {
+                const [startHex, endHex] = range.split('-');
+                const start = parseInt(startHex, 16);
+                const end = parseInt(endHex, 16);
+                if (!isNaN(start) && !isNaN(end) && start <= end) {
+                    const maxCount = 5000;
+                    let count = 0;
+                    for (let i = start; i <= end; i++) {
+                        if (count++ > maxCount) break;
+                        result.push(i.toString(16).toUpperCase());
+                    }
+                }
+            } else {
+                result.push(range.toUpperCase());
+            }
         }
-        const mimeType = this.getMimeType(filename);
+        return result;
+    }
 
-        const result = await this.llmImageService.describeRaw(buffer, mimeType, abortSignal);
+    async describeResource(sessionId: string, version: number, filename: string, abortSignal?: AbortSignal): Promise<string> {
+        const metadata = await this.getResourceInfo(sessionId, version, filename);
+        if (!metadata) {
+            throw new Error(`Resource metadata not found: ${filename}`);
+        }
+
+        const mimeType = metadata.mimetype || this.getMimeType(filename);
+        const isIconFont = mimeType.startsWith('font/') && metadata.type === ResourceFontType.ICONS;
+        const isTextFont = mimeType.startsWith('font/') && metadata.type === ResourceFontType.FONT;
+        const isVideo = mimeType.startsWith('video/');
+
+        if (isIconFont && metadata.puaRanges && metadata.puaRanges.length > 0) {
+            const chunkSizeStr = process.env.ICON_FONT_CHUNK_SIZE || '12';
+            let chunkSize = parseInt(chunkSizeStr, 10);
+            if (isNaN(chunkSize) || chunkSize <= 0) chunkSize = 12;
+
+            const hexCodes = this.parsePuaRanges(metadata.puaRanges);
+            if (hexCodes.length > 0) {
+                let accumulatedDescription = '';
+                const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+                const targetUrl = `file://sessions/${sessionId}/versions/${version}/${filename}`;
+
+                for (let i = 0; i < hexCodes.length; i += chunkSize) {
+                    const chunk = hexCodes.slice(i, i + chunkSize);
+                    const rangeParam = chunk.join(',');
+                    const previewUrl = `${screenshotServiceUrl}/preview?url=${encodeURIComponent(targetUrl)}&range=${encodeURIComponent(rangeParam)}`;
+                    
+                    let chunkBuffer: Buffer | null = null;
+                    let chunkMimeType = 'image/png';
+                    try {
+                        const response = await fetch(previewUrl, { signal: abortSignal });
+                        if (response.ok) {
+                            const arrayBuffer = await response.arrayBuffer();
+                            chunkBuffer = Buffer.from(arrayBuffer);
+                            chunkMimeType = response.headers.get('content-type') || 'image/png';
+                        } else {
+                            console.warn(`Failed to fetch icon chunk preview for ${filename}: ${response.status}`);
+                            continue;
+                        }
+                    } catch (e) {
+                        console.warn(`Error fetching icon chunk preview for ${filename}`, e);
+                        continue;
+                    }
+
+                    let prompt = "This image shows a grid of icons from an icon font. The hex code is written directly below each icon. Carefully read the grid row by row, from left to right, and provide a list of the icons and their corresponding hex codes. Make sure to match each icon strictly with the code directly beneath it. Do not guess or hallucinate codes. Describe each icon in detail using a short phrase (more than one word if possible) rather than just a single word. Format the list strictly as '* [HEX]: [Description]' and do NOT output any conversational text, introductory remarks, or concluding sentences.";
+                    
+                    if (i === 0) {
+                        prompt = "This image is a preview of an icon font file. The hex code is written directly below each icon. First, write exactly one sentence starting with 'This font file contains icons in a...' to describe the overall visual style, aesthetic, and characteristics of the icons (e.g., minimalist, line-art, solid, rounded, detailed). Do not mention the image itself. Then, carefully read the grid row by row, from left to right, and provide a list of the icons and their corresponding hex codes. Make sure to match each icon strictly with the code directly beneath it. Do not guess or hallucinate codes. Describe each icon in detail using a short phrase (more than one word if possible) rather than just a single word. Format the list strictly as '* [HEX]: [Description]' and do NOT output any conversational text, introductory remarks, or concluding sentences.";
+                    }
+
+                    const result = await this.llmImageService.describeRaw(chunkBuffer, chunkMimeType, prompt, abortSignal);
+
+                    if (result.usage) {
+                        this.eventBus.publish(ImageTokenUsedEvent({
+                            sessionId,
+                            agent: result.usage.agent,
+                            model: result.usage.model,
+                            prompt: result.usage.prompt,
+                            completion: result.usage.completion,
+                            total: result.usage.total,
+                        }));
+                    }
+
+                    accumulatedDescription += result.description + '\n';
+                }
+                
+                return accumulatedDescription.trim();
+            }
+        }
+
+        let previewBuffer: Buffer | null = null;
+        let previewMimeType = 'image/png';
+
+        try {
+            const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+            const targetUrl = `file://sessions/${sessionId}/versions/${version}/${filename}`;
+            const previewUrl = `${screenshotServiceUrl}/preview?url=${encodeURIComponent(targetUrl)}`;
+            const response = await fetch(previewUrl, { signal: abortSignal });
+            if (!response.ok) {
+                console.warn(`Failed to fetch preview for ${filename}: ${response.status}`);
+            } else {
+                const arrayBuffer = await response.arrayBuffer();
+                previewBuffer = Buffer.from(arrayBuffer);
+                previewMimeType = response.headers.get('content-type') || 'image/png';
+            }
+        } catch (e) {
+            console.warn(`Error fetching preview for ${filename}`, e);
+        }
+
+        if (!previewBuffer) {
+            previewBuffer = this.filesService.readVersionFileBuffer(sessionId, version, filename) || null;
+            if (!previewBuffer) {
+                throw new Error(`Resource file not found: ${filename}`);
+            }
+            previewMimeType = mimeType;
+        }
+
+        let prompt = "Analyze this image. Describe it in a single sentence so that I can use this description for alt-text or generating a similar image.";
+
+        if (isVideo) {
+            prompt = "This is a storyboard of a video. Describe the main events and visual contents of the video based on these extracted frames in a single sentence.";
+        } else if (isIconFont) {
+            prompt = "This image shows a grid of icons from an icon font. The hex code is written directly below each icon. First, write one sentence describing the overall visual style, aesthetic, and characteristics of the icons (e.g., minimalist, line-art, solid, rounded, detailed) without mentioning the image itself. Then, carefully read the grid row by row, from left to right, and provide a list of the icons and their corresponding hex codes. Make sure to match each icon strictly with the code directly beneath it. Do not guess or hallucinate codes. Describe each icon in detail using a short phrase (more than one word if possible) rather than just a single word. Format the list as '* [HEX]: [Description]'.";
+        } else if (isTextFont) {
+            prompt = "This is a text font preview showing sample text. First, determine if the font style is serif, sans-serif, monospace, handwriting, or display, and write '[STYLE: <style>]' (e.g., '[STYLE: monospace]'). Then describe the visual characteristics and style of the font in a single sentence.";
+        }
+
+        const result = await this.llmImageService.describeRaw(previewBuffer, previewMimeType, prompt, abortSignal);
 
         if (result.usage) {
             this.eventBus.publish(ImageTokenUsedEvent({
@@ -152,7 +298,25 @@ export class SessionResourceService {
             }));
         }
 
-        return result.description;
+        let description = result.description;
+
+        if (isTextFont) {
+            const styleMatch = description.match(/\[STYLE:\s*(serif|sans-serif|monospace|handwriting|display)\]/i);
+            if (styleMatch) {
+                const detectedStyle = styleMatch[1].toLowerCase() as ResourceFontStyle;
+                description = description.replace(styleMatch[0], '').trim();
+
+                if (!metadata.style || metadata.style === ResourceFontStyle.UNKNOWN) {
+                    try {
+                        await this.saveMetadata(sessionId, version, filename, mimeType, { style: detectedStyle });
+                    } catch (e) {
+                        console.warn(`Failed to save extracted style for ${filename}`, e);
+                    }
+                }
+            }
+        }
+
+        return description;
     }
 
     async saveUploadedFile(sessionId: string, version: number, file: Express.Multer.File, preserveFilename = false): Promise<ResourceMetadata> {
