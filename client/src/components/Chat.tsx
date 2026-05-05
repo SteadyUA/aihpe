@@ -15,6 +15,7 @@ import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
 import { ContextMenu } from './ContextMenu';
 import { withClipboard, ClipboardContextProps } from '../contexts/ClipboardContext';
+import { ReplyIcon, CopyIcon, ExpandIcon, PaperclipIcon, SquareIcon, SendIcon, BotIcon } from '../icons';
 
 interface MessageProps {
     msg: MessageData;
@@ -354,19 +355,7 @@ class Message extends React.Component<MessageProps> {
                             }}
                             title="Undo this changes"
                         >
-                            <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <path d="M9 14 4 9l5-5" />
-                                <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" />
-                            </svg>
+                            <ReplyIcon size={16} />
                         </button>
                     )}
 
@@ -382,26 +371,7 @@ class Message extends React.Component<MessageProps> {
                                 }}
                                 title={`Clone from turn ${msg.turn}`}
                             >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <rect
-                                        x="9"
-                                        y="9"
-                                        width="13"
-                                        height="13"
-                                        rx="2"
-                                        ry="2"
-                                    ></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                </svg>
+                                <CopyIcon size={14} />
                             </button>
                         )}
                     {/* Timestamp for assistant messages */}
@@ -1526,30 +1496,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         disabled={isFormDisabled}
                                         title={isPicking ? "Cancel selection" : "Select element"}
                                     >
-                                        <svg
-                                            width="18"
-                                            height="18"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <path d="M1 1h4" />
-                                            <path d="M1 1v4" />
-                                            <path d="M1 23v-4" />
-                                            <path d="M1 23h4" />
-                                            <path d="M23 1h-4" />
-                                            <path d="M23 1v4" />
-                                            <path d="M10 1h4" />
-                                            <path d="M1 10v4" />
-                                            <path d="M23 10v4" />
-                                            <path d="M10 23h4" />
-                                            <path d="M21 21l-9-9" />
-                                            <path d="M12 12l8 3" />
-                                            <path d="M12 12l3 8" />
-                                        </svg>
+                                        <ExpandIcon size={18} />
                                     </UiButton>
 
                                     <div>
@@ -1571,18 +1518,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                             {isUploading ? (
                                                 <span className={styles.spinner} style={{ width: 14, height: 14, margin: 0, borderWidth: 2 }}></span>
                                             ) : (
-                                                <svg
-                                                    width="16"
-                                                    height="16"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                >
-                                                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                                </svg>
+                                                <PaperclipIcon size={16} />
                                             )}
                                         </UiButton>
                                     </div>
@@ -1622,18 +1558,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                             title="Stop generation"
                                             className={styles.stopButton}
                                         >
-                                            <svg
-                                                width="16"
-                                                height="16"
-                                                viewBox="0 0 24 24"
-                                                fill="currentColor"
-                                                stroke="currentColor"
-                                                strokeWidth="0"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                            >
-                                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
-                                            </svg>
+                                            <SquareIcon size={16} fill="currentColor" strokeWidth="0" />
                                         </UiButton>
                                     ) : (
                                         <div className={styles.sendButtonGroup}>
@@ -1647,19 +1572,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                                 className={styles.mainSendButton}
                                                 title="Send"
                                             >
-                                                <svg
-                                                    width="16"
-                                                    height="16"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                >
-                                                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                                </svg>
+                                                <SendIcon size={16} />
                                             </UiButton>
                                             <div className={classNames(styles.parallelButtonWrapper, { [styles.disabledWrapper]: isFormDisabled || (!input.trim() && !attachment) })}>
                                                 <select
@@ -1681,19 +1594,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                                     ))}
                                                 </select>
                                                 <div className={styles.parallelIcon}>
-                                                    <svg
-                                                        width="14"
-                                                        height="14"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2"
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                    >
-                                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                                        <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                                    </svg>
+                                                    <CopyIcon size={14} />
                                                 </div>
                                             </div>
                                         </div>
@@ -1738,10 +1639,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         id: 'send',
                                         label: 'Send',
                                         icon: (
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                            </svg>
+                                            <SendIcon size={14} />
                                         ),
                                         onClick: () => {
                                             this.setState({ contextMenu: null }, () => this.submit(text));
@@ -1751,10 +1649,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         id: 'run-parallel',
                                         label: 'Run parallel',
                                         icon: (
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                                <path d="M5 15H4a2 2 0 0 1-2-2V4c0-1.1.9-2 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                            </svg>
+                                            <CopyIcon size={14} />
                                         ),
                                         subItems: [1, 2, 3, 4, 5].map(num => ({
                                             id: `parallel-${num}`,
@@ -1773,11 +1668,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         id: 'quote',
                                         label: 'Quote',
                                         icon: (
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                                                <path d="M8 12a2 2 0 0 0 2-2V8H8"/>
-                                                <path d="M14 12a2 2 0 0 0 2-2V8h-2"/>
-                                            </svg>
+                                            <BotIcon size={14} />
                                         ),
                                         onClick: () => {
                                             if (text) {

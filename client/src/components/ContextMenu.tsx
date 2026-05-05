@@ -1,6 +1,6 @@
 import React from 'react';
 import styles from './ContextMenu.module.css';
-
+import { ChevronRightIcon } from '../icons';
 export interface MenuItem {
     id: string;
     label: string;
@@ -100,9 +100,7 @@ export class ContextMenu extends React.Component<ContextMenuProps, ContextMenuSt
                             {item.icon && <span className={styles.menuIcon}>{item.icon}</span>}
                             <span>{item.label}</span>
                             {item.subItems && (
-                                <svg className={styles.chevron} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <polyline points="9 18 15 12 9 6"></polyline>
-                                </svg>
+                                <ChevronRightIcon className={styles.chevron} size={16} />
                             )}
                         </div>
                         {item.subItems && hoveredItemId === item.id && (

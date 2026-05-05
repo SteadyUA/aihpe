@@ -44,6 +44,7 @@ This repository is a monorepo containing a **React/Vite client** and a **Node.js
   - **New Components:** Use **Class Components** by default. Use functional components only as an exception where class components cannot be used.
 - **State Management:** React local state and Context API (e.g., `ConnectionContext`).
 - **Styling:** Use CSS modules for component-specific styles (e.g., `import styles from './Component.module.css'`). Use the `classnames` library for conditional class application. Global CSS files should only contain CSS variables. Inline styles are allowed only as an exception.
+- **Icons:** SVG icons must be implemented as separate modular React components (e.g., `<SettingsIcon />`) rather than inline `<svg>` elements. They should be placed in the `client/src/icons/` directory.
 - **Naming:** PascalCase for components (`ProjectWorkspace.tsx`), camelCase for utilities/functions.
 
 ### Server (Node.js)

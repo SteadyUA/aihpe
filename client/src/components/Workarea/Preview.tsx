@@ -6,6 +6,7 @@ import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
+import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon } from '../../icons';
 
 interface Device {
     name: string;
@@ -569,20 +570,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 onClick={this.handleReload}
                                 title="Reload Preview"
                             >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <path d="M23 4v6h-6"></path>
-                                    <path d="M1 20v-6h6"></path>
-                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                                </svg>
+                                <RefreshCwIcon size={14} />
                             </UiButton>
                             <UiCheckbox
                                 checked={isMobile}
@@ -609,18 +597,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                         disabled={currentStep === 0}
                                         title="Previous Step"
                                     >
-                                        <svg
-                                            width="14"
-                                            height="14"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <polyline points="15 18 9 12 15 6"></polyline>
-                                        </svg>
+                                        <ChevronLeftIcon size={14} />
                                     </UiButton>
                                     <span className={styles.stepInfo}>
                                         {currentStep + 1} / {maxStep}
@@ -632,18 +609,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                         disabled={currentStep === maxStep - 1}
                                         title="Next Step"
                                     >
-                                        <svg
-                                            width="14"
-                                            height="14"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        >
-                                            <polyline points="9 18 15 12 9 6"></polyline>
-                                        </svg>
+                                        <ChevronRightIcon size={14} />
                                     </UiButton>
                                 </div>
                             )}
@@ -657,20 +623,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 onClick={this.handleNewWindow}
                                 title="Open in new window"
                             >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                    <polyline points="15 3 21 3 21 9"></polyline>
-                                    <line x1="10" y1="14" x2="21" y2="3"></line>
-                                </svg>
+                                <ExternalLinkIcon size={14} />
                             </UiButton>
                             <UiButton
                                 variant={ButtonVariant.SECONDARY}
@@ -678,20 +631,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                                 onClick={this.handleDownload}
                                 title="Download ZIP"
                             >
-                                <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="7 10 12 15 17 10"></polyline>
-                                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                                </svg>
+                                <DownloadIcon size={14} />
                             </UiButton>
                         </>
                     }
