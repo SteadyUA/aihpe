@@ -538,24 +538,16 @@ export class SessionResourceService {
         this.filesService.writeVersionFile(targetSessionId, targetVersion, filename, buffer);
 
         const mimetype = this.getMimeType(filename);
-        let metadataObj: any = {
-            description: '',
-            model: 'clipboard-copy',
-            isUsed: false,
-        };
-
         const targetResource = await this.repository.findOne({ where: { sessionId: targetSessionId, version: targetVersion, filename } });
         const targetIsUsed = targetResource?.metadata?.isUsed ?? false;
 
         const sourceResource = await this.repository.findOne({ where: { sessionId: sourceSessionId, version: sourceVersion, filename } });
-        if (sourceResource && sourceResource.metadata) {
-            metadataObj = { ...sourceResource.metadata };
-            metadataObj.isUsed = targetResource ? targetIsUsed : false;
-        } else {
-            const extraMeta = await this.fetchResourceMetadata(targetSessionId, targetVersion, filename, mimetype);
-            Object.assign(metadataObj, extraMeta);
-            metadataObj.isUsed = targetResource ? targetIsUsed : false;
+        if (!sourceResource || !sourceResource.metadata) {
+            throw new Error(`Source resource metadata not found: ${filename}`);
         }
+
+        const metadataObj: any = { ...sourceResource.metadata };
+        metadataObj.isUsed = targetResource ? targetIsUsed : false;
 
         await this.saveMetadata(targetSessionId, targetVersion, filename, mimetype, metadataObj);
         return await this.getResourceInfo(targetSessionId, targetVersion, filename);
