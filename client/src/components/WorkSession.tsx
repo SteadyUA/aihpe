@@ -306,6 +306,8 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     isBusy={session.status === SessionStatus.BUSY}
                     isLatest={isLatest}
                     displayedTurn={currentTurn}
+                    selectedResource={session.resource}
+                    onSelectResource={(filename) => this.props.onUpdateSession({ resource: filename })}
                 />
             </div>
         );

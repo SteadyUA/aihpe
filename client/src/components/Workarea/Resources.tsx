@@ -9,7 +9,7 @@ import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Resources.module.css';
-import { UploadIcon } from '../../icons';
+import { UploadIcon, ResourceIcon, XIcon } from '../../icons';
 
 const formatDuration = (seconds: number) => {
     if (seconds < 60) return `${Math.round(seconds * 10) / 10}s`;
@@ -68,6 +68,8 @@ interface ResourcesProps {
     sessionId: string | null;
     version: number;
     active: boolean;
+    onSelectResource?: (filename: string | null) => void;
+    selectedResource?: string | null;
 }
 
 interface ResourcesState {
@@ -669,10 +671,28 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                             {visibleImages.map((img) => (
                                 <div
                                     key={img.filename}
-                                    className={styles.imageTile}
+                                    className={classNames(styles.imageTile, {
+                                        [styles.imageTileSelected]: this.props.selectedResource === img.filename
+                                    })}
                                     onClick={() => this.handleImageClick(img)}
                                     style={{ cursor: 'pointer' }}
                                 >
+                                    {this.props.onSelectResource && (
+                                        <button
+                                            className={styles.resourceActionBtn}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (this.props.selectedResource === img.filename) {
+                                                    this.props.onSelectResource!(null);
+                                                } else {
+                                                    this.props.onSelectResource!(img.filename);
+                                                }
+                                            }}
+                                            title={this.props.selectedResource === img.filename ? "Cancel selection" : "Select resource"}
+                                        >
+                                            {this.props.selectedResource === img.filename ? <XIcon size={16} /> : <ResourceIcon size={16} />}
+                                        </button>
+                                    )}
                                     <div className={styles.imageThumbContainer}>
                                         {img.mimetype?.startsWith('image/') || !img.mimetype ? (
                                             <img

@@ -31,11 +31,56 @@
     flex-direction: column;
     cursor: pointer;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+}
+
+.resourceActionBtn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    opacity: 0;
+    transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    z-index: 10;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.imageTile:hover .resourceActionBtn,
+.imageTileSelected .resourceActionBtn {
+    opacity: 1;
+}
+
+.resourceActionBtn:hover {
+    background: #f8fafc;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.imageTileSelected .resourceActionBtn {
+    color: var(--text-secondary); /* neutral color for XIcon when selected */
+}
+.imageTileSelected .resourceActionBtn:hover {
+    background: #f0fdf4;
+    color: #16a34a;
+    border-color: #86efac;
 }
 
 .imageTile:hover {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+
+.imageTileSelected {
+    border-color: #22c55e !important;
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4) !important;
 }
 
 .imageThumbContainer {

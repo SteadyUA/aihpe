@@ -27,6 +27,8 @@ interface WorkareaProps {
     isLatest?: boolean;
     latestVersion?: number;
     displayedTurn: number;
+    onSelectResource?: (filename: string | null) => void;
+    selectedResource?: string | null;
 }
 
 export enum AssetType {
@@ -541,6 +543,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     sessionId={sessionId}
                     version={version}
                     active={activeTab === TabType.RESOURCES}
+                    onSelectResource={this.props.onSelectResource}
+                    selectedResource={this.props.selectedResource}
                 />
 
 
