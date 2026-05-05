@@ -529,6 +529,36 @@ export class SessionResourceService {
         await this.repository.save(resource);
     }
 
+    async copyResource(sourceSessionId: string, sourceVersion: number, targetSessionId: string, targetVersion: number, filename: string): Promise<ResourceMetadata | undefined> {
+        const buffer = this.filesService.readVersionFileBuffer(sourceSessionId, sourceVersion, filename);
+        if (!buffer) {
+            throw new Error(`Source file not found: ${filename}`);
+        }
+
+        this.filesService.writeVersionFile(targetSessionId, targetVersion, filename, buffer);
+
+        const mimetype = this.getMimeType(filename);
+        let metadataObj: any = {
+            description: '',
+            model: 'clipboard-copy',
+            isUsed: false,
+        };
+
+        const existingResource = await this.getResourceInfo(sourceSessionId, sourceVersion, filename);
+        if (existingResource) {
+            metadataObj = { ...existingResource };
+            delete metadataObj.createdAt;
+            delete metadataObj.isUsed;
+            metadataObj.isUsed = false;
+        } else {
+            const extraMeta = await this.fetchResourceMetadata(targetSessionId, targetVersion, filename, mimetype);
+            Object.assign(metadataObj, extraMeta);
+        }
+
+        await this.saveMetadata(targetSessionId, targetVersion, filename, mimetype, metadataObj);
+        return await this.getResourceInfo(targetSessionId, targetVersion, filename);
+    }
+
     async copySessionResources(sourceId: string, targetId: string, maxVersion?: number): Promise<void> {
         const whereClause: any = { sessionId: sourceId };
         if (maxVersion !== undefined) {

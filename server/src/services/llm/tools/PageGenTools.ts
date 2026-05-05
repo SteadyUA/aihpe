@@ -516,7 +516,7 @@ export function createPageGenTools(
             },
             {
                 name: 'read_clipboard_file',
-                description: 'Use this tool to read the contents of a specific file from the active clipboard context.',
+                description: 'Use this tool to read the contents of a specific text file from the active clipboard context. This is ONLY for text files (html, css, js, json, md, etc.). For binary files like images, use the copy_clipboard_file tool instead.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -541,12 +541,69 @@ export function createPageGenTools(
                             return 'Clipboard does not reference any specific files or session.';
                         }
 
+                        const ext = require('path').extname(filename).toLowerCase();
+                        const binaryExts = ['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.mp4', '.webm', '.woff', '.woff2', '.ttf'];
+                        if (binaryExts.includes(ext)) {
+                            return `Error: ${filename} is a binary file and cannot be read as text. Use the copy_clipboard_file tool to copy it into the current session.`;
+                        }
+
                         const content = filesService.readVersionFile(activeRecord.sessionId, activeRecord.version, filename);
                         if (content === undefined) return `File ${filename} not found or is empty in the clipboard context.`;
 
                         return content;
                     } catch (error: any) {
                         return `Failed to read clipboard file: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'copy_clipboard_file',
+                description: 'Use this tool to copy a file (such as an image, video, font, or code file) from the active clipboard context into the current session.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filename: { type: 'string', description: 'The name of the file to copy from the clipboard' },
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Copying [filename] from the clipboard").' }
+                    },
+                    required: ['filename', 'summary']
+                },
+                execute: async ({ filename, summary: _summary }: { filename: string; summary: string }) => {
+                    try {
+                        const metadata = await sessionService.getMetadata(request.sessionId);
+                        if (!metadata) return 'Session not found';
+
+                        const project = await projectService.getProject(metadata.projectId);
+                        if (!project || project.accountId === undefined || project.accountId === null) {
+                            return 'Project or account not found';
+                        }
+
+                        const activeRecord = await clipboardService.getActive(project.accountId);
+                        if (!activeRecord) return 'Clipboard is empty';
+                        if (!activeRecord.sessionId || activeRecord.version === undefined) {
+                            return 'Clipboard does not reference any specific files or session.';
+                        }
+
+                        if (!filesService.versionFileExists(activeRecord.sessionId, activeRecord.version, filename)) {
+                            return `File ${filename} not found in the clipboard context.`;
+                        }
+
+                        const nextVersion = await ensureNextVersion(request.sessionId);
+
+                        const ext = require('path').extname(filename).toLowerCase();
+                        const isResource = ['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.mp4', '.webm', '.woff', '.woff2', '.ttf', '.svg'].includes(ext);
+
+                        if (isResource) {
+                            await resourceService.copyResource(activeRecord.sessionId, activeRecord.version, request.sessionId, nextVersion, filename);
+                        } else {
+                            const content = filesService.readVersionFileBuffer(activeRecord.sessionId, activeRecord.version, filename);
+                            if (content) {
+                                filesService.writeVersionFile(request.sessionId, nextVersion, filename, content);
+                            }
+                        }
+
+                        return `Successfully copied ${filename} to the current session.`;
+                    } catch (error: any) {
+                        return `Failed to copy clipboard file: ${error.message}`;
                     }
                 }
             }
