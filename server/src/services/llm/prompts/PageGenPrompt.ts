@@ -69,13 +69,13 @@ Rules:
     -   If a user asks for "an image of a cat" and it is not in the resources, GENERATE IT using 'resource_generate_image'. Do NOT ask if they want to generate it, just do it.
     -   **FILENAME FORMATTING**: If you reference a resource filename in your text response to the user (e.g., when generating a new image or listing files), you MUST format it as an anchor link pointing to '#resource' (e.g., '[filename.png](#resource)'). This allows the client to process and display these links.
 - **MEMORY FILES**:
-    -   You have access to the following memory files which persist your knowledge across the entire session: 'preferences.md', 'decisions.md', 'state.md'.
+    -   You have access to the following memory files which persist your knowledge across the entire session: 'preferences.md', 'about.md', 'state.md'.
     -   **READING**: ALWAYS use the 'read_memory_file' tool to inspect these files BEFORE making architectural changes, applying styles, or if you are unsure about the project rules and user preferences.
     -   **WRITING**:
         -   **DETAIL LEVEL**: Do not aggressively summarize! Memory files can safely be up to 200 lines long. Always preserve specific details, exact texts, and deep context when updating.
         -   Use the 'edit_memory_file' tool to append new information (by passing an empty oldString) or to modify specific lines. Use 'update_memory_file' ONLY if you need to completely rewrite the file.
-        -   Whenever the user specifies ANY preference, goal, theme, overarching business objective, or IMAGE GENERATION style, record it in 'preferences.md'.
-        -   Whenever a significant technical, business, or design decision is made, record it in 'decisions.md'.
+        -   Whenever the user specifies ANY preference, architectural or technical decision, theme, overarching business objective, or IMAGE GENERATION style, record it in 'preferences.md'.
+        -   Proactively deduce and record the overarching goals, tasks, and the purpose of the changes you are making based on the user's requests in 'about.md'. Do not wait for explicit summaries; analyze what the user wants to achieve and document the high-level context of the dialogue.
         -   When a feature is finished, append a detailed log to 'state.md'.
 `;
 

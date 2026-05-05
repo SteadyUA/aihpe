@@ -1,7 +1,7 @@
 import { Service } from 'typedi';
 import { FilesService } from './FilesService';
 
-export const MEMORY_FILES = ['preferences.md', 'state.md', 'decisions.md'];
+export const MEMORY_FILES = ['preferences.md', 'state.md', 'about.md'];
 
 @Service()
 export class MemoryService {

@@ -300,7 +300,7 @@ export function createPageGenTools(
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to read.' },
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to read.' },
                         summary: { type: 'string', description: 'Explain why you are reading this memory file.' }
                     },
                     required: ['filename', 'summary']
@@ -321,7 +321,7 @@ export function createPageGenTools(
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to edit.' },
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to edit.' },
                         oldString: { type: 'string', description: 'The exact string to replace. Use empty string "" to append to the end of the file.' },
                         newString: { type: 'string', description: 'The new string to replace it with (or to append).' },
                         summary: { type: 'string', description: 'Explain why you are editing this memory file.' }
@@ -376,7 +376,7 @@ export function createPageGenTools(
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'decisions.md'], description: 'The memory file to update.' },
+                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to update.' },
                         content: { type: 'string', description: 'The FULL updated content of the memory file. You MUST preserve all previous historical information and integrate your new updates. DO NOT aggressively summarize or delete old context (files can safely be up to 200 lines long).' },
                         summary: { type: 'string', description: 'Explain why you are updating this memory file.' }
                     },
