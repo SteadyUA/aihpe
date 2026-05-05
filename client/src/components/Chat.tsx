@@ -110,26 +110,8 @@ const DurationTimer: React.FC<{ startTime?: number }> = ({ startTime }) => {
     );
 };
 
-const processContent = (text: string, sessionIds: string[] = []) => {
-    if (!text) return '';
-
-    let processedText = text;
-
-    // Simplified Regex to find partial or full session IDs (start with 8 hex chars)
-    return processedText.replace(/(`)?\b([0-9a-fA-F]{8}[0-9a-fA-F-]*)(?![0-9a-fA-F-])(?:\.{3}|…)?(`)?/g, (match, _bt1, id, _bt2) => {
-        // Case insensitive check
-        const matchLower = id.toLowerCase();
-
-        const foundId = sessionIds.find(existingId => {
-            const idLower = existingId.toLowerCase();
-            return idLower === matchLower || idLower.startsWith(matchLower);
-        });
-
-        if (foundId) {
-            return `[${id.substring(0, 8)}](#session-${foundId})`;
-        }
-        return match;
-    });
+const processContent = (text: string) => {
+    return text || '';
 };
 
 const areArraysEqual = (a?: any[], b?: any[]) => {
@@ -255,7 +237,22 @@ class Message extends React.Component<MessageProps> {
                         // Check if click was on a session link
                         if (target.tagName === 'A') {
                             const href = target.getAttribute('href');
-                            if (href && href.startsWith('#session-')) {
+                            if (href === '#session') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const sessionIdData = target.getAttribute('data-session-id');
+                                const sessionIdText = sessionIdData || target.textContent || '';
+                                
+                                const matchLower = sessionIdText.toLowerCase().trim();
+                                const foundId = this.props.sessionIds?.find(existingId => {
+                                    const idLower = existingId.toLowerCase();
+                                    return idLower === matchLower || idLower.startsWith(matchLower);
+                                });
+
+                                if (foundId && this.props.onSwitchSession) {
+                                    this.props.onSwitchSession(foundId);
+                                }
+                            } else if (href && href.startsWith('#session-')) {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 const sessionId = href.replace('#session-', '');
@@ -329,7 +326,7 @@ class Message extends React.Component<MessageProps> {
                                         styles: styles as any,
                                         sessionId: this.props.sessionId,
                                         version: msg.version
-                                    }).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''), this.props.sessionIds)) as string,
+                                    }).parse(processContent(msg.content || (isAssistant ? '_Changes implemented._' : ''))) as string,
                                 }}
                             />
                         )

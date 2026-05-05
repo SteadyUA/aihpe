@@ -61,6 +61,11 @@ export const createMarkedInstance = (context: ChatMarkedContext) => {
                         </a>
                     `;
                 }
+                if (token.href === '#session') {
+                    const sessionId = token.text;
+                    const displayId = sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId;
+                    return `<a href="#session" data-session-id="${sessionId}" title="Session ${sessionId}">${displayId}</a>`;
+                }
                 return false;
             }
         }

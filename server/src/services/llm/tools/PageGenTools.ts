@@ -555,11 +555,11 @@ export function createPageGenTools(
         if (request.allowVariants) {
             tools.push({
                 name: 'generate_variant',
-                description: 'Generate a variant of the page in a new session. This session inherits all previous conversation context. The instruction must be written as a natural follow-up message in the chat, NOT as a standalone prompt.',
+                description: 'Generate a variant of the page in a new session. Use this tool when the user asks to create or suggest multiple options. NEVER place multiple variants of a component side-by-side in the current code; use this tool to generate separate sessions for each variant instead. This session inherits all previous conversation context. The instruction must be written as a natural follow-up message in the chat, NOT as a standalone prompt.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        instruction: { type: 'string', description: 'The exact text of the simulated user message asking for the variant (e.g., "Now make the background dark", "Try using a sweet candy pastel palette"). Do NOT write a completely new standalone prompt.' },
+                        instruction: { type: 'string', description: 'The exact text of the simulated user message asking for the variant (e.g., "Now make the background dark", "Try using a sweet candy pastel palette"). DO NOT mention that it is the "first", "second", or any variant number. Do NOT write a completely new standalone prompt.' },
                         summary: { type: 'string', description: 'Explain why you are generating this variant.' }
                     },
                     required: ['instruction', 'summary']
