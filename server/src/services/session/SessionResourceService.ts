@@ -544,15 +544,17 @@ export class SessionResourceService {
             isUsed: false,
         };
 
-        const existingResource = await this.getResourceInfo(sourceSessionId, sourceVersion, filename);
-        if (existingResource) {
-            metadataObj = { ...existingResource };
-            delete metadataObj.createdAt;
-            delete metadataObj.isUsed;
-            metadataObj.isUsed = false;
+        const targetResource = await this.repository.findOne({ where: { sessionId: targetSessionId, version: targetVersion, filename } });
+        const targetIsUsed = targetResource?.metadata?.isUsed ?? false;
+
+        const sourceResource = await this.repository.findOne({ where: { sessionId: sourceSessionId, version: sourceVersion, filename } });
+        if (sourceResource && sourceResource.metadata) {
+            metadataObj = { ...sourceResource.metadata };
+            metadataObj.isUsed = targetResource ? targetIsUsed : false;
         } else {
             const extraMeta = await this.fetchResourceMetadata(targetSessionId, targetVersion, filename, mimetype);
             Object.assign(metadataObj, extraMeta);
+            metadataObj.isUsed = targetResource ? targetIsUsed : false;
         }
 
         await this.saveMetadata(targetSessionId, targetVersion, filename, mimetype, metadataObj);
