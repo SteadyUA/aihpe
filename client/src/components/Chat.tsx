@@ -485,6 +485,10 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         window.addEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
         document.addEventListener('mouseup', this.handleMouseUp);
         document.addEventListener('mousedown', this.handleMouseDown);
+
+        if (this.messagesRef.current) {
+            this.messagesRef.current.addEventListener('load', this.handleImageLoad, true);
+        }
     }
 
     handleTurnCompleted = (event: CustomEvent) => {
@@ -600,7 +604,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
             this.scrollToActiveTurn('smooth', 'nearest');
             this.syncVersion(this.props.activeTurn);
         } else if (historyJustLoaded) {
-            this.scrollToActiveTurn('auto', 'nearest');
+            this.scrollToActiveTurn('auto', this.isLastTurn() ? 'end' : 'start');
             this.syncVersion(this.props.activeTurn);
         }
     }
@@ -647,6 +651,10 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         window.removeEventListener('app:turn-completed', this.handleTurnCompleted as EventListener);
         document.removeEventListener('mouseup', this.handleMouseUp);
         document.removeEventListener('mousedown', this.handleMouseDown);
+
+        if (this.messagesRef.current) {
+            this.messagesRef.current.removeEventListener('load', this.handleImageLoad, true);
+        }
     }
 
     handleMouseDown = (e: MouseEvent) => {
@@ -1240,7 +1248,8 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
     };
 
     private imageLoadTimeout: ReturnType<typeof setTimeout> | null = null;
-    handleImageLoad = () => {
+    handleImageLoad = (e?: Event) => {
+        if (e && (e.target as HTMLElement).tagName !== 'IMG') return;
         if (this.imageLoadTimeout) {
             clearTimeout(this.imageLoadTimeout);
         }
