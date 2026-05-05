@@ -156,28 +156,51 @@
 .contextChip {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    background: rgba(255, 255, 255, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
-    padding: 0.2rem 0.5rem;
+    gap: 4px;
     font-family: var(--font-mono);
     font-size: 0.8em;
     color: white;
     cursor: pointer;
-    transition:
-        background 0.2s,
-        border-color 0.2s;
+    transition: opacity 0.2s;
 }
 
 .contextChip:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
+    opacity: 0.8;
 }
 
-.contextChipWithImage {
+.chipContent {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    display: flex;
+    align-items: center;
+    transition: background 0.2s;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.contextChip:hover .chipContent {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.contextChipWithImage .chipContent {
     padding: 0.2rem;
-    background: rgba(255, 255, 255, 0.1);
+}
+
+.chipIconWrapper {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.chipIconWrapper svg {
+    width: 1.1em;
+    height: 1.1em;
 }
 
 .contextChipImage {

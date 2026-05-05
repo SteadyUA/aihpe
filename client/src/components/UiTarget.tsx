@@ -7,13 +7,19 @@ export interface UiTargetProps {
     removeTitle?: string;
     className?: string;
     disabled?: boolean;
+    icon?: React.ReactNode;
 }
 
 export class UiTarget extends React.Component<UiTargetProps> {
     render() {
-        const { children, onRemove, removeTitle, className, disabled } = this.props;
+        const { children, onRemove, removeTitle, className, disabled, icon } = this.props;
         return (
             <div className={`${styles.container} ${className || ''}`.trim()}>
+                {icon && (
+                    <div className={styles.iconWrapper}>
+                        {icon}
+                    </div>
+                )}
                 <div className={styles.content}>
                     {children}
                 </div>

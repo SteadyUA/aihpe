@@ -15,7 +15,7 @@ import { apiAuth } from '../utils/api';
 import { UiModal } from './UiModal';
 import { ContextMenu } from './ContextMenu';
 import { withClipboard, ClipboardContextProps } from '../contexts/ClipboardContext';
-import { ReplyIcon, CopyIcon, ExpandIcon, PaperclipIcon, SquareIcon, SendIcon, BotIcon } from '../icons';
+import { ReplyIcon, CopyIcon, ExpandIcon, PaperclipIcon, SquareIcon, SendIcon, BotIcon, ClipboardIcon, ResourceIcon } from '../icons';
 
 interface MessageProps {
     msg: MessageData;
@@ -60,14 +60,18 @@ const ContextChip: React.FC<ContextChipProps> = ({ icon, label, imageUrl, onClic
         onClick={onClick}
         title={title}
     >
-        {imageUrl ? (
-            <img src={imageUrl} alt={title || label} className={styles.contextChipImage} />
-        ) : (
-            <>
-                {icon && <span style={{ display: 'inline-flex', alignItems: 'center' }}>{icon}</span>}
-                {label && <span>{label}</span>}
-            </>
+        {icon && (
+            <div className={styles.chipIconWrapper}>
+                {icon}
+            </div>
         )}
+        <div className={styles.chipContent}>
+            {imageUrl ? (
+                <img src={imageUrl} alt={title || label} className={styles.contextChipImage} />
+            ) : (
+                label && <span>{label}</span>
+            )}
+        </div>
     </div>
 );
 
@@ -219,7 +223,7 @@ class Message extends React.Component<MessageProps> {
                     className={styles.messageContent}
                     onClick={(e) => {
                         const target = e.target as HTMLElement;
-                        
+
                         // Check if click was on an actionable quote
                         const quoteAnchor = target.closest('a[href="#send"]') as HTMLAnchorElement;
                         if (quoteAnchor && this.props.onQuoteActionClick) {
@@ -266,6 +270,7 @@ class Message extends React.Component<MessageProps> {
                         <div className={styles.contextChipsContainer}>
                             {msg.selection && (
                                 <ContextChip
+                                    icon={<ExpandIcon />}
                                     label={msg.selection.selector}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -276,6 +281,7 @@ class Message extends React.Component<MessageProps> {
                             )}
                             {msg.resource && (
                                 <ContextChip
+                                    icon={<ResourceIcon />}
                                     imageUrl={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${msg.version || 0}/resources/${msg.resource}/thumbnail`}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -286,6 +292,7 @@ class Message extends React.Component<MessageProps> {
                             )}
                             {msg.attachment && (
                                 <ContextChip
+                                    icon={<PaperclipIcon />}
                                     imageUrl={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${msg.attachment!.filename}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -414,7 +421,7 @@ interface ChatProps {
     isVisible?: boolean;
 }
 
-export interface ChatPropsWithContext extends ChatProps, ClipboardContextProps {}
+export interface ChatPropsWithContext extends ChatProps, ClipboardContextProps { }
 
 interface ChatState {
     isLoading: boolean;
@@ -669,7 +676,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
             if (selection && selection.toString().trim() !== '' && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
                 const node = selection.anchorNode;
-                
+
                 if (this.messagesRef.current && node && this.messagesRef.current.contains(node)) {
                     const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
                     if (element && element.closest('[id$="-assistant"]')) {
@@ -1422,8 +1429,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                             <div className={styles.selections}>
                                 {this.props.clipboardRecord && (
                                     <div className={styles.pickerContainer}>
-                                        <UiTarget onRemove={this.props.clearClipboard} removeTitle="Clear clipboard" disabled={isFormDisabled}>
-                                            <span style={{ fontSize: '0.9rem', marginRight: '6px' }}>📋</span>
+                                        <UiTarget icon={<ClipboardIcon />} onRemove={this.props.clearClipboard} removeTitle="Clear clipboard" disabled={isFormDisabled}>
                                             <code className={styles.selectionValue} title={this.props.clipboardRecord.description} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, display: 'inline-block', verticalAlign: 'bottom', minWidth: 0 }}>
                                                 {this.props.clipboardRecord.description}
                                             </code>
@@ -1432,7 +1438,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                 )}
                                 {selection && (
                                     <div className={styles.pickerContainer}>
-                                        <UiTarget onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
+                                        <UiTarget icon={<ExpandIcon />} onRemove={onClearSelection} removeTitle="Clear selection" disabled={isFormDisabled}>
                                             <code className={styles.selectionValue}>{selection}</code>
                                         </UiTarget>
                                     </div>
@@ -1440,7 +1446,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
 
                                 {attachment && (
                                     <div className={styles.attachmentList}>
-                                        <UiTarget onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
+                                        <UiTarget icon={<PaperclipIcon />} onRemove={this.removeAttachment} removeTitle="Remove attachment" disabled={isFormDisabled}>
                                             <img
                                                 src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/uploads/${attachment.filename}`}
                                                 alt={attachment.originalName || attachment.filename}
@@ -1452,7 +1458,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                 )}
                                 {resource && (
                                     <div className={styles.attachmentList}>
-                                        <UiTarget onRemove={() => this.props.onUpdateSession({ resource: null })} removeTitle="Remove selected resource" disabled={isFormDisabled}>
+                                        <UiTarget icon={<ResourceIcon />} onRemove={() => this.props.onUpdateSession({ resource: null })} removeTitle="Remove selected resource" disabled={isFormDisabled}>
                                             <img
                                                 src={`${import.meta.env.BASE_URL}api/sessions/${this.props.sessionId}/${this.props.version}/resources/${resource}/thumbnail`}
                                                 alt={resource}
@@ -1676,7 +1682,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                                 const quoteMd = `${quoteLines}\n\n`;
                                                 const currentInput = this.state.input.trim();
                                                 const newInput = currentInput ? `${currentInput}\n\n${quoteMd}` : quoteMd;
-                                                
+
                                                 this.setState({ input: newInput, contextMenu: null }, () => {
                                                     this.handleSaveUnsent({ input: newInput });
                                                     this.richInputRef.current?.focus(true);

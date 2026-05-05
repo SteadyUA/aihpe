@@ -21,3 +21,5 @@ export { ExternalLinkIcon } from './ExternalLinkIcon';
 export { DownloadIcon } from './DownloadIcon';
 export { UploadIcon } from './UploadIcon';
 export { XIcon } from './XIcon';
+export { ClipboardIcon } from './ClipboardIcon';
+export { ResourceIcon } from './ResourceIcon';
