@@ -541,10 +541,9 @@ export function createPageGenTools(
                             return 'Clipboard does not reference any specific files or session.';
                         }
 
-                        const ext = require('path').extname(filename).toLowerCase();
-                        const binaryExts = ['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.mp4', '.webm', '.woff', '.woff2', '.ttf'];
-                        if (binaryExts.includes(ext)) {
-                            return `Error: ${filename} is a binary file and cannot be read as text. Use the copy_clipboard_file tool to copy it into the current session.`;
+                        const resourceInfo = await resourceService.getResourceInfo(activeRecord.sessionId, activeRecord.version, filename);
+                        if (resourceInfo) {
+                            return `Error: ${filename} is a binary resource file and cannot be read as text. Use the copy_clipboard_files tool to copy it into the current session.`;
                         }
 
                         const content = filesService.readVersionFile(activeRecord.sessionId, activeRecord.version, filename);
@@ -557,17 +556,17 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'copy_clipboard_file',
-                description: 'Use this tool to copy a file (such as an image, video, font, or code file) from the active clipboard context into the current session.',
+                name: 'copy_clipboard_files',
+                description: 'Use this tool to copy one or more files (such as images, videos, fonts, or code files) from the active clipboard context into the current session.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', description: 'The name of the file to copy from the clipboard' },
-                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Copying [filename] from the clipboard").' }
+                        filenames: { type: 'array', items: { type: 'string' }, description: 'The names of the files to copy from the clipboard' },
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action.' }
                     },
-                    required: ['filename', 'summary']
+                    required: ['filenames', 'summary']
                 },
-                execute: async ({ filename, summary: _summary }: { filename: string; summary: string }) => {
+                execute: async ({ filenames, summary: _summary }: { filenames: string[]; summary: string }) => {
                     try {
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
@@ -583,27 +582,41 @@ export function createPageGenTools(
                             return 'Clipboard does not reference any specific files or session.';
                         }
 
-                        if (!filesService.versionFileExists(activeRecord.sessionId, activeRecord.version, filename)) {
-                            return `File ${filename} not found in the clipboard context.`;
-                        }
-
                         const nextVersion = await ensureNextVersion(request.sessionId);
+                        const copied: string[] = [];
+                        const errors: string[] = [];
 
-                        const ext = require('path').extname(filename).toLowerCase();
-                        const isResource = ['.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif', '.mp4', '.webm', '.woff', '.woff2', '.ttf', '.svg'].includes(ext);
+                        for (const filename of filenames) {
+                            if (!filesService.versionFileExists(activeRecord.sessionId, activeRecord.version, filename)) {
+                                errors.push(`File ${filename} not found`);
+                                continue;
+                            }
 
-                        if (isResource) {
-                            await resourceService.copyResource(activeRecord.sessionId, activeRecord.version, request.sessionId, nextVersion, filename);
-                        } else {
-                            const content = filesService.readVersionFileBuffer(activeRecord.sessionId, activeRecord.version, filename);
-                            if (content) {
-                                filesService.writeVersionFile(request.sessionId, nextVersion, filename, content);
+                            const resourceInfo = await resourceService.getResourceInfo(activeRecord.sessionId, activeRecord.version, filename);
+                            const isResource = !!resourceInfo;
+
+                            try {
+                                if (isResource) {
+                                    await resourceService.copyResource(activeRecord.sessionId, activeRecord.version, request.sessionId, nextVersion, filename);
+                                } else {
+                                    const content = filesService.readVersionFileBuffer(activeRecord.sessionId, activeRecord.version, filename);
+                                    if (content) {
+                                        filesService.writeVersionFile(request.sessionId, nextVersion, filename, content);
+                                    }
+                                }
+                                copied.push(filename);
+                            } catch (err: any) {
+                                errors.push(`Failed to copy ${filename}: ${err.message}`);
                             }
                         }
 
-                        return `Successfully copied ${filename} to the current session.`;
+                        let resultMessage = `Successfully copied ${copied.length} files.`;
+                        if (errors.length > 0) {
+                            resultMessage += ` Errors: ${errors.join('; ')}`;
+                        }
+                        return resultMessage;
                     } catch (error: any) {
-                        return `Failed to copy clipboard file: ${error.message}`;
+                        return `Failed to copy clipboard files: ${error.message}`;
                     }
                 }
             }
