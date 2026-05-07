@@ -11,6 +11,85 @@ export interface PageGenContext {
     ensureNextVersion: (sessionId: string) => Promise<number>;
 }
 
+export function readTextRange(
+    content: string,
+    startLine?: number,
+    endLine?: number
+): string {
+    if (!content) return '';
+
+    const lines = content.split(/\r?\n/);
+    const start = startLine ? Math.max(1, startLine) : 1;
+    const end = endLine ? Math.min(lines.length, endLine) : lines.length;
+
+    if (start > end) {
+        throw new Error(`startLine (${start}) cannot be greater than endLine (${end})`);
+    }
+
+    const slicedLines = lines.slice(start - 1, end);
+    return slicedLines.map((line, index) => `${start + index}: ${line}`).join('\n');
+}
+
+export interface TextEditParams {
+    content: string;
+    startLine: number;
+    endLine: number;
+    expectedContent: string;
+    newContent: string;
+}
+
+export function editTextRange(params: TextEditParams): string {
+    const { content, startLine, endLine, expectedContent, newContent } = params;
+
+    const sanitizeContent = (text: string) => text.replace(/^\s*\d+[:|]\s?/gm, '');
+    let targetString = sanitizeContent(expectedContent);
+    const replacementString = sanitizeContent(newContent);
+
+    const lines = content.split(/\r?\n/);
+
+    if (startLine > lines.length && targetString !== '') {
+        throw new Error(`Cannot edit starting at line ${startLine}. The file currently has only ${lines.length} lines.`);
+    }
+
+    const start = Math.max(1, startLine);
+    const end = Math.min(lines.length, Math.max(start, endLine));
+
+    let slice = lines.slice(start - 1, end).join('\n');
+
+    if (targetString === '') {
+        slice = replacementString;
+    } else {
+        if (!slice.includes(targetString)) {
+            if (slice.includes(targetString.trim())) {
+                targetString = targetString.trim();
+            } else {
+                const normalizedSlice = slice.replace(/\r\n/g, '\n');
+                const normalizedTarget = targetString.replace(/\r\n/g, '\n');
+                if (normalizedSlice.includes(normalizedTarget)) {
+                    targetString = normalizedTarget;
+                    slice = normalizedSlice;
+                } else if (normalizedSlice.includes(normalizedTarget.trim())) {
+                    targetString = normalizedTarget.trim();
+                    slice = normalizedSlice;
+                } else {
+                    throw new Error(`expectedContent not found between lines ${start} and ${end}. The file may have been modified or you provided incorrect content. Please use the appropriate read tool to check the current lines.`);
+                }
+            }
+        }
+
+        if (slice.split(targetString).length > 2) {
+            throw new Error(`expectedContent found multiple times between lines ${start} and ${end}. Provide a narrower range or more unique expectedContent.`);
+        }
+
+        slice = slice.replace(targetString, replacementString);
+    }
+
+    const replacedSliceLines = slice.split('\n');
+    lines.splice(start - 1, end - start + 1, ...replacedSliceLines);
+
+    return lines.join('\n');
+}
+
 export function createPageGenTools(
     resourceService: SessionResourceService,
     filesService: FilesService,
@@ -30,116 +109,129 @@ export function createPageGenTools(
 
         const tools: any[] = [
             {
-                name: 'read_file',
-                description: 'Read the content of a file. Use this to understand current code before editing.',
+                name: 'list_text_files',
+                description: 'Get a summary of all project text files and memory files, including their line counts and byte sizes. Use this to orient yourself and plan chunked reads for large files.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        summary: { type: 'string', description: 'Explain why you are listing text files.' }
+                    },
+                    required: ['summary']
+                },
+                execute: async ({ summary: _summary }: { summary: string }) => {
+                    try {
+                        const version = getTargetVersion() ?? request.currentVersion;
+                        const stats: any = { project_files: {}, memory_files: {} };
+
+                        const projectFiles = ['index.html', 'styles.css', 'script.js'];
+                        for (const file of projectFiles) {
+                            const content = filesService.readVersionFile(request.sessionId, version, file) || '';
+                            stats.project_files[file] = { 
+                                lines: content ? (content.match(/\n/g) || []).length + 1 : 0, 
+                                bytes: Buffer.byteLength(content, 'utf8') 
+                            };
+                        }
+
+                        const memoryFiles = ['preferences.md', 'state.md', 'about.md'];
+                        for (const file of memoryFiles) {
+                            const content = memoryService.readMemoryFile(request.sessionId, version, file) || '';
+                            stats.memory_files[file] = { 
+                                lines: content ? (content.match(/\n/g) || []).length + 1 : 0, 
+                                bytes: Buffer.byteLength(content, 'utf8') 
+                            };
+                        }
+
+                        return JSON.stringify(stats, null, 2);
+                    } catch (error: any) {
+                        return `Failed to list text files: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'read_text_file',
+                description: 'Read the content of a text file. If the file is large, you can specify startLine and endLine to read a specific section. Returns the content with line numbers prepended.',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: { type: 'string', enum: ['index.html', 'styles.css', 'script.js'], description: 'The file to read' },
+                        startLine: { type: 'number', description: 'The starting line number to read (1-indexed). Optional.' },
+                        endLine: { type: 'number', description: 'The ending line number to read (1-indexed). Optional.' },
                         summary: { type: 'string', description: 'Explain why you need to read this file.' }
                     },
                     required: ['file', 'summary']
                 },
                 execute: async ({
                     file,
+                    startLine,
+                    endLine,
                 }: {
                     file: 'index.html' | 'styles.css' | 'script.js';
+                    startLine?: number;
+                    endLine?: number;
                     summary: string;
                 }) => {
                     const version = getTargetVersion() ?? request.currentVersion;
-                    const content = filesService.readVersionFile(request.sessionId, version, file);
-                    if (content !== undefined) return content;
+                    let content = filesService.readVersionFile(request.sessionId, version, file);
+                    
+                    if (content === undefined) {
+                        return 'File not found';
+                    }
 
-                    // Fallback to initial files if not found
-                    const { EMPTY_FILES } = await import('../../ChatService');
-                    const emptyContent = EMPTY_FILES[file];
-                    if (emptyContent !== undefined) return emptyContent;
-
-                    return 'File not found';
+                    try {
+                        return readTextRange(content, startLine, endLine);
+                    } catch (e: any) {
+                        return `Error: ${e.message}`;
+                    }
                 }
             },
             {
-                name: 'edit_file',
-                description: 'Edit a file by replacing exact string match.',
+                name: 'edit_text_file',
+                description: 'Edit a text file by replacing a specific block of code within a specified line range. Always use read_text_file first to check line numbers. expectedContent should not include the line numbers prepended by read_text_file.',
                 parameters: {
                     type: 'object',
                     properties: {
                         file: { type: 'string', enum: ['index.html', 'styles.css', 'script.js'], description: 'The file to edit' },
-                        oldString: { type: 'string', description: 'The exact string to replace.' },
-                        newString: { type: 'string', description: 'The new string to replace it with.' },
+                        startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
+                        endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
+                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range.' },
+                        newContent: { type: 'string', description: 'The new string to replace it with.' },
                         summary: { type: 'string', description: 'Explain why you are making this edit.' }
                     },
-                    required: ['file', 'oldString', 'newString', 'summary']
+                    required: ['file', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
                 },
                 execute: async ({
                     file,
-                    oldString,
-                    newString,
+                    startLine,
+                    endLine,
+                    expectedContent,
+                    newContent,
                 }: {
                     file: 'index.html' | 'styles.css' | 'script.js';
-                    oldString: string;
-                    newString: string;
+                    startLine: number;
+                    endLine: number;
+                    expectedContent: string;
+                    newContent: string;
                     summary: string;
                 }) => {
-                    // Logic for Workflow:
-                    // 1. If editing code files, we MUST ensure a new version exists.
-                    //    This matches the FIRST code edit in this turn.
-
                     let nextVersion = await ensureNextVersion(request.sessionId);
 
                     let content = filesService.readVersionFile(request.sessionId, nextVersion, file);
 
                     if (content === undefined) {
-                        const { EMPTY_FILES } = await import('../../ChatService');
-                        content = EMPTY_FILES[file];
-                    }
-
-                    if (!content && (file === 'styles.css' || file === 'script.js')) {
-                        // Allow empty css/js if undefined
                         content = '';
-                    } else if (content === undefined) {
-                        return `Error: File ${file} not found.`;
                     }
 
-                    let targetString = oldString;
-                    if (!content.includes(targetString)) {
-                        // Try flexible matching for trailing/leading whitespace
-                        if (content.includes(targetString.trim())) {
-                            targetString = targetString.trim();
-                        } else {
-                            // Try normalizing newlines (CRLF vs LF)
-                            const normalizedContent = content.replace(
-                                /\r\n/g,
-                                '\n',
-                            );
-                            const normalizedTarget = targetString.replace(
-                                /\r\n/g,
-                                '\n',
-                            );
-                            if (normalizedContent.includes(normalizedTarget)) {
-                                content = normalizedContent;
-                                targetString = normalizedTarget;
-                            } else if (
-                                normalizedContent.includes(
-                                    normalizedTarget.trim(),
-                                )
-                            ) {
-                                content = normalizedContent;
-                                targetString = normalizedTarget.trim();
-                            } else {
-                                return `Error: oldString not found in ${file}`;
-                            }
-                        }
+                    try {
+                        const updatedContent = editTextRange({
+                            content, startLine, endLine, expectedContent, newContent
+                        });
+                        
+                        filesService.writeVersionFile(request.sessionId, nextVersion, file, updatedContent);
+
+                        return `Successfully updated ${file} between lines ${Math.max(1, startLine)} and ${Math.min(updatedContent.split(/\r?\n/).length, Math.max(1, endLine))}`;
+                    } catch (e: any) {
+                        return `Error: ${e.message}`;
                     }
-
-                    if (content.split(targetString).length > 2)
-                        return `Error: oldString found multiple times in ${file}. Provide more unique context.`;
-
-                    const newContent = content.replace(targetString, newString);
-                    filesService.writeVersionFile(request.sessionId, nextVersion, file, newContent);
-
-
-                    return `Successfully updated ${file}`;
                 }
             },
             {
@@ -178,7 +270,7 @@ export function createPageGenTools(
                 },
             },
             {
-                name: 'resource_list',
+                name: 'list_resource_files',
                 description: 'List available resources in the current session. You can filter by resource type. Note: this tool does NOT return the description/contents of the resources. Use resource_info to get the description.',
                 parameters: {
                     type: 'object',
@@ -222,7 +314,7 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'resource_info',
+                name: 'read_resource_info',
                 description: 'Get details about a specific resource file (image, video, font). If the description is missing, this tool will automatically generate and save one before returning it.',
                 parameters: {
                     type: 'object',
@@ -250,7 +342,7 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'resource_generate_image',
+                name: 'generate_resource_image',
                 description: 'Generate an image based on a description.',
                 parameters: {
                     type: 'object',
@@ -272,7 +364,7 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'resource_edit_image',
+                name: 'edit_resource_image',
                 description: 'Edit an existing image based on a description.',
                 parameters: {
                     type: 'object',
@@ -296,20 +388,22 @@ export function createPageGenTools(
             },
             {
                 name: 'read_memory_file',
-                description: 'Read a memory file to recall technical decisions, state, or user preferences.',
+                description: 'Read a memory file to recall technical decisions, state, or user preferences. If the file is large, you can specify startLine and endLine to read a specific section. Returns the content with line numbers prepended.',
                 parameters: {
                     type: 'object',
                     properties: {
                         filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to read.' },
+                        startLine: { type: 'number', description: 'The starting line number to read (1-indexed). Optional.' },
+                        endLine: { type: 'number', description: 'The ending line number to read (1-indexed). Optional.' },
                         summary: { type: 'string', description: 'Explain why you are reading this memory file.' }
                     },
                     required: ['filename', 'summary']
                 },
-                execute: async ({ filename }: { filename: string; summary: string }) => {
+                execute: async ({ filename, startLine, endLine }: { filename: string; startLine?: number; endLine?: number; summary: string }) => {
                     try {
                         const version = getTargetVersion() ?? request.currentVersion;
-                        const content = memoryService.readMemoryFile(request.sessionId, version, filename);
-                        return content || '(File is empty)';
+                        const content = memoryService.readMemoryFile(request.sessionId, version, filename) || '';
+                        return readTextRange(content, startLine, endLine) || '(File is empty)';
                     } catch (error: any) {
                         return `Failed to read memory file: ${error.message}`;
                     }
@@ -317,84 +411,40 @@ export function createPageGenTools(
             },
             {
                 name: 'edit_memory_file',
-                description: 'Edit a memory file by replacing an exact string match. Use this instead of update_memory_file to add new lines or modify existing lines without rewriting the whole file.',
+                description: 'Edit a memory file by replacing a specific block of text within a specified line range. Always use read_memory_file first to check line numbers. expectedContent should not include the line numbers prepended by read_memory_file. Use this instead of update_memory_file to add new lines or modify existing lines without rewriting the whole file.',
                 parameters: {
                     type: 'object',
                     properties: {
                         filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to edit.' },
-                        oldString: { type: 'string', description: 'The exact string to replace. Use empty string "" to append to the end of the file.' },
-                        newString: { type: 'string', description: 'The new string to replace it with (or to append).' },
+                        startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
+                        endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
+                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Use empty string "" to append/replace the whole slice.' },
+                        newContent: { type: 'string', description: 'The new string to replace it with.' },
                         summary: { type: 'string', description: 'Explain why you are editing this memory file.' }
                     },
-                    required: ['filename', 'oldString', 'newString', 'summary']
+                    required: ['filename', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
                 },
-                execute: async ({ filename, oldString, newString }: { filename: string; oldString: string; newString: string; summary: string }) => {
+                execute: async ({ filename, startLine, endLine, expectedContent, newContent }: { filename: string; startLine: number; endLine: number; expectedContent: string; newContent: string; summary: string }) => {
                     try {
                         const version = getTargetVersion() ?? request.currentVersion;
-                        let content = memoryService.readMemoryFile(request.sessionId, version, filename) || '';
+                        const content = memoryService.readMemoryFile(request.sessionId, version, filename) || '';
 
-                        if (oldString === '') {
-                            content = content.trim() + (content ? '\n\n' : '') + newString;
-                        } else {
-                            let targetString = oldString;
-                            if (!content.includes(targetString)) {
-                                if (content.includes(targetString.trim())) {
-                                    targetString = targetString.trim();
-                                } else {
-                                    const normalizedContent = content.replace(/\r\n/g, '\n');
-                                    const normalizedTarget = targetString.replace(/\r\n/g, '\n');
-                                    if (normalizedContent.includes(normalizedTarget)) {
-                                        content = normalizedContent;
-                                        targetString = normalizedTarget;
-                                    } else if (normalizedContent.includes(normalizedTarget.trim())) {
-                                        content = normalizedContent;
-                                        targetString = normalizedTarget.trim();
-                                    } else {
-                                        return `Error: oldString not found in ${filename}`;
-                                    }
-                                }
-                            }
-
-                            if (content.split(targetString).length > 2) {
-                                return `Error: oldString found multiple times in ${filename}. Provide more unique context.`;
-                            }
-
-                            content = content.replace(targetString, newString);
-                        }
+                        const updatedContent = editTextRange({
+                            content, startLine, endLine, expectedContent, newContent
+                        });
 
                         const nextVersion = await ensureNextVersion(request.sessionId);
-                        memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, content);
-                        return `Successfully edited memory file: ${filename}`;
+                        memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, updatedContent);
+                        return `Successfully updated ${filename} between lines ${Math.max(1, startLine)} and ${Math.min(updatedContent.split(/\r?\n/).length, Math.max(1, endLine))}`;
                     } catch (error: any) {
                         return `Failed to edit memory file: ${error.message}`;
                     }
                 }
             },
+
             {
-                name: 'update_memory_file',
-                description: 'Update a memory file to persist new technical decisions, state changes, or user preferences for future turns.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to update.' },
-                        content: { type: 'string', description: 'The FULL updated content of the memory file. You MUST preserve all previous historical information and integrate your new updates. DO NOT aggressively summarize or delete old context (files can safely be up to 200 lines long).' },
-                        summary: { type: 'string', description: 'Explain why you are updating this memory file.' }
-                    },
-                    required: ['filename', 'content', 'summary']
-                },
-                execute: async ({ filename, content }: { filename: string; content: string; summary: string }) => {
-                    try {
-                        const nextVersion = await ensureNextVersion(request.sessionId);
-                        memoryService.updateMemoryFile(request.sessionId, nextVersion, filename, content);
-                        return `Successfully updated memory file: ${filename}`;
-                    } catch (error: any) {
-                        return `Failed to update memory file: ${error.message}`;
-                    }
-                }
-            },
-            {
-                name: 'save_to_clipboard',
-                description: 'Use this tool to save formatting, color schemes, or specific state nuances the user asks you to remember or copy. This information will be saved to the clipboard and can be used in other sessions.',
+                name: 'save_clipboard_text',
+                description: 'Use this tool to save formatting, color schemes, or specific state nuances the user asks you to remember or copy. TIP: Instead of saving raw code, just save the file names and line numbers (e.g., "header layout is in index.html lines 15-40"). This allows you to easily pull the exact code later using read_clipboard_file. This information will be saved to the clipboard and can be used in other sessions.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -429,8 +479,8 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'read_clipboard',
-                description: 'Use this tool to read the text from clipboard.',
+                name: 'read_clipboard_text',
+                description: 'Use this tool to read the text description from the clipboard.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -451,15 +501,31 @@ export function createPageGenTools(
                         const activeRecord = await clipboardService.getActive(project.accountId);
                         if (!activeRecord) return 'Clipboard is empty';
 
-                        return activeRecord.description;
+                        let responseText = `--- CLIPBOARD DESCRIPTION ---\n${activeRecord.description}\n`;
+
+                        if (activeRecord.sessionId && activeRecord.version !== undefined) {
+                            responseText += `\n--- ORIGIN PROJECT FILES SCALE ---\n`;
+                            const projectFiles = ['index.html', 'styles.css', 'script.js'];
+                            const stats: any = {};
+                            for (const file of projectFiles) {
+                                const content = filesService.readVersionFile(activeRecord.sessionId, activeRecord.version, file) || '';
+                                stats[file] = {
+                                    lines: content ? (content.match(/\n/g) || []).length + 1 : 0,
+                                    bytes: Buffer.byteLength(content, 'utf8')
+                                };
+                            }
+                            responseText += JSON.stringify(stats, null, 2);
+                        }
+
+                        return responseText;
                     } catch (error: any) {
                         return `Failed to read clipboard: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'list_clipboard_files',
-                description: 'Use this tool to get a list of files associated with the active clipboard record. Returns filename, size, and mime-type.',
+                name: 'list_clipboard_resource_files',
+                description: 'Use this tool to get a list of resource files (images, videos, fonts) associated with the active clipboard record. Returns filename, size, and mime-type.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -483,29 +549,22 @@ export function createPageGenTools(
                             return 'Clipboard does not reference any specific files or session.';
                         }
 
-                        const filenames = filesService.listVersionFiles(activeRecord.sessionId, activeRecord.version);
-                        if (filenames.length === 0) return 'No files found for the clipboard session context.';
+                        const resources = await resourceService.listResources(activeRecord.sessionId, activeRecord.version);
+                        if (resources.length === 0) return 'No resource files found for the clipboard session context.';
 
-                        const fileInfos = filenames.map(filename => {
-                            const filePath = filesService.resolveVersionFilePath(activeRecord.sessionId!, activeRecord.version!, filename);
+                        const fileInfos = resources.map(res => {
+                            const filePath = filesService.resolveVersionFilePath(activeRecord.sessionId!, activeRecord.version!, res.filename);
                             const fs = require('fs');
-                            const path = require('path');
                             let size = 0;
                             try {
                                 size = fs.statSync(filePath).size;
                             } catch (e) { }
 
-                            const ext = path.extname(filename).toLowerCase();
-                            let mimeType = 'application/octet-stream';
-                            if (ext === '.html') mimeType = 'text/html';
-                            else if (ext === '.css') mimeType = 'text/css';
-                            else if (ext === '.js') mimeType = 'application/javascript';
-                            else if (ext === '.json') mimeType = 'application/json';
-                            else if (ext === '.png') mimeType = 'image/png';
-                            else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-                            else if (ext === '.svg') mimeType = 'image/svg+xml';
-
-                            return { filename, size, mimeType };
+                            return { 
+                                filename: res.filename, 
+                                size, 
+                                mimeType: res.mimetype 
+                            };
                         });
 
                         return JSON.stringify(fileInfos, null, 2);
@@ -515,18 +574,21 @@ export function createPageGenTools(
                 }
             },
             {
-                name: 'read_clipboard_file',
-                description: 'Use this tool to read the contents of a specific text file from the active clipboard context. This is ONLY for text files (html, css, js, json, md, etc.). For binary files like images, use the copy_clipboard_file tool instead.',
+                name: 'read_clipboard_text_file',
+                description: 'Use this tool to read the contents of a specific project text file from the active clipboard context. If the file is large, you can specify startLine and endLine to read a specific section. Returns the content with line numbers prepended.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        filename: { type: 'string', description: 'The name of the file to read' },
-                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Reading [filename] from the clipboard").' }
+                        file: { type: 'string', enum: ['index.html', 'styles.css', 'script.js'], description: 'The file to read' },
+                        startLine: { type: 'number', description: 'The starting line number to read (1-indexed). Optional.' },
+                        endLine: { type: 'number', description: 'The ending line number to read (1-indexed). Optional.' },
+                        summary: { type: 'string', description: 'A short, user-facing summary of this action (e.g. "Reading [file] from the clipboard").' }
                     },
-                    required: ['filename', 'summary']
+                    required: ['file', 'summary']
                 },
-                execute: async ({ filename, summary: _summary }: { filename: string; summary: string }) => {
+                execute: async ({ file, startLine, endLine, summary: _summary }: { file: 'index.html' | 'styles.css' | 'script.js'; startLine?: number; endLine?: number; summary: string }) => {
                     try {
+                        const filename = file;
                         const metadata = await sessionService.getMetadata(request.sessionId);
                         if (!metadata) return 'Session not found';
 
@@ -543,21 +605,21 @@ export function createPageGenTools(
 
                         const resourceInfo = await resourceService.getResourceInfo(activeRecord.sessionId, activeRecord.version, filename);
                         if (resourceInfo) {
-                            return `Error: ${filename} is a binary resource file and cannot be read as text. Use the copy_clipboard_files tool to copy it into the current session.`;
+                            return `Error: ${filename} is a binary resource file and cannot be read as text. Use the copy_clipboard_resource_files tool to copy it into the current session.`;
                         }
 
                         const content = filesService.readVersionFile(activeRecord.sessionId, activeRecord.version, filename);
                         if (content === undefined) return `File ${filename} not found or is empty in the clipboard context.`;
 
-                        return content;
+                        return readTextRange(content, startLine, endLine);
                     } catch (error: any) {
                         return `Failed to read clipboard file: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'copy_clipboard_files',
-                description: 'Use this tool to copy one or more files (such as images, videos, fonts, or code files) from the active clipboard context into the current session.',
+                name: 'copy_clipboard_resource_files',
+                description: 'Use this tool to copy one or more resource files (images, videos, fonts) from the active clipboard context into the current session. Do NOT use this for code files (index.html, styles.css, script.js).',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -587,6 +649,11 @@ export function createPageGenTools(
                         const errors: string[] = [];
 
                         for (const filename of filenames) {
+                            if (['index.html', 'styles.css', 'script.js'].includes(filename)) {
+                                errors.push(`File ${filename} is a project text file. Copying it directly is dangerous. Use read_clipboard_text_file and edit_text_file to precisely port code instead.`);
+                                continue;
+                            }
+
                             if (!filesService.versionFileExists(activeRecord.sessionId, activeRecord.version, filename)) {
                                 errors.push(`File ${filename} not found`);
                                 continue;
