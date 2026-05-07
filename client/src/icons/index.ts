@@ -23,3 +23,4 @@ export { UploadIcon } from './UploadIcon';
 export { XIcon } from './XIcon';
 export { ClipboardIcon } from './ClipboardIcon';
 export { ResourceIcon } from './ResourceIcon';
+export { CameraIcon } from './CameraIcon';

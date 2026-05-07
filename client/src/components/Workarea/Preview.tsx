@@ -6,7 +6,7 @@ import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
-import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon } from '../../icons';
+import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon, CameraIcon } from '../../icons';
 
 interface Device {
     name: string;
@@ -492,6 +492,217 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         window.open(url, '_blank');
     };
 
+    handleScreenshot = () => {
+        const { sessionId, version } = this.props;
+        if (!sessionId) return;
+
+        const iframe = this.iframeRef.current;
+        if (!iframe || !iframe.contentDocument) return;
+
+        const doc = iframe.contentDocument;
+        const htmlNode = doc.documentElement.cloneNode(true) as HTMLElement;
+
+        // Sync inputs/textareas to attributes so they persist in outerHTML
+        const originalInputs = doc.querySelectorAll('input, textarea, select');
+        const clonedInputs = htmlNode.querySelectorAll('input, textarea, select');
+        
+        originalInputs.forEach((el, index) => {
+            const cloneEl = clonedInputs[index];
+            if (!cloneEl) return;
+            
+            if (el.tagName === 'INPUT') {
+                const type = el.getAttribute('type');
+                if (type === 'checkbox' || type === 'radio') {
+                    if ((el as HTMLInputElement).checked) cloneEl.setAttribute('checked', 'checked');
+                    else cloneEl.removeAttribute('checked');
+                } else {
+                    cloneEl.setAttribute('value', (el as HTMLInputElement).value);
+                }
+            } else if (el.tagName === 'TEXTAREA') {
+                cloneEl.textContent = (el as HTMLTextAreaElement).value;
+            } else if (el.tagName === 'SELECT') {
+                const select = el as HTMLSelectElement;
+                const cloneSelect = cloneEl as HTMLSelectElement;
+                const options = select.options;
+                const cloneOptions = cloneSelect.options;
+                for (let i = 0; i < options.length; i++) {
+                    if (options[i].selected) cloneOptions[i].setAttribute('selected', 'selected');
+                    else cloneOptions[i].removeAttribute('selected');
+                }
+            }
+        });
+
+        // Serialize canvases
+        const originalCanvases = doc.querySelectorAll('canvas');
+        const clonedCanvases = htmlNode.querySelectorAll('canvas');
+        originalCanvases.forEach((canvas, i) => {
+            const cloneCanvas = clonedCanvases[i];
+            if (!cloneCanvas) return;
+            try {
+                const dataUrl = canvas.toDataURL('image/png');
+                const img = doc.createElement('img');
+                img.src = dataUrl;
+                img.style.cssText = cloneCanvas.style.cssText;
+                img.className = cloneCanvas.className;
+                img.width = canvas.width;
+                img.height = canvas.height;
+                cloneCanvas.parentNode?.replaceChild(img, cloneCanvas);
+            } catch (e) {
+                // Ignore tainted canvases
+            }
+        });
+
+        // Serialize videos to capture the current playing frame
+        const originalVideos = doc.querySelectorAll('video');
+        const clonedVideos = htmlNode.querySelectorAll('video');
+        originalVideos.forEach((video, i) => {
+            const cloneVideo = clonedVideos[i];
+            if (!cloneVideo) return;
+            try {
+                if (video.readyState >= 2) { // HAVE_CURRENT_DATA
+                    const canvas = doc.createElement('canvas');
+                    canvas.width = video.videoWidth || video.clientWidth || 800;
+                    canvas.height = video.videoHeight || video.clientHeight || 600;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        // Use PNG to preserve transparency if the video has alpha channel
+                        const dataUrl = canvas.toDataURL('image/png'); 
+                        const img = doc.createElement('img');
+                        img.src = dataUrl;
+                        img.style.cssText = cloneVideo.style.cssText;
+                        img.className = cloneVideo.className;
+                        img.id = cloneVideo.id;
+                        
+                        const widthAttr = cloneVideo.getAttribute('width');
+                        const heightAttr = cloneVideo.getAttribute('height');
+                        if (widthAttr) img.setAttribute('width', widthAttr);
+                        if (heightAttr) img.setAttribute('height', heightAttr);
+                        
+                        cloneVideo.parentNode?.replaceChild(img, cloneVideo);
+                    }
+                } else {
+                    // Video has no data (e.g. broken link). Fallback to poster image if available.
+                    const poster = video.getAttribute('poster');
+                    if (poster) {
+                        const img = doc.createElement('img');
+                        img.setAttribute('src', poster);
+                        img.style.cssText = cloneVideo.style.cssText;
+                        img.className = cloneVideo.className;
+                        img.id = cloneVideo.id;
+                        
+                        const widthAttr = cloneVideo.getAttribute('width');
+                        const heightAttr = cloneVideo.getAttribute('height');
+                        if (widthAttr) img.setAttribute('width', widthAttr);
+                        if (heightAttr) img.setAttribute('height', heightAttr);
+                        
+                        cloneVideo.parentNode?.replaceChild(img, cloneVideo);
+                    } else {
+                        cloneVideo.remove();
+                    }
+                }
+            } catch (e) {
+                // Ignore CORS errors
+            }
+        });
+
+        // Serialize CSSOM (dynamically inserted rules via CSSStyleSheet.insertRule)
+        for (let i = 0; i < doc.styleSheets.length; i++) {
+            const sheet = doc.styleSheets[i] as CSSStyleSheet;
+            // Only process inline <style> tags to avoid duplicating or breaking external <link> URLs
+            if (sheet.ownerNode && sheet.ownerNode.nodeName === 'STYLE') {
+                try {
+                    const rules = sheet.cssRules || sheet.rules;
+                    let cssText = '';
+                    if (rules) {
+                        for (let j = 0; j < rules.length; j++) {
+                            cssText += rules[j].cssText + '\n';
+                        }
+                    }
+                    const ownerNode = sheet.ownerNode as HTMLElement;
+                    // Tag the owner node to find its clone
+                    const styleId = ownerNode.id || `snapshot-style-${i}`;
+                    ownerNode.dataset.snapshotId = styleId;
+                    
+                    const clonedStyle = htmlNode.querySelector(`style[data-snapshot-id="${styleId}"]`);
+                    if (clonedStyle) {
+                        clonedStyle.textContent = cssText;
+                        delete (clonedStyle as HTMLElement).dataset.snapshotId;
+                    }
+                    delete ownerNode.dataset.snapshotId;
+                } catch (e) {
+                    // Ignore cross-origin stylesheet errors
+                }
+            }
+        }
+
+        // Remove scripts to prevent double-execution in Puppeteer
+        const scripts = htmlNode.querySelectorAll('script');
+        scripts.forEach(s => s.remove());
+
+        let htmlContent = htmlNode.outerHTML;
+        
+        // Convert any absolute URLs pointing to localhost back into relative paths
+        // so that the screenshot microservice (running in Docker) can resolve them via base href
+        const currentOrigin = window.location.origin;
+        const originRegex = new RegExp(currentOrigin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        htmlContent = htmlContent.replace(originRegex, '');
+
+        let url = `${import.meta.env.BASE_URL}api/sessions/${sessionId}/${version}/screenshot`;
+
+        const { isMobile, deviceIndex } = this.state;
+        let width = '';
+        let height = '';
+        if (isMobile) {
+            const device = DEVICES[deviceIndex];
+            width = device.width.toString();
+            height = device.height.toString();
+        }
+
+        const scrollY = isMobile && iframe.contentWindow ? iframe.contentWindow.scrollY : 0;
+
+        // Create a hidden form to submit a POST request to open in a new tab
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        form.target = '_blank';
+        form.style.display = 'none';
+
+        const htmlInput = document.createElement('input');
+        htmlInput.type = 'hidden';
+        htmlInput.name = 'html';
+        htmlInput.value = htmlContent;
+        form.appendChild(htmlInput);
+
+        if (width) {
+            const widthInput = document.createElement('input');
+            widthInput.type = 'hidden';
+            widthInput.name = 'width';
+            widthInput.value = width;
+            form.appendChild(widthInput);
+        }
+
+        if (height) {
+            const heightInput = document.createElement('input');
+            heightInput.type = 'hidden';
+            heightInput.name = 'height';
+            heightInput.value = height;
+            form.appendChild(heightInput);
+        }
+
+        if (isMobile && scrollY > 0) {
+            const scrollYInput = document.createElement('input');
+            scrollYInput.type = 'hidden';
+            scrollYInput.name = 'scrollY';
+            scrollYInput.value = scrollY.toString();
+            form.appendChild(scrollYInput);
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+    };
+
     handleDownload = async () => {
         const { sessionId, version } = this.props;
         if (!sessionId) return;
@@ -617,6 +828,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     }
                     right={
                         <>
+                            <UiButton
+                                variant={ButtonVariant.SECONDARY}
+                                size={ButtonSize.ICON}
+                                onClick={this.handleScreenshot}
+                                title="Screenshot"
+                            >
+                                <CameraIcon size={14} />
+                            </UiButton>
                             <UiButton
                                 variant={ButtonVariant.SECONDARY}
                                 size={ButtonSize.ICON}
