@@ -120,6 +120,36 @@ export class TaskManagerService {
         return false;
     }
 
+    async failJob(taskId: string, description: string, reason: string): Promise<boolean> {
+        const task = await this.getTask(taskId);
+        if (!task) return false;
+
+        const steps = task.steps || [];
+
+        for (const step of steps) {
+            const job = step.concurrentJobs.find((t: Job) => t.description === description.trim());
+            if (job) {
+                job.failed = true;
+                job.errorContext = reason;
+                task.steps = steps;
+                await this.saveTask(task);
+                return true;
+            }
+            const looseJob = step.concurrentJobs.find((t: Job) =>
+                t.description.includes(description.trim()) ||
+                description.trim().includes(t.description)
+            );
+            if (looseJob) {
+                looseJob.failed = true;
+                looseJob.errorContext = reason;
+                task.steps = steps;
+                await this.saveTask(task);
+                return true;
+            }
+        }
+        return false;
+    }
+
     async getNextStep(taskId: string): Promise<Step | undefined> {
         const task = await this.getTask(taskId);
         if (!task) return undefined;
@@ -158,6 +188,24 @@ export class TaskManagerService {
         const task = await this.getTask(taskId);
         if (!task) return false;
         return (task.steps || []).length > 0;
+    }
+
+    async getFailedJobs(taskId: string): Promise<Job[]> {
+        const task = await this.getTask(taskId);
+        if (!task) return [];
+        const failed: Job[] = [];
+        for (const step of task.steps || []) {
+            failed.push(...step.concurrentJobs.filter(t => t.failed));
+        }
+        return failed;
+    }
+
+    async clearAllJobs(taskId: string): Promise<void> {
+        const task = await this.getTask(taskId);
+        if (task) {
+            task.steps = [];
+            await this.saveTask(task);
+        }
     }
 }
 

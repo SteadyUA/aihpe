@@ -6,7 +6,7 @@ import { FilesService } from './session/FilesService';
 import { ChatService } from './ChatService';
 import { HtmlConversionAgent } from './llm/agents/HtmlConversionAgent';
 import { TaskManagerService } from './TaskManagerService';
-import { Turn , TaskStatus , ProjectStatus } from '../types/chat';
+import { Turn, TaskStatus, ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import extract from 'extract-zip';
@@ -30,6 +30,7 @@ export class HtmlImportService {
     ) { }
 
     async importArchive(projectId: string, zipPath: string, providedTaskId: string): Promise<void> {
+        const beginTime = new Date();
         const taskId = providedTaskId;
         console.log(`Starting HTML import for project ${projectId}, task ${taskId}`);
         const sessionId = crypto.randomUUID();
@@ -59,7 +60,7 @@ export class HtmlImportService {
             await this.formatExtractedFiles(tempDir);
 
             // Execute the import process
-            await this.executeImportLoop(projectId, sessionId, taskId, tempDir);
+            await this.executeImportLoop(projectId, sessionId, taskId, tempDir, beginTime);
 
         } catch (error: any) {
             console.error('HTML Import failed:', error);
@@ -75,6 +76,7 @@ export class HtmlImportService {
     }
 
     async resumeArchiveImport(taskId: string): Promise<void> {
+        const beginTime = new Date();
         console.log(`Resuming HTML import for task ${taskId}`);
         try {
             const project = await this.projectService.getProjectByTaskId(taskId);
@@ -92,7 +94,7 @@ export class HtmlImportService {
                 throw new Error('Temporary import directory not found. Cannot resume.');
             }
 
-            await this.executeImportLoop(project.id, sessionId, taskId, tempDir);
+            await this.executeImportLoop(project.id, sessionId, taskId, tempDir, beginTime);
 
         } catch (error: any) {
             console.error('HTML Import Resume failed:', error);
@@ -100,7 +102,7 @@ export class HtmlImportService {
         }
     }
 
-    private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string): Promise<void> {
+    private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string, beginTime: Date): Promise<void> {
         // 3. Run Optimization Loop
         let allDone = false;
         let iterations = 0;
@@ -142,6 +144,21 @@ export class HtmlImportService {
                         abortSignal: abortController.signal
                     });
                 }));
+
+                const failedJobs = await this.taskManagerService.getFailedJobs(taskId);
+                if (failedJobs.length > 0) {
+                    console.log(`[Task ${taskId}] Step failed. Re-summoning Planner...`);
+                    const errorContexts = failedJobs.map(j => `Failed Job: ${j.description}\\nReason: ${j.errorContext}`).join('\\n\\n');
+                    await this.taskManagerService.clearAllJobs(taskId);
+
+                    const abortController = new AbortController();
+                    await this.htmlConversionAgent.plan(this.provider as any, {
+                        workingDirectory: tempDir,
+                        taskId: taskId,
+                        instruction: `Analyze the working directory and create a granular optimization plan using add_jobs.\\n\\nCRITICAL: The previous execution failed! You MUST adjust your plan to fix these issues:\\n${errorContexts}`,
+                        abortSignal: abortController.signal
+                    });
+                }
             }
         }
 
@@ -150,7 +167,14 @@ export class HtmlImportService {
 
             // 5. Move files to Session Version 0
             const files: Record<string, string> = {};
-            const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.heic']);
+            const resourceExtensions = new Set([
+                // Images
+                '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.heic',
+                // Fonts
+                '.woff', '.woff2', '.ttf', '.otf', '.eot',
+                // Videos
+                '.mp4', '.webm', '.ogg', '.mov'
+            ]);
 
             // Needs to capture 'this' for resourceService
             const self = this;
@@ -165,8 +189,8 @@ export class HtmlImportService {
                         const relPath = path.relative(baseDir, res);
                         const ext = path.extname(res).toLowerCase();
 
-                        if (imageExtensions.has(ext)) {
-                            // It's an image, save it using ResourceService
+                        if (resourceExtensions.has(ext)) {
+                            // It's a binary resource, save it using ResourceService
                             try {
                                 const buffer = await fs.readFile(res);
                                 // Construct a fake Multer.File object for the service
@@ -175,9 +199,9 @@ export class HtmlImportService {
                                     buffer: buffer,
                                 };
                                 await self.resourceService.saveUploadedFile(sessionId, 0, fileObj, true);
-                                console.log(`Saved image ${relPath} to session ${sessionId}`);
+                                console.log(`Saved resource ${relPath} to session ${sessionId}`);
                             } catch (err) {
-                                console.error(`Failed to save image ${relPath}:`, err);
+                                console.error(`Failed to save resource ${relPath}:`, err);
                             }
                         } else {
                             // It's a text file
@@ -200,10 +224,10 @@ export class HtmlImportService {
             const now = new Date();
             const welcomeTurn: Turn = {
                 turn: 1,
-                beginTime: now,
+                beginTime: beginTime,
                 endTime: now,
-                request: '',
-                response: 'files imported',
+                request: 'Uploaded archived files',
+                response: 'Files imported',
                 provider: this.provider as any, // Cast to avoid LlmProvider type issues if any
                 fastMode: false,
                 version: 0,

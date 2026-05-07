@@ -2,6 +2,7 @@ import { TaskManagerService } from '../../TaskManagerService';
 import { Container } from 'typedi';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { readTextRange, editTextRange } from './PageGenTools';
 
 export interface HtmlConversionContext {
     workingDirectory: string;
@@ -142,9 +143,23 @@ export function createHtmlConversionTools(): (
                         const files = await getFiles(workingDirectory);
                         const fileList = await Promise.all(files.map(async f => {
                             const relPath = path.relative(workingDirectory, f);
+                            const mimeType = await getMimeType(f);
+                            const stats = await fs.stat(f);
+                            
+                            const isText = mimeType.startsWith('text/') || ['application/json', 'application/javascript', 'image/svg+xml'].includes(mimeType);
+                            let lines = undefined;
+                            if (isText) {
+                                try {
+                                    const content = await fs.readFile(f, 'utf-8');
+                                    lines = (content.match(/\n/g) || []).length + 1;
+                                } catch (e) {}
+                            }
+                            
                             return {
                                 path: relPath,
-                                mimeType: await getMimeType(f)
+                                size: stats.size,
+                                mimeType,
+                                ...(lines !== undefined ? { lines } : {})
                             };
                         }));
                         return JSON.stringify(fileList);
@@ -155,96 +170,189 @@ export function createHtmlConversionTools(): (
             },
             {
                 name: 'read_file',
-                description: 'Read the content of a file.',
+                description: 'Read the content of a text file. If the file is large, you can specify startLine and endLine to read a specific section. Returns the content with line numbers prepended.',
                 parameters: {
                     type: 'object',
                     properties: {
                         filePath: { type: 'string', description: 'Relative path to the file.' },
+                        startLine: { type: 'number', description: 'The starting line number to read (1-indexed). Optional.' },
+                        endLine: { type: 'number', description: 'The ending line number to read (1-indexed). Optional.' },
                         summary: { type: 'string', description: 'Reason for reading the file.' }
                     },
                     required: ['filePath', 'summary']
                 },
-                execute: async ({ filePath }: { filePath: string; summary: string }) => {
+                execute: async ({ filePath, startLine, endLine }: { filePath: string; startLine?: number; endLine?: number; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         const content = await fs.readFile(fullPath, 'utf-8');
-                        return content;
+                        return readTextRange(content, startLine, endLine);
                     } catch (error: any) {
                         return `Error reading file ${filePath}: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'write_file',
-                description: 'Write content to a file. Overwrites if exists. Creates directories if needed.',
+                name: 'multi_edit_file',
+                description: 'Edit a text file by replacing multiple non-contiguous blocks of text. The tool will automatically sort the replacements from bottom to top (descending line numbers) to prevent line number drift. Always use read_file first to check line numbers. expectedContent should not include the line numbers prepended by read_file.',
                 parameters: {
                     type: 'object',
                     properties: {
                         filePath: { type: 'string', description: 'Relative path to the file.' },
-                        content: { type: 'string', description: 'Content to write.' },
-                        summary: { type: 'string', description: 'Reason for writing the file.' }
-                    },
-                    required: ['filePath', 'content', 'summary']
-                },
-                execute: async ({ filePath, content }: { filePath: string; content: string; summary: string }) => {
-                    try {
-                        const fullPath = resolvePath(filePath);
-                        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-                        await fs.writeFile(fullPath, content, 'utf-8');
-                        return `Successfully wrote to ${filePath}`;
-                    } catch (error: any) {
-                        return `Error writing file ${filePath}: ${error.message}`;
-                    }
-                }
-            },
-            {
-                name: 'edit_file',
-                description: 'Edit a file by replacing all occurrences of a specific string with a new string. Use this to quickly remove or change lines of code.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        filePath: { type: 'string', description: 'Relative path to the file.' },
-                        oldString: { type: 'string', description: 'The exact string to be replaced.' },
-                        newString: { type: 'string', description: 'The string to replace it with. Pass an empty string to delete oldString.' },
+                        edits: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
+                                    endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
+                                    expectedContent: { type: 'string', description: 'The exact string to replace. Use empty string "" to append/replace the whole slice.' },
+                                    newContent: { type: 'string', description: 'The new string to replace it with.' }
+                                },
+                                required: ['startLine', 'endLine', 'expectedContent', 'newContent']
+                            },
+                            description: 'List of edits to apply to the file.'
+                        },
                         summary: { type: 'string', description: 'Reason for editing the file.' }
                     },
-                    required: ['filePath', 'oldString', 'newString', 'summary']
+                    required: ['filePath', 'edits', 'summary']
                 },
-                execute: async ({ filePath, oldString, newString }: { filePath: string; oldString: string; newString: string; summary: string }) => {
+                execute: async ({ filePath, edits, summary: _summary }: { filePath: string; edits: any[]; summary: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
                         let content = await fs.readFile(fullPath, 'utf-8');
-                        if (!content.includes(oldString)) {
-                            return `Error: oldString was not found in ${filePath}`;
+                        
+                        // Sort descending by startLine to prevent drift
+                        const sortedEdits = [...edits].sort((a, b) => b.startLine - a.startLine);
+                        
+                        for (const edit of sortedEdits) {
+                            content = editTextRange({
+                                content, 
+                                startLine: edit.startLine, 
+                                endLine: edit.endLine, 
+                                expectedContent: edit.expectedContent, 
+                                newContent: edit.newContent
+                            });
                         }
-                        content = content.split(oldString).join(newString);
+                        
                         await fs.writeFile(fullPath, content, 'utf-8');
-                        return `Successfully edited ${filePath}, replacing occurrences of the string.`;
+                        return `Successfully applied ${edits.length} edits to ${filePath}`;
                     } catch (error: any) {
                         return `Error editing file ${filePath}: ${error.message}`;
                     }
                 }
             },
             {
-                name: 'append_file',
-                description: 'Append content to a file. Creates the file and directories if they do not exist.',
+                name: 'fail_job',
+                description: 'Mark a job as failed if it cannot be completed (e.g. invalid file format, unexpected errors). This will summon the Planner to adjust the plan.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        filePath: { type: 'string', description: 'Relative path to the file.' },
-                        content: { type: 'string', description: 'Content to append.' },
-                        summary: { type: 'string', description: 'Reason for appending to the file.' }
+                        job: { type: 'string', description: 'The job description to mark as failed.' },
+                        reason: { type: 'string', description: 'Detailed reason for the failure.' }
                     },
-                    required: ['filePath', 'content', 'summary']
+                    required: ['job', 'reason']
                 },
-                execute: async ({ filePath, content }: { filePath: string; content: string; summary: string }) => {
+                execute: async ({ job, reason }: { job: string; reason: string }) => {
+                    const success = await taskManagerService.failJob(taskId, job, reason);
+                    if (abortController) {
+                        abortController.abort();
+                    }
+                    if (success) {
+                        return `Marked job as failed: ${job}\\n\\nSYSTEM INSTRUCTION: JOB HAS FAILED. YOU MUST NOW RETURN AN EMPTY RESPONSE (NO TOOLS, NO TEXT) TO YIELD CONTROL TO THE SYSTEM.`;
+                    } else {
+                        return `Job not found: ${job}\\n\\nSYSTEM INSTRUCTION: YIELD CONTROL.`;
+                    }
+                }
+            },
+            {
+                name: 'set_state',
+                description: 'Save a key-value pair to the structured memory store for sharing data between jobs and steps.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        key: { type: 'string', description: 'The key to store the data under.' },
+                        value: { type: 'string', description: 'A JSON-stringified representation of the value to store.' },
+                        summary: { type: 'string', description: 'Reason for saving the state.' }
+                    },
+                    required: ['key', 'value', 'summary']
+                },
+                execute: async ({ key, value }: { key: string; value: string }) => {
+                    try {
+                        const statePath = resolvePath('_state.json');
+                        let state: any = {};
+                        try {
+                            const content = await fs.readFile(statePath, 'utf-8');
+                            state = JSON.parse(content);
+                        } catch (e) {
+                            // File doesn't exist or is invalid JSON, ignore
+                        }
+                        state[key] = JSON.parse(value);
+                        await fs.writeFile(statePath, JSON.stringify(state, null, 2), 'utf-8');
+                        return `Successfully saved state for key '${key}'`;
+                    } catch (error: any) {
+                        return `Error saving state: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'get_state',
+                description: 'Retrieve a value from the structured memory store by key.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        key: { type: 'string', description: 'The key to retrieve.' },
+                        summary: { type: 'string', description: 'Reason for retrieving the state.' }
+                    },
+                    required: ['key', 'summary']
+                },
+                execute: async ({ key }: { key: string }) => {
+                    try {
+                        const statePath = resolvePath('_state.json');
+                        const content = await fs.readFile(statePath, 'utf-8');
+                        const state = JSON.parse(content);
+                        if (key in state) {
+                            return JSON.stringify(state[key], null, 2);
+                        } else {
+                            return `Key '${key}' not found in state store.`;
+                        }
+                    } catch (error: any) {
+                        return `Error retrieving state: ${error.message}`;
+                    }
+                }
+            },
+            {
+                name: 'validate_syntax',
+                description: 'Validate the syntax of a JavaScript file.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        filePath: { type: 'string', description: 'Relative path to the JS file to validate.' },
+                        summary: { type: 'string', description: 'Reason for validating.' }
+                    },
+                    required: ['filePath', 'summary']
+                },
+                execute: async ({ filePath }: { filePath: string }) => {
                     try {
                         const fullPath = resolvePath(filePath);
-                        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-                        await fs.appendFile(fullPath, content + '\n', 'utf-8');
-                        return `Successfully appended to ${filePath}`;
+                        const ext = path.extname(filePath).toLowerCase();
+                        if (ext !== '.js') {
+                            return `Syntax validation is currently only supported for .js files. Cannot validate ${filePath}`;
+                        }
+                        
+                        const { exec } = require('child_process');
+                        const util = require('util');
+                        const execAsync = util.promisify(exec);
+                        
+                        try {
+                            // node -c checks syntax without executing
+                            await execAsync(`node -c "${fullPath}"`);
+                            return `Syntax validation passed for ${filePath}`;
+                        } catch (e: any) {
+                            // exec returns stdout/stderr in error object
+                            return `Syntax validation FAILED for ${filePath}:\\n${e.stderr || e.stdout || e.message}`;
+                        }
                     } catch (error: any) {
-                        return `Error appending to file ${filePath}: ${error.message}`;
+                        return `Error during validation: ${error.message}`;
                     }
                 }
             },
@@ -317,86 +425,13 @@ export function createHtmlConversionTools(): (
                 }
             },
             {
-                name: 'get_file_info',
-                description: 'Get file size and type info.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        filePath: { type: 'string', description: 'Relative path to the file.' },
-                        summary: { type: 'string', description: 'Reason for checking file info.' }
-                    },
-                    required: ['filePath', 'summary']
-                },
-                execute: async ({ filePath }: { filePath: string; summary: string }) => {
-                    try {
-                        const fullPath = resolvePath(filePath);
-                        const stats = await fs.stat(fullPath);
-                        return JSON.stringify({
-                            size: stats.size,
-                            isFile: stats.isFile(),
-                            isDirectory: stats.isDirectory()
-                        });
-                    } catch (error: any) {
-                        return `Error getting info for ${filePath}: ${error.message}`;
-                    }
-                }
-            },
-            {
-                name: 'regexp_match_all',
-                description: 'Find all occurrences of a regular expression within a specific file and return the matched strings. Capture groups are returned if the regex contains them.',
-                parameters: {
-                    type: 'object',
-                    properties: {
-                        pattern: { type: 'string', description: 'The regular expression pattern string (e.g., "(?<=\\\\()url\\\\([^)]+\\\\)")' },
-                        flags: { type: 'string', description: 'Optional regex flags (e.g., "g", "i", "m"). Defaults to "g" if omitted.' },
-                        filePath: { type: 'string', description: 'Relative path to the file to search in.' },
-                        summary: { type: 'string', description: 'Reason for searching the file.' }
-                    },
-                    required: ['pattern', 'filePath', 'summary']
-                },
-                execute: async ({ pattern, flags, filePath }: { pattern: string; flags?: string; filePath: string; summary: string }) => {
-                    try {
-                        const fullPath = resolvePath(filePath);
-                        const content = await fs.readFile(fullPath, 'utf-8');
-                        const regexFlags = flags || 'g';
-                        const isGlobal = regexFlags.includes('g');
-                        const regex = new RegExp(pattern, regexFlags);
-
-                        if (isGlobal) {
-                            const matches = [...content.matchAll(regex)];
-                            if (matches.length === 0) return 'No matches found.';
-
-                            // Extract full match and capture groups
-                            const results = matches.map(m => {
-                                if (m.length > 1) {
-                                    // Remove the full match at index 0, return just the capture groups
-                                    return m.slice(1).filter(g => g !== undefined);
-                                }
-                                return [m[0]];
-                            });
-                            return JSON.stringify(results);
-                        } else {
-                            const match = content.match(regex);
-                            if (!match) return 'No match found.';
-
-                            if (match.length > 1) {
-                                return JSON.stringify([match.slice(1).filter(g => g !== undefined)]);
-                            }
-                            return JSON.stringify([[match[0]]]);
-                        }
-                    } catch (error: any) {
-                        return `Error scanning file ${filePath}: ${error.message}`;
-                    }
-                }
-            },
-            {
                 name: 'regexp_search_files',
-                description: 'Search for a regular expression pattern across all files in a directory recursively. Returns a list of filenames that contain at least one match.',
+                description: 'Search for a regular expression pattern across all text files in a directory recursively. Returns a list of matches with file path, line number, and line content.',
                 parameters: {
                     type: 'object',
                     properties: {
                         pattern: { type: 'string', description: 'The regular expression pattern string.' },
-                        flags: { type: 'string', description: 'Optional regex flags (e.g., "i", "m"). Do not use "g" here.' },
+                        flags: { type: 'string', description: 'Optional regex flags (e.g., "i"). Do not use "g" or "m" here as searching is done line-by-line.' },
                         dirPath: { type: 'string', description: 'Relative directory path to search in (use "." for root).' },
                         summary: { type: 'string', description: 'Reason for searching files.' }
                     },
@@ -405,8 +440,9 @@ export function createHtmlConversionTools(): (
                 execute: async ({ pattern, flags, dirPath }: { pattern: string; flags?: string; dirPath: string; summary: string }) => {
                     try {
                         const fullDir = resolvePath(dirPath);
-                        const regex = new RegExp(pattern, flags);
-                        const matchingFiles: string[] = [];
+                        const regexFlags = (flags || '').replace(/[gm]/g, ''); // strip g and m
+                        const regex = new RegExp(pattern, regexFlags);
+                        const matches: { path: string; line: number; content: string }[] = [];
 
                         async function searchDir(dir: string) {
                             const dirents = await fs.readdir(dir, { withFileTypes: true });
@@ -415,13 +451,19 @@ export function createHtmlConversionTools(): (
                                 if (dirent.isDirectory()) {
                                     await searchDir(res);
                                 } else {
-                                    // Skip binary files naively by checking extension or just trying to read as utf8
                                     const ext = path.extname(res).toLowerCase();
                                     if (['.html', '.css', '.js', '.json', '.txt', '.md', '.svg'].includes(ext)) {
                                         try {
-                                            const content = await fs.readFile(res, 'utf-8');
-                                            if (regex.test(content)) {
-                                                matchingFiles.push(path.relative(workingDirectory, res));
+                                            const fileContent = await fs.readFile(res, 'utf-8');
+                                            const lines = fileContent.split(/\\r?\\n/);
+                                            for (let i = 0; i < lines.length; i++) {
+                                                if (regex.test(lines[i])) {
+                                                    matches.push({
+                                                        path: path.relative(workingDirectory, res),
+                                                        line: i + 1,
+                                                        content: lines[i].trim()
+                                                    });
+                                                }
                                             }
                                         } catch (e) {
                                             // Ignore read errors for individual files
@@ -432,8 +474,8 @@ export function createHtmlConversionTools(): (
                         }
 
                         await searchDir(fullDir);
-                        if (matchingFiles.length === 0) return 'No files matched the pattern.';
-                        return JSON.stringify(matchingFiles);
+                        if (matches.length === 0) return 'No matches found.';
+                        return JSON.stringify(matches, null, 2);
                     } catch (error: any) {
                         return `Error searching files in ${dirPath}: ${error.message}`;
                     }

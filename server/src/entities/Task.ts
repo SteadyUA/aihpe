@@ -5,6 +5,8 @@ export interface Job {
     description: string;
     shortDescription: string;
     completed: boolean;
+    failed?: boolean;
+    errorContext?: string;
 }
 
 export interface Step {
