@@ -195,7 +195,13 @@ export class SessionVersionController {
         if (filename === 'script.js') {
             const basePath = process.env.APP_BASE_PATH || '';
             const header = `const API_BASE = '${basePath}/api/stab';\n`;
-            const footer = `\nif (typeof regform !== 'undefined') { window.regform = regform; }`;
+            const footer = `\nif (typeof regform !== 'undefined') { window.regform = regform; }
+document.querySelectorAll('form').forEach(form => {
+    const action = form.getAttribute('action');
+    if (action && action.startsWith('/')) {
+        form.action = API_BASE + action;
+    }
+});`;
 
             const modifiedStream = Readable.from((async function* () {
                 yield header;
