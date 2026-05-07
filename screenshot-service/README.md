@@ -21,13 +21,15 @@ You can configure the service using environment variables. Copy `.env.example` t
 
 ## API Endpoints
 
-### 1. `GET /screenshot`
-Captures a screenshot of a web page using Puppeteer.
+### 1. `POST /screenshot`
+Captures a screenshot of a web page or a provided HTML snapshot using Puppeteer.
 
-**Query Parameters:**
-- `url` (required): HTTP/HTTPS or `file://` URL to capture.
+**JSON Body Parameters:**
+- `url` (optional if `html` is provided): HTTP/HTTPS or `file://` URL to capture. If `html` is provided, this URL is injected as a `<base href>` to resolve relative assets.
+- `html` (optional): A full HTML string to render directly instead of navigating to the `url`. Useful for capturing dynamic DOM states without relying on the network.
 - `viewportWidth` (optional, default: 1280): Width of the browser viewport.
 - `viewportHeight` (optional, default: 800): Height of the browser viewport.
+- `scrollY` (optional): Scroll the page to this Y coordinate before taking the screenshot.
 - `size` (optional): Resize the final image so its maximum dimension is `size` (aspect ratio preserved).
 
 ### 2. `GET /thumbnail`
@@ -67,9 +69,9 @@ Analyzes a media file and returns detailed JSON metadata without generating an i
 ## Examples
 
 ### 1. Web Page Screenshot
-Take a screenshot of a website:
+Take a screenshot of a website by sending a POST request with JSON payload:
 ```bash
-curl "http://localhost:3001/screenshot?url=https://example.com" > example_screenshot.png
+curl -X POST -H "Content-Type: application/json" -d '{"url":"https://example.com"}' http://localhost:3001/screenshot > example_screenshot.png
 ```
 
 ### 2. Video Thumbnail (via HTTP URL)

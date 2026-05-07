@@ -205,9 +205,9 @@ async function initBrowser() {
     }
 }
 
-app.get('/screenshot', async (req, res) => {
+app.post('/screenshot', express.json({limit: '50mb'}), async (req, res) => {
     try {
-        const { url, viewportWidth = 1280, viewportHeight = 800, size } = req.query;
+        const { url, viewportWidth = 1280, viewportHeight = 800, size, html, scrollY } = req.body;
 
         const resolved = resolveUrl(url);
 
@@ -219,7 +219,34 @@ app.get('/screenshot', async (req, res) => {
             page = await browser.newPage();
             await page.setViewport({ width: parseInt(viewportWidth), height: parseInt(viewportHeight) });
 
-            await withTimeout(page.goto(resolved.url, { waitUntil: 'networkidle0' }), TIMEOUT_MS);
+            if (html) {
+                const headRegex = /<head[^>]*>/i;
+                let htmlWithBase = html;
+                if (headRegex.test(html)) {
+                    htmlWithBase = html.replace(headRegex, `$&<base href="${resolved.url}">`);
+                } else {
+                    htmlWithBase = `<head><base href="${resolved.url}"></head>` + html;
+                }
+                await withTimeout(page.setContent(htmlWithBase, { waitUntil: 'networkidle0' }), TIMEOUT_MS);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } else {
+                await withTimeout(page.goto(resolved.url, { waitUntil: 'networkidle0' }), TIMEOUT_MS);
+            }
+
+            // Disable animations and transitions globally to avoid capturing mid-animation states
+            await page.addStyleTag({
+                content: `
+                    *, *::after, *::before {
+                        animation: none !important;
+                        transition: none !important;
+                        animation-delay: 0s !important;
+                    }
+                `
+            });
+
+            if (scrollY) {
+                await page.evaluate((y) => window.scrollTo(0, y), parseInt(scrollY));
+            }
 
             let imageBuffer = await withTimeout(page.screenshot({ type: 'png' }), TIMEOUT_MS);
 
