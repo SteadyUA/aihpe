@@ -242,7 +242,7 @@ class Message extends React.Component<MessageProps> {
                                 e.stopPropagation();
                                 const sessionIdData = target.getAttribute('data-session-id');
                                 const sessionIdText = sessionIdData || target.textContent || '';
-                                
+
                                 const matchLower = sessionIdText.toLowerCase().trim();
                                 const foundId = this.props.sessionIds?.find(existingId => {
                                     const idLower = existingId.toLowerCase();
@@ -1539,7 +1539,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         value={this.props.fastMode ? 'fast' : 'plan'}
                                         options={[
                                             { value: 'plan', label: 'Planning' },
-                                            { value: 'fast', label: 'Fast mode' }
+                                            { value: 'fast', label: 'Just do it' }
                                         ]}
                                         onChange={(val) => {
                                             this.props.onUpdateSession({ fastMode: val === 'fast' });
