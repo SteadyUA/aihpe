@@ -10,6 +10,8 @@ import { Service } from 'typedi';
 import { Readable } from 'stream';
 import { FileResponse, FileStreamResponse, FileResponseHandler } from '../interceptors/FileResponseHandler';
 import { IsString, IsNumber, IsOptional, IsBoolean, IsInt, Min } from 'class-validator';
+import { resolveInternalUrl } from '../utils/url';
+import express from 'express';
 
 class SessionVersionParams {
     @IsString()
@@ -417,5 +419,58 @@ document.querySelectorAll('form').forEach(form => {
         const { sessionId, version } = params;
         const memory = await this.memoryService.getMemoryContext(sessionId, version);
         return { memory };
+    }
+
+    @Post('/api/sessions/:sessionId/:version/screenshot')
+    @UseBefore(express.urlencoded({ extended: true, limit: '50mb' }))
+    @UseBefore(express.json({ limit: '50mb' }))
+    @UseInterceptor(FileResponseHandler)
+    async postScreenshot(
+        @Params() params: SessionVersionParams,
+        @Body() body: any,
+    ): Promise<FileStreamResponse> {
+        const { sessionId, version } = params;
+
+        if (!this.filesService.versionFileExists(sessionId, version, 'index.html')) {
+            throw new NotFoundError('index.html not found');
+        }
+
+        const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+        const serverInternalUrl = await resolveInternalUrl(process.env.SERVER_INTERNAL_URL || 'http://app:5000');
+        const basePath = process.env.APP_BASE_PATH || '';
+        const targetUrl = `${serverInternalUrl}${basePath}/api/sessions/${sessionId}/${version}/files/index.html`;
+
+        const payload = {
+            url: targetUrl,
+            html: body?.html,
+            viewportWidth: body?.width ? parseInt(body.width) : undefined,
+            viewportHeight: body?.height ? parseInt(body.height) : undefined,
+            scrollY: body?.scrollY ? parseInt(body.scrollY) : undefined
+        };
+
+        const url = `${screenshotServiceUrl}/screenshot`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                throw new Error(`Screenshot service returned ${response.status}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            
+            const stream = Readable.from(buffer);
+
+            return new FileStreamResponse('screenshot.png', stream);
+        } catch (error: any) {
+            console.error('Failed to generate screenshot:', error);
+            throw new InternalServerError('Failed to generate screenshot');
+        }
     }
 }
