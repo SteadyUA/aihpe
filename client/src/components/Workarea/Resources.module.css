@@ -61,26 +61,26 @@
 .resourceActionBtn:hover {
     background: #f8fafc;
     color: var(--accent);
-    border-color: var(--accent);
+    border-color: var(--border-color-hover);
 }
 
 .imageTileSelected .resourceActionBtn {
-    color: var(--text-secondary); /* neutral color for XIcon when selected */
+    color: var(--text-secondary);
 }
+
 .imageTileSelected .resourceActionBtn:hover {
     background: #f0fdf4;
     color: #16a34a;
-    border-color: #86efac;
+    border-color: #22c55e;
 }
 
 .imageTile:hover {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+    border-color: var(--border-color-hover);
+    box-shadow: 0 0 0 1px var(--border-color-hover);
 }
 
 .imageTileSelected {
     border-color: #22c55e !important;
-    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4) !important;
 }
 
 .imageThumbContainer {

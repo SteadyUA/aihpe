@@ -19,7 +19,7 @@
 }
 
 .select:hover:not(:disabled) {
-    border-color: var(--accent);
+    border-color: var(--border-color-hover);
 }
 
 .select:focus {
