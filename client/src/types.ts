@@ -37,6 +37,7 @@ export interface Project {
     taskId?: string;
     createdAt: string;
     updatedAt: string;
+    sessions?: any[];
 }
 
 export interface UnsentData {

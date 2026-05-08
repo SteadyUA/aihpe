@@ -22,6 +22,7 @@ import { HtmlImportService } from '../services/HtmlImportService';
 import { TaskManagerService } from '../services/TaskManagerService';
 import { LlmProvider, ProjectStatus } from '../types/chat';
 import { Project } from '../entities/Project';
+import { SessionService } from '../services/session/SessionService';
 
 class ProjectResponse {
     id!: string;
@@ -31,6 +32,9 @@ class ProjectResponse {
     status!: string;
     taskId?: string | null;
     sessionIds!: string[];
+    createdAt!: string;
+    updatedAt!: string;
+    sessions?: any[];
 }
 
 class OkResponse {
@@ -75,6 +79,7 @@ export class ProjectController {
         private readonly projectService: ProjectService,
         private readonly htmlImportService: HtmlImportService,
         private readonly taskManagerService: TaskManagerService,
+        private readonly sessionService: SessionService,
     ) {
         console.log('ProjectController initialized');
     }
@@ -87,7 +92,9 @@ export class ProjectController {
             activeSessionId: project.activeSessionId,
             status: project.status,
             taskId: project.taskId,
-            sessionIds: project.sessionIds || [], // Ensure safe fallbacks if needed
+            sessionIds: project.sessionIds || [],
+            createdAt: project.createdAt.toISOString(),
+            updatedAt: project.updatedAt.toISOString(),
         };
     }
 
@@ -131,7 +138,10 @@ export class ProjectController {
         }
         const projects = await this.projectService.getUserProjects(accountId);
 
-        return projects.map(p => this.mapProjectToResponse(p));
+        return Promise.all(projects.map(async p => ({
+            ...this.mapProjectToResponse(p),
+            sessions: await this.sessionService.getSessionsByProjectId(p.id)
+        })));
     }
 
     @Get('/:projectId')
@@ -145,7 +155,10 @@ export class ProjectController {
             throw new ForbiddenError('Access denied');
         }
 
-        return this.mapProjectToResponse(project);
+        return {
+            ...this.mapProjectToResponse(project),
+            sessions: await this.sessionService.getSessionsByProjectId(project.id)
+        };
     }
 
     @Patch('/:projectId')

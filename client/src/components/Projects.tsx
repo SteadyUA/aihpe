@@ -6,6 +6,7 @@ import { ProjectCreationModal } from './ProjectCreationModal';
 import { ConfirmationModal } from './ConfirmationModal';
 import { withRouter, RouterProps } from './withRouter';
 import styles from './Projects.module.css';
+import classNames from 'classnames';
 
 interface ProjectsProps extends RouterProps {
     onSelectProject: (projectId: string, lastSessionId?: string) => void;
@@ -14,6 +15,7 @@ interface ProjectsProps extends RouterProps {
 
 interface ProjectsState {
     projects: Project[];
+    projectSessions: Record<string, any[]>;
     loading: boolean;
     error: string | null;
     showCreationModal: boolean;
@@ -25,6 +27,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         super(props);
         this.state = {
             projects: [],
+            projectSessions: {},
             loading: true,
             error: null,
             showCreationModal: false,
@@ -43,7 +46,15 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
             const res = await apiAuth.fetch('/api/projects');
             if (!res.ok) throw new Error('Failed to fetch projects');
             const data = await res.json();
-            this.setState({ projects: data, loading: false });
+
+            const projectSessions: Record<string, any[]> = {};
+            data.forEach((p: Project) => {
+                if (p.sessions) {
+                    projectSessions[p.id] = p.sessions;
+                }
+            });
+
+            this.setState({ projects: data, projectSessions, loading: false });
         } catch (error: any) {
             console.error('Failed to load projects', error);
             this.setState({ error: error.message, loading: false });
@@ -133,6 +144,36 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         }
     };
 
+    renderCollage = (project: Project) => {
+        const sessions = this.state.projectSessions[project.id] || [];
+        if (sessions.length === 0) {
+            return <div className={styles.emptyCollage}>No previews available</div>;
+        }
+
+        const activeSessionId = project.activeSessionId || sessions[sessions.length - 1]?.id;
+
+        return (
+            <div className={styles.collageContainer}>
+                {sessions.map((session, i) => {
+                    const isActive = session.id === activeSessionId;
+
+                    return (
+                        <div key={session.id} className={styles.cardWrapper}>
+                            <img
+                                src={`${import.meta.env.BASE_URL}api/sessions/${session.id}/${session.currentVersion}/preview`}
+                                className={classNames(styles.collageCard, { [styles.activeCard]: isActive })}
+                                alt={`Preview ${i}`}
+                                onError={(e) => {
+                                    (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="60" height="100" fill="none" stroke="%23ccc"><rect width="60" height="100" rx="4"/></svg>';
+                                }}
+                            />
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
+
     render() {
         const { currentProjectId } = this.props;
         const { projects, loading, error, showCreationModal, projectToDelete } = this.state;
@@ -163,7 +204,9 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                 onClick={() => this.handleSelectProject(project.id)}
                             >
                                 <div className={styles.projectName}>{project.name}</div>
-                                <div className={styles.projectDate}>{new Date(project.createdAt).toLocaleDateString()}</div>
+
+                                {this.renderCollage(project)}
+
                                 <div className={styles.projectFooter}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                         <span>{project.sessionIds?.length || 0} Sessions</span>

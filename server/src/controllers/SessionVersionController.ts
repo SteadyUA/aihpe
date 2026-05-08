@@ -464,13 +464,73 @@ document.querySelectorAll('form').forEach(form => {
 
             const arrayBuffer = await response.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
-            
+
             const stream = Readable.from(buffer);
 
             return new FileStreamResponse('screenshot.png', stream);
         } catch (error: any) {
             console.error('Failed to generate screenshot:', error);
             throw new InternalServerError('Failed to generate screenshot');
+        }
+    }
+
+    @Get('/api/sessions/:sessionId/:version/preview')
+    @UseBefore(ImmutableCacheMiddleware)
+    @UseInterceptor(FileResponseHandler)
+    async getSessionPreview(
+        @Params() params: SessionVersionParams,
+    ): Promise<FileStreamResponse> {
+        const { sessionId, version } = params;
+
+        let stream = this.filesService.getVersionFileStream(sessionId, version, '.preview.png');
+
+        if (stream) {
+            return new FileStreamResponse('.preview.png', stream);
+        }
+
+        if (!this.filesService.versionFileExists(sessionId, version, 'index.html')) {
+            throw new NotFoundError('index.html not found');
+        }
+
+        const screenshotServiceUrl = process.env.SCREENSHOT_SERVICE_URL || 'http://screenshot:3001';
+        const serverInternalUrl = await resolveInternalUrl(process.env.SERVER_INTERNAL_URL || 'http://app:5000');
+        const basePath = process.env.APP_BASE_PATH || '';
+        const targetUrl = `${serverInternalUrl}${basePath}/api/sessions/${sessionId}/${version}/files/index.html`;
+
+        const payload = {
+            url: targetUrl,
+            viewportWidth: 430,
+            viewportHeight: 932
+        };
+
+        const url = `${screenshotServiceUrl}/screenshot`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                throw new Error(`Screenshot service returned ${response.status}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+
+            this.filesService.writeVersionFile(sessionId, version, '.preview.png', buffer);
+
+            const savedStream = this.filesService.getVersionFileStream(sessionId, version, '.preview.png');
+            if (!savedStream) {
+                throw new InternalServerError('Failed to read saved preview');
+            }
+
+            return new FileStreamResponse('.preview.png', savedStream);
+        } catch (error: any) {
+            console.error('Failed to generate session preview:', error);
+            throw new InternalServerError('Failed to generate session preview');
         }
     }
 }
