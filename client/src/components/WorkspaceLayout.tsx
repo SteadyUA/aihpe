@@ -126,6 +126,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
         const groups: Record<string, number> = {};
         const pendingSessions: string[] = [];
         const subjects: Record<string, string> = {};
+        const versions: Record<string, number> = {};
 
         sessionOrder.forEach(id => {
             const s = sessions[id];
@@ -133,6 +134,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                 statusMap[id] = s.status;
                 groups[id] = s.group;
                 subjects[id] = s.subject || '...';
+                versions[id] = s.currentVersion || 0;
                 if (s.status === SessionStatus.PENDING) pendingSessions.push(id);
             }
         });
@@ -177,6 +179,7 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                             onProjectSettings={this.toggleProjectSettings}
                             projectName={currentName || 'Untitled'}
                             onReorder={handleSessionReorder}
+                            versions={versions}
                         />
                     }
                 >

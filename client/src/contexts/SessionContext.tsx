@@ -85,6 +85,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         window.addEventListener('app:session-update', this.onSessionUpdate);
         window.addEventListener('app:token-usage', this.onTokenUsage);
         window.addEventListener('app:chat-status', this.onChatStatus as EventListener);
+        window.addEventListener('app:turn-completed', this.onTurnCompleted);
     }
 
     componentDidUpdate(prevProps: SessionProviderProps, prevState: SessionProviderState) {
@@ -96,6 +97,7 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
         window.removeEventListener('app:session-update', this.onSessionUpdate);
         window.removeEventListener('app:token-usage', this.onTokenUsage);
         window.removeEventListener('app:chat-status', this.onChatStatus as EventListener);
+        window.removeEventListener('app:turn-completed', this.onTurnCompleted);
     }
 
     onSessionCreated = (e: Event) => {
@@ -165,6 +167,25 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                         [payload.sessionId]: {
                             ...session,
                             tokenUsage: payload.tokenUsage
+                        }
+                    }
+                };
+            });
+        }
+    }
+
+    onTurnCompleted = (e: Event) => {
+        const payload = (e as CustomEvent).detail;
+        if (payload.sessionId && payload.message && payload.message.version !== undefined) {
+            this.setState((prevState) => {
+                const session = prevState.sessions[payload.sessionId];
+                if (!session) return null;
+                return {
+                    sessions: {
+                        ...prevState.sessions,
+                        [payload.sessionId]: {
+                            ...session,
+                            currentVersion: payload.message.version
                         }
                     }
                 };

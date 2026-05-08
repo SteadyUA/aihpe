@@ -1,6 +1,7 @@
 import React from 'react';
 import { SessionStatus } from '../types';
 import classNames from 'classnames';
+import { createPortal } from 'react-dom';
 import styles from './SessionBar.module.css';
 import { SettingsIcon, AlertCircleIcon, MessageSquareIcon, PlusIcon } from '../icons';
 interface SessionBarProps {
@@ -17,6 +18,7 @@ interface SessionBarProps {
     onProjectSettings: () => void;
     projectName?: string;
     onReorder: (newOrder: string[]) => void;
+    versions: Record<string, number>;
 }
 
 interface SessionBarState {
@@ -24,6 +26,8 @@ interface SessionBarState {
     isHovering: boolean;
     showLeftScroll: boolean;
     showRightScroll: boolean;
+    hoveredTabId: string | null;
+    hoveredTabRect: { top: number; left: number } | null;
 }
 
 export class SessionBar extends React.Component<
@@ -40,6 +44,8 @@ export class SessionBar extends React.Component<
             isHovering: false,
             showLeftScroll: false,
             showRightScroll: false,
+            hoveredTabId: null,
+            hoveredTabRect: null,
         };
     }
 
@@ -129,6 +135,7 @@ export class SessionBar extends React.Component<
             groups,
             pendingSessions,
             projectName,
+            versions,
         } = this.props;
 
         const { dropTargetIndex, showLeftScroll, showRightScroll } = this.state;
@@ -230,6 +237,17 @@ export class SessionBar extends React.Component<
                                     {isDropTarget && <div className={styles.dropIndicator} />}
                                     <div
                                         draggable
+                                        onMouseEnter={(e) => {
+                                            const rect = e.currentTarget.getBoundingClientRect();
+                                            this.setState({
+                                                hoveredTabId: id,
+                                                hoveredTabRect: {
+                                                    top: rect.bottom,
+                                                    left: rect.left + rect.width / 2
+                                                }
+                                            });
+                                        }}
+                                        onMouseLeave={() => this.setState({ hoveredTabId: null, hoveredTabRect: null })}
                                         onDragStart={(e) => {
                                             e.dataTransfer.setData('text/plain', index.toString());
                                             e.dataTransfer.effectAllowed = 'move';
@@ -270,7 +288,7 @@ export class SessionBar extends React.Component<
                                                 <MessageSquareIcon size={12} fill="currentColor" />
                                             )}
                                         </span>
-                                        <span className={styles.sessionTitle} title={id}>
+                                        <span className={styles.sessionTitle}>
                                             {this.props.subjects[id] || id.slice(0, 8)}
                                         </span>
                                         <span
@@ -286,6 +304,24 @@ export class SessionBar extends React.Component<
                                 </React.Fragment>
                             );
                         })}
+                        {this.state.hoveredTabId && this.state.hoveredTabRect && createPortal(
+                            <div
+                                className={styles.previewTooltip}
+                                style={{
+                                    top: this.state.hoveredTabRect.top,
+                                    left: this.state.hoveredTabRect.left
+                                }}
+                            >
+                                <img
+                                    src={`${import.meta.env.BASE_URL}api/sessions/${this.state.hoveredTabId}/${versions[this.state.hoveredTabId] || 0}/preview`}
+                                    alt="Preview"
+                                    onError={(e) => {
+                                        (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="130" height="220" fill="none" stroke="%23ccc"><rect width="130" height="220" rx="4"/></svg>';
+                                    }}
+                                />
+                            </div>,
+                            document.body
+                        )}
                         {/* Add one last drop target for appending to end? */}
                         {dropTargetIndex === sessions.length && <div className={styles.dropIndicator} />}
                         {/* We need a transparent filler to catch "append" drags if we want to drag to empty space?
