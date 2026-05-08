@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import styles from './LoginForm.module.css';
+import { UiInput } from './UiInput';
+import { UiCheckbox } from './UiCheckbox';
+import { UiButton, ButtonVariant } from './UiButton';
+import { UiLabel } from './UiLabel';
 
 interface LoginFormProps {
     onLogin: (token: string, refreshToken: string, remember: boolean) => void;
@@ -46,11 +50,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
                 {error && <div className={styles.error}>{error}</div>}
 
                 <div className={styles.field}>
-                    <label htmlFor="login" className={styles.label}>Login</label>
-                    <input
+                    <UiLabel htmlFor="login">Login</UiLabel>
+                    <UiInput
                         id="login"
                         type="text"
-                        className={styles.input}
                         value={login}
                         onChange={(e) => setLogin(e.target.value)}
                         required
@@ -58,31 +61,32 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
                 </div>
 
                 <div className={styles.field}>
-                    <label htmlFor="password" className={styles.label}>Password</label>
-                    <input
+                    <UiLabel htmlFor="password">Password</UiLabel>
+                    <UiInput
                         id="password"
                         type="password"
-                        className={styles.input}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
                     />
                 </div>
 
-                <div className={styles.checkbox}>
-                    <label className={styles.checkboxLabel}>
-                        <input
-                            type="checkbox"
-                            checked={remember}
-                            onChange={(e) => setRemember(e.target.checked)}
-                        />
-                        Remember me
-                    </label>
+                <div className={styles.checkboxWrapper}>
+                    <UiCheckbox
+                        checked={remember}
+                        onChange={setRemember}
+                        label="Remember me"
+                    />
                 </div>
 
-                <button type="submit" disabled={isLoading} className={styles.button}>
+                <UiButton 
+                    type="submit" 
+                    disabled={isLoading} 
+                    variant={ButtonVariant.PRIMARY}
+                    style={{ marginTop: '0.5rem' }}
+                >
                     {isLoading ? 'Logging in...' : 'Login'}
-                </button>
+                </UiButton>
             </form>
         </div>
     );

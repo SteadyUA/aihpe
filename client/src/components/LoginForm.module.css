@@ -38,51 +38,10 @@
     gap: 0.5rem;
 }
 
-.label {
-    font-weight: 500;
-    color: #374151;
-}
 
-.input {
-    padding: 0.75rem;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.input:focus {
-    outline: none;
-    border-color: #2563eb;
-    ring: 2px solid #93c5fd;
-}
-
-.checkbox {
-    display: flex;
-    align-items: center;
-}
-
-.checkboxLabel {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    user-select: none;
-}
-
-.button {
-    background-color: #2563eb;
-    color: white;
-    padding: 0.75rem;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.button:hover {
-    background-color: #1d4ed8;
+.checkboxWrapper {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
 .button:disabled {

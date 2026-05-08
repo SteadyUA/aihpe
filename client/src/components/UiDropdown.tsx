@@ -22,6 +22,7 @@ interface UiDropdownProps {
     className?: string;
     title?: string;
     variant?: DropdownVariant;
+    fullWidth?: boolean;
 }
 
 export class UiDropdown extends React.Component<UiDropdownProps> {
@@ -32,10 +33,13 @@ export class UiDropdown extends React.Component<UiDropdownProps> {
     };
 
     render() {
-        const { value, options, disabled, className, title, variant = DropdownVariant.STANDARD } = this.props;
+        const { value, options, disabled, className, title, variant = DropdownVariant.STANDARD, fullWidth } = this.props;
 
         return (
-            <div className={classNames(styles.container, className, { [styles.ghost]: variant === DropdownVariant.GHOST })} title={title}>
+            <div className={classNames(styles.container, className, { 
+                [styles.ghost]: variant === DropdownVariant.GHOST,
+                [styles.fullWidth]: fullWidth
+            })} title={title}>
                 <select
                     className={styles.select}
                     value={value}

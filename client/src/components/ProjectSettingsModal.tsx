@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { UiModal } from './UiModal';
-import { UiButton, ButtonVariant} from './UiButton';
+import { UiButton, ButtonVariant } from './UiButton';
+import { UiInput } from './UiInput';
+import { UiDropdown } from './UiDropdown';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
 import { LLM_PROVIDERS } from '../constants';
@@ -65,8 +67,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
         >
             <div className={styles.field}>
                 <label className={styles.label}>Project Name</label>
-                <input
-                    className={styles.input}
+                <UiInput
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter project name"
@@ -74,17 +75,11 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             </div>
             <div className={styles.field}>
                 <label className={styles.label}>Default Provider</label>
-                <select
-                    className={styles.input}
+                <UiDropdown
                     value={defaultProvider}
-                    onChange={(e) => setDefaultProvider(e.target.value as LlmProvider)}
-                >
-                    {LLM_PROVIDERS.map(provider => (
-                        <option key={provider.value} value={provider.value}>
-                            {provider.label}
-                        </option>
-                    ))}
-                </select>
+                    onChange={(val) => setDefaultProvider(val as LlmProvider)}
+                    options={LLM_PROVIDERS.map(p => ({ value: p.value, label: p.label }))}
+                />
             </div>
         </UiModal>
     );

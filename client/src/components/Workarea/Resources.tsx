@@ -4,6 +4,8 @@ import { UiCheckbox, CheckboxVariant } from '../UiCheckbox';
 import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { UiDropdown, DropdownVariant } from '../UiDropdown';
 import { UiModal } from '../UiModal';
+import { UiTextarea } from '../UiTextarea';
+import { UiLabel } from '../UiLabel';
 import { UiTarget } from '../UiTarget';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { Toolbar } from './Toolbar';
@@ -578,9 +580,9 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                     </div>
                     <div className={styles.editFormGroup}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <label className={styles.editLabel} style={{ marginBottom: 0 }}>
+                            <UiLabel style={{ marginBottom: 0 }}>
                                 Description
-                            </label>
+                            </UiLabel>
                             {isGeneratingDescription ? (
                                 <span style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>
                                     Generating... ({generationTimer}s)
@@ -596,12 +598,12 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                                 </UiButton>
                             )}
                         </div>
-                        <textarea
-                            className={styles.editDescriptionInput}
+                        <UiTextarea
                             value={editDescriptionValue}
                             onChange={this.handleDescriptionChange}
                             placeholder="Enter image description..."
                             disabled={isBusy}
+                            style={{ minHeight: '120px' }}
                         />
                     </div>
                 </div>

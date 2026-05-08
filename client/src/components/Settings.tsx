@@ -2,6 +2,9 @@ import React, { Component } from 'react';
 import { withRouter, RouterProps } from './withRouter';
 import styles from './Settings.module.css';
 import { UiModal } from './UiModal';
+import { UiInput } from './UiInput';
+import { UiLabel } from './UiLabel';
+import { UiButton, ButtonVariant } from './UiButton';
 import { apiAuth } from '../utils/api';
 
 interface SettingsProps extends RouterProps { }
@@ -126,12 +129,12 @@ class Settings extends Component<SettingsProps, SettingsState> {
                     <div className={styles.section}>
                         <h2 className={styles.sectionTitle}>Authentication</h2>
                         <div className={styles.fieldRow}>
-                            <label>Login:</label>
+                            <UiLabel>Login:</UiLabel>
                             <span className={styles.value}>{login || 'Unknown'}</span>
                         </div>
                         <div className={styles.fieldRow}>
-                            <label>Password:</label>
-                            <button className={styles.button} onClick={this.toggleChangePassword}>Change Password</button>
+                            <UiLabel>Password:</UiLabel>
+                            <UiButton variant={ButtonVariant.SECONDARY} onClick={this.toggleChangePassword}>Change Password</UiButton>
                         </div>
                     </div>
                 </div>
@@ -142,8 +145,8 @@ class Settings extends Component<SettingsProps, SettingsState> {
                     onClose={this.toggleChangePassword}
                     actions={
                         <>
-                            <button className={styles.buttonSecondary} onClick={this.toggleChangePassword}>Cancel</button>
-                            <button className={styles.buttonPrimary} onClick={this.handleSubmitChangePassword}>Save</button>
+                            <UiButton variant={ButtonVariant.SECONDARY} onClick={this.toggleChangePassword}>Cancel</UiButton>
+                            <UiButton variant={ButtonVariant.PRIMARY} onClick={this.handleSubmitChangePassword}>Save</UiButton>
                         </>
                     }
                 >
@@ -152,8 +155,8 @@ class Settings extends Component<SettingsProps, SettingsState> {
                         {success && <div className={styles.success}>{success}</div>}
 
                         <div className={styles.formGroup}>
-                            <label>Current Password</label>
-                            <input
+                            <UiLabel>Current Password</UiLabel>
+                            <UiInput
                                 type="password"
                                 name="oldPassword"
                                 value={oldPassword}
@@ -162,8 +165,8 @@ class Settings extends Component<SettingsProps, SettingsState> {
                             />
                         </div>
                         <div className={styles.formGroup}>
-                            <label>New Password</label>
-                            <input
+                            <UiLabel>New Password</UiLabel>
+                            <UiInput
                                 type="password"
                                 name="newPassword"
                                 value={newPassword}
@@ -172,8 +175,8 @@ class Settings extends Component<SettingsProps, SettingsState> {
                             />
                         </div>
                         <div className={styles.formGroup}>
-                            <label>Repeat New Password</label>
-                            <input
+                            <UiLabel>Repeat New Password</UiLabel>
+                            <UiInput
                                 type="password"
                                 name="repeatPassword"
                                 value={repeatPassword}

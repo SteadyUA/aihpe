@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { UiModal } from './UiModal';
-import { UiButton, ButtonVariant} from './UiButton';
+import { UiButton, ButtonVariant } from './UiButton';
+import { UiInput } from './UiInput';
+import { UiDropdown } from './UiDropdown';
+import { UiLabel } from './UiLabel';
 import styles from './ProjectModal.module.css';
 import { LlmProvider } from '../types';
 import { LLM_PROVIDERS } from '../constants';
@@ -58,9 +61,8 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
             className={styles.modal}
         >
             <div className={styles.field}>
-                <label className={styles.label}>Project Name</label>
-                <input
-                    className={styles.input}
+                <UiLabel>Project Name</UiLabel>
+                <UiInput
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter project name"
@@ -68,30 +70,24 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
                 />
             </div>
             <div className={styles.field}>
-                <label className={styles.label}>HTML Archive (ZIP)</label>
-                <input
+                <UiLabel>HTML Archive (ZIP)</UiLabel>
+                <UiInput
                     type="file"
-                    className={styles.input}
                     accept=".zip"
                     onChange={handleFileChange}
                 />
-                <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '4px' }}>
+                <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '-0.2rem' }}>
                     Optional: Upload an archive containing index.html, styles, and images.
                 </div>
             </div>
             <div className={styles.field}>
-                <label className={styles.label}>Default Provider</label>
-                <select
-                    className={styles.input}
+                <UiLabel>Default Provider</UiLabel>
+                <UiDropdown
                     value={defaultProvider}
-                    onChange={(e) => setDefaultProvider(e.target.value as LlmProvider)}
-                >
-                    {LLM_PROVIDERS.map(provider => (
-                        <option key={provider.value} value={provider.value}>
-                            {provider.label}
-                        </option>
-                    ))}
-                </select>
+                    onChange={(val) => setDefaultProvider(val as LlmProvider)}
+                    options={LLM_PROVIDERS.map(p => ({ value: p.value, label: p.label }))}
+                    fullWidth
+                />
             </div>
         </UiModal>
     );
