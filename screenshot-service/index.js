@@ -205,7 +205,7 @@ async function initBrowser() {
     }
 }
 
-app.post('/screenshot', express.json({limit: '50mb'}), async (req, res) => {
+app.post('/screenshot', express.json({ limit: '50mb' }), async (req, res) => {
     try {
         const { url, viewportWidth = 1280, viewportHeight = 800, size, html, scrollY } = req.body;
 
@@ -227,10 +227,11 @@ app.post('/screenshot', express.json({limit: '50mb'}), async (req, res) => {
                 } else {
                     htmlWithBase = `<head><base href="${resolved.url}"></head>` + html;
                 }
-                await withTimeout(page.setContent(htmlWithBase, { waitUntil: 'networkidle0' }), TIMEOUT_MS);
+                await withTimeout(page.setContent(htmlWithBase, { waitUntil: 'load' }), TIMEOUT_MS);
                 await new Promise(resolve => setTimeout(resolve, 500));
             } else {
-                await withTimeout(page.goto(resolved.url, { waitUntil: 'networkidle0' }), TIMEOUT_MS);
+                await withTimeout(page.goto(resolved.url, { waitUntil: 'load' }), TIMEOUT_MS);
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
 
             // Disable animations and transitions globally to avoid capturing mid-animation states
@@ -263,7 +264,7 @@ app.post('/screenshot', express.json({limit: '50mb'}), async (req, res) => {
             semaphore.release();
         }
     } catch (err) {
-        console.error('Screenshot error:', err);
+        console.error(`Screenshot error for URL ${req.body?.url}:`, err);
         res.status(400).json({ error: err.message });
     }
 });
