@@ -26,9 +26,6 @@
     height: 30px;
     padding: 0.25rem 1rem;
     position: relative;
-    /* Ensure stacking context if needed */
-    z-index: 10;
-    /* Raise header slightly */
 }
 
 .sessionTitle {

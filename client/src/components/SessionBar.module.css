@@ -42,7 +42,7 @@
     display: flex;
     flex: 1;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     min-width: 0;
     /* Important for flex items */
 }
@@ -52,7 +52,7 @@
     /* gap: 4px; */
     flex: 1;
     overflow-x: scroll;
-    overflow-y: hidden;
+    overflow-y: visible;
     padding-top: 4px;
     /* Prevent scrollbar from overlapping content slightly */
 }
@@ -63,6 +63,7 @@
 
 .sessionTabs::-webkit-scrollbar {
     height: 4px;
+    width: 0px;
     /* Thin scrollbar */
 }
 
@@ -117,7 +118,6 @@
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.2s;
-    position: relative;
     height: 28px;
     flex-shrink: 0;
     /* Prevent shrinking */
@@ -296,17 +296,25 @@
 }
 
 .previewTooltip {
-    position: fixed;
-    transform: translateX(-50%);
-    margin-top: 8px;
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    transform: translateX(calc((var(--tab-width, 100px) / 2) - 50% - var(--scroll-x, 0px)));
     width: 130px;
     height: 220px;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     border-radius: 4px;
     z-index: 10000;
     pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.previewTooltip.visible {
+    opacity: 1;
+    visibility: visible;
 }
 
 .previewTooltip img {

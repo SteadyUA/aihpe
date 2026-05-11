@@ -398,6 +398,12 @@ export class ChatService {
                         currentVersion: generation.targetVersion,
                         updatedAt: new Date(),
                     });
+
+                    try {
+                        this.filesService.deleteVersionFile(sessionId, generation.targetVersion, '.preview.png');
+                    } catch (e) {
+                        // ignore if the file doesn't exist
+                    }
                 }
 
                 await this.resourceService.updateResourcesUsage(sessionId, generation.targetVersion);

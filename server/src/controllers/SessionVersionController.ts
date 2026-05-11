@@ -13,6 +13,8 @@ import { IsString, IsNumber, IsOptional, IsBoolean, IsInt, Min } from 'class-val
 import { resolveInternalUrl } from '../utils/url';
 import express from 'express';
 
+const previewGenerationLocks = new Map<string, Promise<void>>();
+
 class SessionVersionParams {
     @IsString()
     sessionId!: string;
@@ -489,6 +491,20 @@ document.querySelectorAll('form').forEach(form => {
             return new FileStreamResponse('.preview.png', stream);
         }
 
+        const lockKey = `${sessionId}-${version}`;
+
+        if (previewGenerationLocks.has(lockKey)) {
+            try {
+                await previewGenerationLocks.get(lockKey);
+            } catch (err) {
+                // Ignore errors from other requests, we'll just try to read it
+            }
+            const lockedStream = this.filesService.getVersionFileStream(sessionId, version, '.preview.png');
+            if (lockedStream) {
+                return new FileStreamResponse('.preview.png', lockedStream);
+            }
+        }
+
         if (!this.filesService.versionFileExists(sessionId, version, 'index.html')) {
             throw new NotFoundError('index.html not found');
         }
@@ -506,7 +522,7 @@ document.querySelectorAll('form').forEach(form => {
 
         const url = `${screenshotServiceUrl}/screenshot`;
 
-        try {
+        const generatePromise = (async () => {
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -521,17 +537,25 @@ document.querySelectorAll('form').forEach(form => {
             const arrayBuffer = await response.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
 
-            this.filesService.writeVersionFile(sessionId, version, '.preview.png', buffer);
+            await this.filesService.writeVersionFile(sessionId, version, '.preview.png', buffer);
+        })();
 
-            const savedStream = this.filesService.getVersionFileStream(sessionId, version, '.preview.png');
-            if (!savedStream) {
-                throw new InternalServerError('Failed to read saved preview');
-            }
+        previewGenerationLocks.set(lockKey, generatePromise);
 
-            return new FileStreamResponse('.preview.png', savedStream);
+        try {
+            await generatePromise;
         } catch (error: any) {
             console.error('Failed to generate session preview:', error);
             throw new InternalServerError('Failed to generate session preview');
+        } finally {
+            previewGenerationLocks.delete(lockKey);
         }
+
+        const savedStream = this.filesService.getVersionFileStream(sessionId, version, '.preview.png');
+        if (!savedStream) {
+            throw new InternalServerError('Failed to read saved preview');
+        }
+
+        return new FileStreamResponse('.preview.png', savedStream);
     }
 }

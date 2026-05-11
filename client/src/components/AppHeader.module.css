@@ -21,7 +21,8 @@
 
 .center {
     flex: 1;
-    overflow: hidden;
+    overflow: visible;
+    min-width: 0;
     /* Ensure tabs can scroll if needed */
     /* padding: 0 0.5rem; */
 }
