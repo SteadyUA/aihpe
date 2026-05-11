@@ -154,9 +154,10 @@ export class SessionVersionController {
 
     @Post('/api/sessions/:sessionId/:version/files/:filename')
     @UseBefore(AuthMiddleware)
+    @UseBefore(express.text({ type: '*/*', limit: '50mb' }))
     async updateStaticFile(
         @Params() params: SessionVersionFileParams,
-        @Body() body: any,
+        @Body() body: string,
     ): Promise<OkResponse> {
         const { sessionId, version, filename } = params;
 
