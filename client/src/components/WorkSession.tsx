@@ -267,11 +267,8 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     onUpdateSession={this.props.onUpdateSession}
                     status={session.status || SessionStatus.IDLE}
                     isVisible={isVisible}
-                    onPickElement={this.startPicking}
-                    onCancelPick={this.stopPicking}
                     selection={session.selection || null}
                     resource={session.resource || null}
-                    isPicking={session.isPicking || false}
                     onClearSelection={this.clearSelection}
                     onSelectChip={this.restoreSelection}
                     onCloneTurn={onCloneTurn}
@@ -308,6 +305,9 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     displayedTurn={currentTurn}
                     selectedResource={session.resource}
                     onSelectResource={(filename) => this.props.onUpdateSession({ resource: filename })}
+                    onPickElement={this.startPicking}
+                    onCancelPick={this.stopPicking}
+                    isPicking={session.isPicking || false}
                 />
             </div>
         );

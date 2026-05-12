@@ -6,7 +6,7 @@ import { UiButton, ButtonVariant, ButtonSize } from '../UiButton';
 import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
-import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon, CameraIcon } from '../../icons';
+import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon, CameraIcon, ExpandIcon } from '../../icons';
 
 interface Device {
     name: string;
@@ -30,6 +30,9 @@ interface PreviewProps {
     onLoad?: () => void;
     reloadTrigger?: number;
     isResizing?: boolean;
+    onPickElement?: () => void;
+    onCancelPick?: () => void;
+    isPicking?: boolean;
 }
 
 interface PreviewState {
@@ -737,7 +740,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     render() {
-        const { sessionId, version, active, reloadTrigger } = this.props;
+        const { sessionId, version, active, reloadTrigger, onPickElement, onCancelPick, isPicking } = this.props;
         const { isMobile, deviceIndex, scale, reloadCount, hasMultiStep, currentStep, maxStep } = this.state;
         const device = DEVICES[deviceIndex];
 
@@ -775,6 +778,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 <Toolbar
                     left={
                         <>
+                            <UiButton
+                                variant={isPicking ? ButtonVariant.GHOST_ACTIVE : ButtonVariant.SECONDARY}
+                                size={ButtonSize.ICON}
+                                onClick={isPicking ? onCancelPick : onPickElement}
+                                title={isPicking ? "Cancel selection" : "Select element"}
+                            >
+                                <ExpandIcon size={14} />
+                            </UiButton>
                             <UiButton
                                 variant={ButtonVariant.SECONDARY}
                                 size={ButtonSize.ICON}

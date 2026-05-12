@@ -83,13 +83,13 @@
 .small {
     padding: 0.25rem 0.5rem;
     font-size: 0.85rem;
-    height: 28px;
+    height: 32px;
 }
 
 .icon {
     padding: 0.4rem;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
 }
 
 .small.icon {

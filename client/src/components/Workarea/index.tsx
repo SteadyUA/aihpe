@@ -29,6 +29,9 @@ interface WorkareaProps {
     displayedTurn: number;
     onSelectResource?: (filename: string | null) => void;
     selectedResource?: string | null;
+    onPickElement?: () => void;
+    onCancelPick?: () => void;
+    isPicking?: boolean;
 }
 
 export enum AssetType {
@@ -537,6 +540,9 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     onLoad={onLoad}
                     reloadTrigger={iframeKey}
                     isResizing={this.props.isResizing}
+                    onPickElement={this.props.onPickElement}
+                    onCancelPick={this.props.onCancelPick}
+                    isPicking={this.props.isPicking}
                 />
 
                 <Resources

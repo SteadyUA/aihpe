@@ -394,11 +394,8 @@ interface ChatProps {
     status: SessionStatus;
     sessionId: string;
     version: number;
-    onPickElement?: () => void;
-    onCancelPick?: () => void;
     selection?: string | null;
     resource?: string | null;
-    isPicking?: boolean;
     onClearSelection?: () => void;
     onSelectChip?: (selector: string) => void;
     onCloneTurn?: (turn: number) => void;
@@ -1262,10 +1259,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
     render() {
         const {
             status,
-            onPickElement,
-            onCancelPick,
             selection,
-            isPicking,
             activeTurn,
             onCloneTurn,
             onPreviewTurn,
@@ -1500,16 +1494,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
 
                             <div className={styles.inputControls}>
                                 <div className={styles.inputControlsLeft}>
-                                    <UiButton
-                                        type="button"
-                                        variant={isPicking ? ButtonVariant.GHOST_ACTIVE : ButtonVariant.GHOST}
-                                        size={ButtonSize.ICON}
-                                        onClick={isPicking ? onCancelPick : onPickElement}
-                                        disabled={isFormDisabled}
-                                        title={isPicking ? "Cancel selection" : "Select element"}
-                                    >
-                                        <ExpandIcon size={18} />
-                                    </UiButton>
+
 
                                     <div>
                                         <input
