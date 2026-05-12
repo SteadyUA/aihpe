@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v4.0.0] - 2026-05-12
+
+### Added
+- **Screenshot Service**: Introduced `screenshot-service` microservice for generating web page previews and thumbnails.
+- **Global Clipboard System**: Implemented cross-project global clipboard for seamless resource sharing.
+- **Memory Management**: Introduced tool-based memory files system for session context (`edit_memory_file` tool) and migrated memory display to version badges.
+- **Interactive Quotes**: Added interactive quotes and a modular context menu in the client, alongside cursor navigation improvements.
+- **Parallel Generation**: Implemented parallel generation and unified session cloning.
+- **Console Commands**: Added `get-models` server console command.
+
+### Changed
+- **HTML Archive Import**: Improved the mechanism for importing HTML archives during project creation.
+- **Project Structure**: Simplified the project entity structure.
+- **Resource Management**: Refactored `ImageService` into `SessionResourceService`, adding robust support for video and font files.
+- **SSE Architecture**: Completely decoupled `ChatService` and implemented a robust event-driven architecture for SSE.
+- **API & Controllers**: Modernized API endpoints with explicit DTOs and interceptors.
+- **LLM Infrastructure**: Refactored core LLM architecture, decoupled tools, and improved token usage tracking.
+- **Database Schema**: Standardized database schema and enums. Removed foreign key constraints from Session to Project and dropped legacy summary/preferences columns.
+- **Client UI**: Enhanced Chat message UI with timestamps and flexible layouts. Standardized UI components and session state.
+
+### Fixed
+- Fixed `targetIndex` resolution and initialization during tool calls in `OpenaiRawClient` to prevent chunk shattering.
+- Fixed UI modal constraints and memory modal rendering.
+- Fixed missing metadata fields during session clone.
+
 ## [v3.1.0] - 2026-02-19
 
 ### Added
