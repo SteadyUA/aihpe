@@ -85,45 +85,6 @@ For **running the app** in a production-like environment with the `litellm` serv
 - Edit `litellm/config.yaml` to configure your LLM models.
 - Server data is persisted in `server/data` (mounted from host).
 
-## Architecture & API Reference
+## Documentation
 
-### Overview
-- **Client**: Handles the chat UI, code preview (via iframe), and session management.
-- **Server**: Manages projects, sessions, interacts with the LLM, and persists data to the file system.
-
-### Key API Endpoints
-
-The server exposes a REST API and an SSE endpoint for real-time updates.
-
-#### Structure
-- **SSE Stream**: `GET /api/sse` - Connect for real-time updates on session status and generation progress.
-
-#### Projects
-- `POST /api/projects`: Create a new project.
-- `GET /api/projects/:projectId`: Get project details and list of sessions.
-- `PATCH /api/projects/:projectId`: Update project settings.
-
-#### Sessions
-- `POST /api/sessions`: Create a new chat session.
-- `GET /api/sessions/:sessionId`: Get full session history and state.
-- `DELETE /api/sessions/:sessionId`: Delete a session.
-
-#### Chat & Interaction
-- `POST /api/sessions/:sessionId/chat`: Send a user message (triggers LLM generation).
-- `POST /api/sessions/:sessionId/unsent`: Save current draft input/selection (auto-save).
-- `POST /api/sessions/:sessionId/undo`: Revert the last turn.
-- `POST /api/sessions/:sessionId/clone/:turn`: Branch a session from a specific turn.
-
-#### Assets & Files
-- `POST /api/sessions/:sessionId/uploads`: Upload an image/file.
-- `DELETE /api/sessions/:sessionId/uploads/:filename`: Delete an uploaded file.
-- `GET /api/sessions/:sessionId/uploads/:filename`: Serve an uploaded file.
-- `GET /api/sessions/:sessionId/:version/files/:filename`: Get content of a specific generated file (html/css/js) for a version.
-- `GET /api/sessions/:sessionId/:version/archive`: Download a ZIP archive of the generated code.
-- `GET /api/sessions/:sessionId/artifacts/:turn/:filename`: Get intermediate artifacts (e.g. plans) for a turn.
-
-## Features
-- **Live Preview**: See changes in real-time as the AI writes code.
-- **Session Management**: Organized by Projects with support for multiple sessions.
-- **Branching**: Clone functionality to explore different iterations.
-- **Persistence**: File-system based storage for sessions and generated code.
+For a detailed user guide, architectural overview, and API reference, please see the [Documentation](./docs/README.md).

@@ -94,7 +94,22 @@ This repository is a monorepo containing a **React/Vite client** and a **Node.js
 
 ---
 
-## 3. Git Commit Guidelines for Agents
+## 3. Documentation Guidelines for Agents
+
+To maintain a comprehensive and up-to-date knowledge base, AI agents should follow these rules regarding documentation:
+
+1. **Centralized Location:** All project documentation must be placed in the `docs/` directory. Do not clutter the root directory with loose `.md` files.
+2. **Structure:**
+   - Use `docs/README.md` as the main index.
+   - Place architectural details in `docs/architecture/` (e.g., `client.md`, `server.md`).
+   - Document specific business logic in `docs/features/`.
+   - Update `docs/user_guide.md` if user-facing functionality changes.
+3. **Pointers to Code:** Always include exact file paths (e.g., `server/src/services/SessionService.ts`) in the markdown files so that other AI agents can easily navigate to the source code.
+4. **Mermaid Diagrams:** Use Mermaid (`mermaid`) code blocks for visualizing architectures or workflows whenever possible.
+
+---
+
+## 4. Git Commit Guidelines for Agents
 
 To maintain a clean, readable, and consistent project history, all AI agents must format their Git commits according to the following template (based on the Conventional Commits standard).
 
