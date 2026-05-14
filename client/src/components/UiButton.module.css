@@ -2,6 +2,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     border: 1px solid transparent;
     border-radius: 6px;
     font-size: 0.95rem;
@@ -77,6 +78,18 @@
 
 .danger:hover:not(:disabled) {
     background: rgba(239, 68, 68, 0.05);
+}
+
+.ghostDanger {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-tertiary); /* grey by default */
+    padding: 0.4rem;
+}
+
+.ghostDanger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger, #ef4444);
 }
 
 /* Sizes */

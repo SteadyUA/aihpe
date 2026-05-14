@@ -7,7 +7,8 @@ export enum ButtonVariant {
     SECONDARY = 'secondary',
     GHOST = 'ghost',
     GHOST_ACTIVE = 'ghost-active',
-    DANGER = 'danger'
+    DANGER = 'danger',
+    GHOST_DANGER = 'ghost-danger'
 }
 
 export enum ButtonSize {
@@ -46,6 +47,7 @@ export class UiButton extends React.Component<UiButtonProps> {
                 [styles.ghost]: variant === ButtonVariant.GHOST,
                 [styles.ghostActive]: variant === ButtonVariant.GHOST_ACTIVE,
                 [styles.danger]: variant === ButtonVariant.DANGER,
+                [styles.ghostDanger]: variant === ButtonVariant.GHOST_DANGER,
                 [styles.small]: size === ButtonSize.SMALL,
                 [styles.icon]: size === ButtonSize.ICON,
             },

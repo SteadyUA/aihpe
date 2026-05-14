@@ -1,10 +1,13 @@
 
 import React, { Component } from 'react';
+import { createPortal } from 'react-dom';
 import { apiAuth } from '../utils/api';
 import { Project } from '../types';
 import { ProjectCreationModal } from './ProjectCreationModal';
 import { ConfirmationModal } from './ConfirmationModal';
 import { withRouter, RouterProps } from './withRouter';
+import { UiButton, ButtonVariant, ButtonSize } from './UiButton';
+import { PlusIcon } from '../icons';
 import styles from './Projects.module.css';
 import classNames from 'classnames';
 
@@ -158,7 +161,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                     const isActive = session.id === activeSessionId;
 
                     return (
-                        <div key={session.id} className={styles.cardWrapper}>
+                        <div key={session.id} className={classNames(styles.cardWrapper, { [styles.activeWrapper]: isActive })}>
                             <img
                                 src={`${import.meta.env.BASE_URL}api/sessions/${session.id}/${session.currentVersion}/preview`}
                                 className={classNames(styles.collageCard, { [styles.activeCard]: isActive })}
@@ -178,14 +181,20 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         const { currentProjectId } = this.props;
         const { projects, loading, error, showCreationModal, projectToDelete } = this.state;
 
+        const headerElement = document.getElementById('header-portal-target');
+
         return (
             <div className={styles.container}>
+                {headerElement && createPortal(
+                    <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>,
+                    headerElement
+                )}
 
                 <div className={styles.content}>
                     <div className={styles.controls}>
-                        <button className={styles.createButton} onClick={this.toggleCreationModal}>
-                            + New Project
-                        </button>
+                        <UiButton variant={ButtonVariant.PRIMARY} onClick={this.toggleCreationModal}>
+                            <PlusIcon size={18} /> New Project
+                        </UiButton>
                     </div>
 
                     {loading && <div className={styles.loading}>Loading projects...</div>}
@@ -234,13 +243,14 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                             </span>
                                         )}
                                     </div>
-                                    <button
-                                        className={styles.deleteButton}
+                                    <UiButton
+                                        variant={ButtonVariant.GHOST_DANGER}
+                                        size={ButtonSize.SMALL}
                                         onClick={(e) => this.handleRequestDelete(e, project)}
                                         title="Delete Project"
                                     >
                                         Delete
-                                    </button>
+                                    </UiButton>
                                 </div>
                             </div>
                         ))}
