@@ -148,7 +148,14 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
     };
 
     renderCollage = (project: Project) => {
-        const sessions = this.state.projectSessions[project.id] || [];
+        let sessions = this.state.projectSessions[project.id] || [];
+        
+        if (project.sessionIds && Array.isArray(project.sessionIds) && sessions.length > 0) {
+            sessions = project.sessionIds
+                .map(id => sessions.find(s => s.id === id))
+                .filter(Boolean) as any[];
+        }
+
         if (sessions.length === 0) {
             return <div className={styles.emptyCollage}>No previews available</div>;
         }
