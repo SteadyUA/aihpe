@@ -48,10 +48,6 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
     }
 
     getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
-        // Prepare to hide: Save scroll position before display becomes none
-        if (prevProps.isVisible && !this.props.isVisible) {
-            this.previewRef.current?.saveScroll();
-        }
         return null;
     }
 
@@ -68,7 +64,6 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();
         } else if (!prevProps.isVisible && this.props.isVisible) {
-            this.previewRef.current?.restoreScroll();
             if (this.props.session.selection) {
                 this.visualizeSelection(this.props.session.selection);
             }
@@ -263,7 +258,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                 <Chat
                     ref={this.chatRef}
                     sessionId={session.id}
-                    version={session.currentVersion ?? 0}
+                    version={session.currentVersion}
                     onUpdateSession={this.props.onUpdateSession}
                     status={session.status || SessionStatus.IDLE}
                     isVisible={isVisible}
@@ -293,7 +288,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                 <Workarea
                     ref={this.previewRef}
                     sessionId={session.id}
-                    version={session.currentVersion ?? 0}
+                    version={session.currentVersion}
                     latestVersion={session.latestVersion ?? 0}
                     activeTab={session.activeTab}
                     onTabChange={(tab: any) => this.props.onUpdateSession({ activeTab: tab })}

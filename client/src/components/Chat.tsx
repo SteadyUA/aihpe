@@ -393,7 +393,7 @@ class Message extends React.Component<MessageProps> {
 interface ChatProps {
     status: SessionStatus;
     sessionId: string;
-    version: number;
+    version?: number;
     selection?: string | null;
     resource?: string | null;
     onClearSelection?: () => void;
@@ -632,6 +632,23 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
         const isVisible = el && el.offsetParent !== null;
 
         if (el && isVisible) {
+            const container = el.closest(`.${styles.messages}`);
+            if (container) {
+                const cRect = container.getBoundingClientRect();
+                const eRect = el.getBoundingClientRect();
+                
+                const tolerance = 5;
+                const isTopVisible = eRect.top >= (cRect.top - tolerance);
+                const isBottomVisible = eRect.bottom <= (cRect.bottom + tolerance);
+                const isFullyVisible = isTopVisible && isBottomVisible;
+                
+                const isCovering = eRect.top <= (cRect.top + tolerance) && eRect.bottom >= (cRect.bottom - tolerance);
+
+                if (isFullyVisible || isCovering) {
+                    return; // Already visible, skip scroll
+                }
+            }
+
             el.scrollIntoView({ behavior, block });
         } else if (attempts < 10) {
             // Element might exist but be hidden (e.g. inside a display:none container or before layout)

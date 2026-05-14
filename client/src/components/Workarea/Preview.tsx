@@ -52,6 +52,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     private iframeRef: React.RefObject<HTMLIFrameElement | null>;
     private containerRef: React.RefObject<HTMLDivElement | null>;
     private cleanupCustomScrollbar?: () => void;
+    private scrollbarInjectorInterval: any = null;
 
     constructor(props: PreviewProps) {
         super(props);
@@ -75,16 +76,21 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         // No initial action needed, restoration happens on iframe load
         this.observeContainer();
         window.addEventListener('resize', this.calculateScale);
+        window.addEventListener('preview-scroll-sync', this.handleScrollSync as EventListener);
+        this.startScrollbarInjector();
     }
 
     componentWillUnmount() {
-        this.saveScrollPosition();
         this.cleanupScrollListener();
         this.stopPolling();
+        if (this.scrollbarInjectorInterval) {
+            clearInterval(this.scrollbarInjectorInterval);
+        }
         if (this.resizeObserver) {
             this.resizeObserver.disconnect();
         }
         window.removeEventListener('resize', this.calculateScale);
+        window.removeEventListener('preview-scroll-sync', this.handleScrollSync as EventListener);
     }
 
     private resizeObserver: ResizeObserver | null = null;
@@ -147,38 +153,48 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     };
 
     getSnapshotBeforeUpdate(prevProps: PreviewProps) {
-        if (
-            prevProps.sessionId !== this.props.sessionId ||
-            prevProps.version !== this.props.version
-        ) {
-            this.saveScrollPosition();
-        }
-        // If becoming inactive (tab switch), save scroll
-        if (prevProps.active && !this.props.active) {
-            this.saveScrollPosition(true);
-        }
-        // If we are about to switch version within the same session
-        if (
-            prevProps.sessionId === this.props.sessionId &&
-            prevProps.version !== this.props.version &&
-            prevProps.active
-        ) {
-            // Logic handled by saveScrollPosition above, but we keep this for legacy alignment if needed,
-            // though saveScrollPosition writes to static store now.
-        }
         return null;
     }
 
     componentDidUpdate(prevProps: PreviewProps, prevState: PreviewState, _snapshot: any) {
         // If became active (tab switch), restore scroll
         if (!prevProps.active && this.props.active) {
-            this.restoreScroll();
+            let attempts = 0;
+            const tryRestore = () => {
+                if (!this.props.active) return;
+                
+                const iframe = this.iframeRef.current;
+                if (iframe && iframe.contentWindow) {
+                    if (iframe.offsetHeight > 0) {
+                        this.restoreScroll();
+                        this.manageCustomScrollbar();
+                    }
+                }
+                
+                attempts++;
+                if (attempts < 10) {
+                    setTimeout(tryRestore, 30);
+                }
+            };
+            tryRestore();
+
             // Also recalc scale as container might have changed size
             setTimeout(this.calculateScale, 0);
+            this.startPolling();
+        } else if (prevProps.active && !this.props.active) {
+            this.stopPolling();
         }
 
         if (prevState.isMobile !== this.state.isMobile || prevState.deviceIndex !== this.state.deviceIndex) {
             this.calculateScale();
+        }
+
+        if (
+            prevProps.sessionId !== this.props.sessionId ||
+            prevProps.version !== this.props.version ||
+            prevProps.reloadTrigger !== this.props.reloadTrigger
+        ) {
+            this.startScrollbarInjector();
         }
 
         if (prevState.isMobile !== this.state.isMobile) {
@@ -186,32 +202,18 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     }
 
-    saveScrollPosition = (force: boolean = false) => {
+    handleScrollSync = (e: CustomEvent) => {
         const { sessionId, active } = this.props;
-        if (!sessionId) return;
-
-        // Dont save if we are hidden or inactive, as scroll values might be 0
-        if (!active && !force) return;
+        if (active) return; // Active iframe drives the scroll
+        if (e.detail.sessionId !== sessionId) return;
 
         const iframe = this.iframeRef.current;
         if (iframe && iframe.contentWindow) {
-            // Double check if we are truly visible to avoid saving 0s
-            // (width logic is handled by 'active' prop usually, but safeguards help)
-            if (iframe.offsetWidth === 0 && iframe.offsetHeight === 0 && !force) return;
-
             try {
-                const x = iframe.contentWindow.scrollX;
-                const y = iframe.contentWindow.scrollY;
-                if (x !== undefined && y !== undefined) {
-                    Preview.scrollStore[sessionId] = { x, y };
-                }
-            } catch (e) {
-                // Ignored (cross-origin or closed)
-            }
+                iframe.contentWindow.scrollTo(e.detail.x, e.detail.y);
+            } catch (error) {}
         }
     };
-
-    public saveScroll = () => this.saveScrollPosition(true);
 
     public restoreScroll = () => {
         const { sessionId } = this.props;
@@ -238,20 +240,48 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         this.thottledScrollHandler = null;
     }
 
-    throttle = (func: () => void, limit: number) => {
-        let inThrottle: boolean;
+    debounce = (func: () => void, limit: number) => {
+        let timeout: any;
         return () => {
-            if (!inThrottle) {
-                func();
-                inThrottle = true;
-                setTimeout(() => (inThrottle = false), limit);
-            }
+            clearTimeout(timeout);
+            timeout = setTimeout(func, limit);
         };
     };
 
     handleScroll = () => {
-        this.saveScrollPosition();
+        const { sessionId, active } = this.props;
+        if (!active || !sessionId) return;
+        
+        const iframe = this.iframeRef.current;
+        if (!iframe || !iframe.contentWindow) return;
+
+        try {
+            const x = iframe.contentWindow.scrollX;
+            const y = iframe.contentWindow.scrollY;
+
+            if (x !== undefined && y !== undefined) {
+                Preview.scrollStore[sessionId] = { x, y };
+                window.dispatchEvent(new CustomEvent('preview-scroll-sync', { detail: { sessionId, x, y } }));
+            }
+        } catch (e) {}
     }
+
+    startScrollbarInjector = () => {
+        if (this.scrollbarInjectorInterval) {
+            clearInterval(this.scrollbarInjectorInterval);
+        }
+        
+        this.scrollbarInjectorInterval = setInterval(() => {
+            const iframe = this.iframeRef.current;
+            if (iframe && iframe.contentDocument && iframe.contentDocument.head) {
+                const doc = iframe.contentDocument;
+                const STYLE_ID = 'mobile-custom-scroll-style';
+                if (!doc.getElementById(STYLE_ID) && this.state.isMobile) {
+                    this.manageCustomScrollbar();
+                }
+            }
+        }, 50);
+    };
 
     manageCustomScrollbar = () => {
         const iframe = this.iframeRef.current;
@@ -462,11 +492,16 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
                 // 2. Attach scroll listener
                 // First cleanup old if any (though iframe reload usually wipes listeners on window)
-                this.thottledScrollHandler = this.throttle(this.handleScroll, 200);
+                this.thottledScrollHandler = this.debounce(this.handleScroll, 200);
                 iframe.contentWindow.addEventListener('scroll', this.thottledScrollHandler);
             } catch (e) {
                 // Ignored
             }
+        }
+
+        if (this.scrollbarInjectorInterval) {
+            clearInterval(this.scrollbarInjectorInterval);
+            this.scrollbarInjectorInterval = null;
         }
 
         this.manageCustomScrollbar();

@@ -17,7 +17,7 @@ import { apiAuth } from '../../utils/api';
 
 interface WorkareaProps {
     sessionId: string | null;
-    version: number;
+    version?: number;
     activeTab: TabType;
     onTabChange?: (tab: TabType) => void;
     onLoad?: () => void;
@@ -47,7 +47,8 @@ const FILENAME_MAP: Record<AssetType, string> = {
 };
 
 interface WorkareaState {
-    iframeKey: number;
+    previewCache: number[];
+    versionReloadKeys: Record<number, number>;
     // Cache per version: version -> { html: ..., css: ... }
     versionCache: Record<number, Record<AssetType, string | null>>;
     loading: Record<AssetType, boolean>;
@@ -65,7 +66,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
     constructor(props: WorkareaProps) {
         super(props);
         this.state = {
-            iframeKey: 0,
+            previewCache: props.version !== undefined ? [props.version] : [],
+            versionReloadKeys: {},
             versionCache: {}, // Initialize empty
             loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
             unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
@@ -90,17 +92,46 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
         const sessionChanged = prevProps.sessionId !== this.props.sessionId;
         const versionChanged = prevProps.version !== this.props.version;
-        const activeTurnChanged = prevProps.displayedTurn !== this.props.displayedTurn;
         const tabChanged = prevProps.activeTab !== this.props.activeTab;
 
-        if (sessionChanged || versionChanged || activeTurnChanged) {
-            // Full reset for new turn/session
+        if (sessionChanged) {
+            // Full reset for new session
             this.setState(
                 (prev) => {
                     const newState: Partial<WorkareaState> = {
                         loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
                         unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
-                        iframeKey: prev.iframeKey + 1,
+                        previewCache: this.props.version !== undefined ? [this.props.version] : [],
+                        versionReloadKeys: {},
+                    };
+
+
+
+                    return newState as WorkareaState;
+                },
+                () => {
+                    this.loadContent();
+                },
+            );
+        } else if (versionChanged) {
+            // Add to cache
+            this.setState(
+                (prev) => {
+                    const newVersion = this.props.version;
+                    let newCache = [...prev.previewCache];
+                    if (newVersion !== undefined) {
+                        if (!newCache.includes(newVersion)) {
+                            newCache.push(newVersion);
+                            if (newCache.length > 5) {
+                                newCache.shift();
+                            }
+                        }
+                    }
+                    
+                    const newState: Partial<WorkareaState> = {
+                        loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
+                        unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
+                        previewCache: newCache
                     };
 
 
@@ -130,9 +161,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         this.monacoConfigured = false;
     }
 
-    public saveScroll = () => {
-        this.previewRef.current?.saveScroll();
-    }
+
 
     handleVersionClick = () => {
         this.setState({ showMemoryModal: true });
@@ -169,7 +198,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
             return {
                 versionCache: newCache,
-                iframeKey: prev.iframeKey + 1
+                versionReloadKeys: {
+                    ...prev.versionReloadKeys,
+                    [version]: (prev.versionReloadKeys[version] || 0) + 1
+                }
             };
         }, () => {
             // Re-fetch if current and matching active tab
@@ -193,7 +225,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
     fetchFile = async (type: AssetType) => {
         const { sessionId, version } = this.props;
-        if (!sessionId) return;
+        if (!sessionId || version === undefined) return;
 
         // Check loading
         if (this.state.loading[type]) {
@@ -281,6 +313,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         // Use targetType if provided, otherwise activeTab
         const typeToSave = targetType || activeTab as unknown as AssetType;
 
+        if (version === undefined) return;
+
         if (typeToSave === TabType.PREVIEW as unknown as AssetType || typeToSave === TabType.RESOURCES as unknown as AssetType) return;
         const content = unsavedContent[typeToSave as AssetType];
         if (content === null) return; // No changes
@@ -328,7 +362,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                         [typeToSave]: null,
                     },
                     isSaving: false,
-                    iframeKey: prev.iframeKey + 1, // Force iframe refresh in Preview
+                    versionReloadKeys: {
+                        ...prev.versionReloadKeys,
+                        [version]: (prev.versionReloadKeys[version] || 0) + 1
+                    }, // Force iframe refresh in Preview
                 };
             });
         } catch (error) {
@@ -389,6 +426,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
 
                     // Get CSS content
                     const currVersion = this.props.version;
+                    if (currVersion === undefined) return { suggestions: [] };
                     const cache = this.state.versionCache[currVersion];
                     const cssContent =
                         this.state.unsavedContent?.css ??
@@ -421,6 +459,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                 provideCompletionItems: (_model: any, _position: any) => {
                     // Start simple: always suggest known IDs and classes
                     const currVersion = this.props.version;
+                    if (currVersion === undefined) return { suggestions: [] };
                     const cache = this.state.versionCache[currVersion];
 
                     const htmlContent =
@@ -480,9 +519,20 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
             versionCache,
             loading,
             unsavedContent,
-            iframeKey,
+            previewCache,
+            versionReloadKeys
         } = this.state;
         const isCodeView = activeTab !== TabType.PREVIEW && activeTab !== TabType.RESOURCES;
+
+        if (version === undefined) {
+            return (
+                <div className={classNames(styles.panel, { [styles.codeView]: isCodeView })}>
+                    <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
+                        <div className="loader">Resolving version...</div>
+                    </div>
+                </div>
+            );
+        }
 
         // Resolve content for current version
         const currentFiles = versionCache[version] || { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null };
@@ -532,18 +582,24 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                     ))}
                 </div>
 
-                <Preview
-                    ref={this.previewRef}
-                    sessionId={sessionId}
-                    version={version}
-                    active={activeTab === TabType.PREVIEW}
-                    onLoad={onLoad}
-                    reloadTrigger={iframeKey}
-                    isResizing={this.props.isResizing}
-                    onPickElement={this.props.onPickElement}
-                    onCancelPick={this.props.onCancelPick}
-                    isPicking={this.props.isPicking}
-                />
+                {previewCache.map((cachedVersion) => {
+                    const isPreviewActive = activeTab === TabType.PREVIEW && cachedVersion === version;
+                    return (
+                        <Preview
+                            key={`preview-${cachedVersion}`}
+                            ref={cachedVersion === version ? this.previewRef : undefined}
+                            sessionId={sessionId}
+                            version={cachedVersion}
+                            active={isPreviewActive}
+                            onLoad={cachedVersion === version ? onLoad : undefined}
+                            reloadTrigger={versionReloadKeys[cachedVersion] || 0}
+                            isResizing={this.props.isResizing}
+                            onPickElement={cachedVersion === version ? this.props.onPickElement : undefined}
+                            onCancelPick={cachedVersion === version ? this.props.onCancelPick : undefined}
+                            isPicking={cachedVersion === version ? this.props.isPicking : undefined}
+                        />
+                    );
+                })}
 
                 <Resources
                     sessionId={sessionId}

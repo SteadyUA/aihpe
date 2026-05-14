@@ -512,6 +512,11 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
     };
 
     syncProjectSessions = (projectSessions: any[], activeId?: string) => {
+        const { searchParams } = this.props.router;
+        const sessionIdQuery = searchParams.get('sessionId');
+        const turnFromUrl = searchParams.get('turn');
+        const tabFromUrl = searchParams.get('tab') as TabType;
+
         this.setState(prev => {
             const sessionsMap: Record<string, Session> = { ...prev.sessions };
             const order: string[] = [];
@@ -531,6 +536,10 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
 
                 const existing = prev.sessions[sId];
 
+                const isUrlSession = sId === (activeId || sessionIdQuery);
+                const targetTurn = (isUrlSession && turnFromUrl) ? parseInt(turnFromUrl, 10) : (s.lastTurn ?? 0);
+                const targetTab = (isUrlSession && tabFromUrl) ? tabFromUrl : 'preview';
+
                 // Create full session object using new enriched data from server
                 sessionsMap[sId] = {
                     id: sId,
@@ -538,8 +547,8 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                     status: existing ? (mappedStatus === SessionStatus.IDLE ? (existing.status || SessionStatus.IDLE) : mappedStatus) : mappedStatus,
 
                     lastTurn: s.lastTurn ?? 0,
-                    activeTurn: existing ? (existing.activeTurn ?? s.lastTurn ?? 0) : (s.lastTurn ?? 0),
-                    activeTab: existing?.activeTab || 'preview',
+                    activeTurn: existing ? (existing.activeTurn ?? s.lastTurn ?? 0) : targetTurn,
+                    activeTab: existing?.activeTab || targetTab,
                     selection: (s.unsent?.selection) ?? (existing ? existing.selection : null),
                     isPicking: existing?.isPicking || false,
                     pendingRefreshTurn: null,
@@ -553,7 +562,8 @@ class SessionProviderInternal extends React.Component<SessionProviderProps, Sess
                     attachment: (s.unsent?.attachment) ?? (existing ? existing.attachment : undefined),
 
                     tokenUsage: s.tokenUsage,
-                    currentVersion: s.currentVersion,
+                    currentVersion: targetTurn === s.lastTurn ? s.currentVersion : undefined,
+                    latestVersion: s.currentVersion,
                 };
             });
 
