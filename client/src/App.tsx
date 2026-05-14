@@ -172,30 +172,24 @@ class App extends React.Component<RouterProps, AppState> {
         return (
             <ConnectionProvider isConnected={isConnected}>
                 <ClipboardProvider>
-                    <Routes>
-                        <Route path="/projects" element={
-                            <MainLayout headerContent={
-                                <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
-                            }>
+                    <MainLayout>
+                        <Routes>
+                            <Route path="/projects" element={
                                 <Projects
                                     currentProjectId={null}
                                     onSelectProject={(id) => navigate(`/project/${id}`)}
                                 />
-                            </MainLayout>
-                        } />
-                        <Route path="/settings" element={
-                            <MainLayout headerContent={
-                                <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>Settings</div>
-                            }>
+                            } />
+                            <Route path="/settings" element={
                                 <Settings />
-                            </MainLayout>
-                        } />
-                        <Route path="/project/:projectId" element={
-                            <ProjectWorkspace />
-                        } />
-                        <Route path="/" element={<Navigate to="/projects" replace />} />
-                        <Route path="*" element={<Navigate to="/projects" replace />} />
-                    </Routes>
+                            } />
+                            <Route path="/project/:projectId" element={
+                                <ProjectWorkspace />
+                            } />
+                            <Route path="/" element={<Navigate to="/projects" replace />} />
+                            <Route path="*" element={<Navigate to="/projects" replace />} />
+                        </Routes>
+                    </MainLayout>
                 </ClipboardProvider>
             </ConnectionProvider>
         );

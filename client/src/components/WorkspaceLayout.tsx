@@ -1,7 +1,7 @@
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { SessionBar } from './SessionBar';
-import { MainLayout } from './MainLayout';
 import { ConfirmationModal } from './ConfirmationModal';
 import { ProjectCreationModal } from './ProjectCreationModal';
 import { ProjectSettingsModal } from './ProjectSettingsModal';
@@ -46,6 +46,18 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
         } else {
             // Auto-create if no sessions exist
             this.props.createSession();
+        }
+
+        const contentEl = document.getElementById('layout-content');
+        if (contentEl) {
+            contentEl.style.overflow = 'hidden';
+        }
+    }
+
+    componentWillUnmount() {
+        const contentEl = document.getElementById('layout-content');
+        if (contentEl) {
+            contentEl.style.overflow = '';
         }
     }
 
@@ -139,6 +151,8 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
             }
         });
 
+        const headerElement = document.getElementById('header-portal-target');
+
         return (
             <>
                 <ProjectCreationModal
@@ -163,28 +177,26 @@ class WorkspaceLayoutInternal extends React.Component<WorkspaceLayoutProps, Work
                     onCancel={cancelDeleteSession}
                 />
 
-                <MainLayout
-                    noScroll={true}
-                    headerContent={
-                        <SessionBar
-                            sessions={sessionOrder}
-                            activeSessionId={activeSessionId}
-                            onSwitch={switchSession}
-                            onCreate={createSession}
-                            onRemove={removeSession}
-                            statusMap={statusMap}
-                            groups={groups}
-                            subjects={subjects}
-                            pendingSessions={pendingSessions}
-                            onProjectSettings={this.toggleProjectSettings}
-                            projectName={currentName || 'Untitled'}
-                            onReorder={handleSessionReorder}
-                            versions={versions}
-                        />
-                    }
-                >
-                    <SessionManager />
-                </MainLayout>
+                {headerElement && createPortal(
+                    <SessionBar
+                        sessions={sessionOrder}
+                        activeSessionId={activeSessionId}
+                        onSwitch={switchSession}
+                        onCreate={createSession}
+                        onRemove={removeSession}
+                        statusMap={statusMap}
+                        groups={groups}
+                        subjects={subjects}
+                        pendingSessions={pendingSessions}
+                        onProjectSettings={this.toggleProjectSettings}
+                        projectName={currentName || 'Untitled'}
+                        onReorder={handleSessionReorder}
+                        versions={versions}
+                    />,
+                    headerElement
+                )}
+
+                <SessionManager />
             </>
         );
     }

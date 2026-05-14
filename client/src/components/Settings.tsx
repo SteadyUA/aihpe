@@ -1,4 +1,5 @@
 import React, { Component } from 'react';
+import { createPortal } from 'react-dom';
 import { withRouter, RouterProps } from './withRouter';
 import styles from './Settings.module.css';
 import { UiModal } from './UiModal';
@@ -119,13 +120,15 @@ class Settings extends Component<SettingsProps, SettingsState> {
     render() {
         const { login, isChangePasswordOpen, oldPassword, newPassword, repeatPassword, error, success } = this.state;
 
+        const headerElement = document.getElementById('header-portal-target');
+
         return (
             <div className={styles.container}>
+                {headerElement && createPortal(
+                    <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>Settings</div>,
+                    headerElement
+                )}
                 <div className={styles.content}>
-                    <div className={styles.header}>
-                        <h1 className={styles.title}>Settings</h1>
-                    </div>
-
                     <div className={styles.section}>
                         <h2 className={styles.sectionTitle}>Authentication</h2>
                         <div className={styles.fieldRow}>
