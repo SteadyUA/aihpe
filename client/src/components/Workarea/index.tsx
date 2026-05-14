@@ -32,6 +32,8 @@ interface WorkareaProps {
     onPickElement?: () => void;
     onCancelPick?: () => void;
     isPicking?: boolean;
+    selection?: string | null;
+    onSelectElement?: (selector: string | null) => void;
 }
 
 export enum AssetType {
@@ -174,6 +176,10 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
     public restoreScroll = () => {
         this.previewRef.current?.restoreScroll();
     }
+
+    public visualizeSelection = (selector: string, scrollTo: boolean = false) => {
+        this.previewRef.current?.visualizeSelection(selector, scrollTo);
+    };
 
     public clearCache = (version: number, filename?: string) => {
         this.setState(prev => {
@@ -597,6 +603,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                             onPickElement={cachedVersion === version ? this.props.onPickElement : undefined}
                             onCancelPick={cachedVersion === version ? this.props.onCancelPick : undefined}
                             isPicking={cachedVersion === version ? this.props.isPicking : undefined}
+                            selection={cachedVersion === version ? this.props.selection : undefined}
+                            onSelectElement={cachedVersion === version ? this.props.onSelectElement : undefined}
                         />
                     );
                 })}

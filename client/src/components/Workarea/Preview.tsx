@@ -7,6 +7,7 @@ import { Toolbar } from './Toolbar';
 import { apiAuth } from '../../utils/api';
 import styles from './Preview.module.css';
 import { RefreshCwIcon, ChevronLeftIcon, ChevronRightIcon, ExternalLinkIcon, DownloadIcon, CameraIcon, ExpandIcon } from '../../icons';
+import { ElementPicker } from '../../lib/ElementPicker';
 
 interface Device {
     name: string;
@@ -33,6 +34,8 @@ interface PreviewProps {
     onPickElement?: () => void;
     onCancelPick?: () => void;
     isPicking?: boolean;
+    selection?: string | null;
+    onSelectElement?: (selector: string | null) => void;
 }
 
 interface PreviewState {
@@ -53,6 +56,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     private containerRef: React.RefObject<HTMLDivElement | null>;
     private cleanupCustomScrollbar?: () => void;
     private scrollbarInjectorInterval: any = null;
+    private picker: ElementPicker;
 
     constructor(props: PreviewProps) {
         super(props);
@@ -70,9 +74,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         };
         this.iframeRef = React.createRef();
         this.containerRef = React.createRef();
+        this.picker = new ElementPicker();
     }
 
     componentDidMount() {
+        this.picker.setOnSelect((selector) => this.props.onSelectElement?.(selector));
         // No initial action needed, restoration happens on iframe load
         this.observeContainer();
         window.addEventListener('resize', this.calculateScale);
@@ -81,6 +87,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     }
 
     componentWillUnmount() {
+        this.picker.stop();
         this.cleanupScrollListener();
         this.stopPolling();
         if (this.scrollbarInjectorInterval) {
@@ -200,6 +207,26 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         if (prevState.isMobile !== this.state.isMobile) {
             this.manageCustomScrollbar();
         }
+
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+            if (!prevProps.isPicking && this.props.isPicking) {
+                this.picker.start(iframe);
+            } else if (prevProps.isPicking && !this.props.isPicking) {
+                this.picker.stop();
+                if (this.props.selection) {
+                    this.picker.selectBySelector(iframe, this.props.selection);
+                }
+            }
+
+            if (this.props.selection !== prevProps.selection) {
+                if (this.props.selection) {
+                    this.picker.selectBySelector(iframe, this.props.selection);
+                } else {
+                    this.picker.clearSelection();
+                }
+            }
+        }
     }
 
     handleScrollSync = (e: CustomEvent) => {
@@ -227,6 +254,13 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             }
         }
     }
+
+    public visualizeSelection = (selector: string, scrollTo: boolean = false) => {
+        const iframe = this.iframeRef.current;
+        if (iframe && iframe.contentWindow) {
+            this.picker.selectBySelector(iframe, selector, scrollTo);
+        }
+    };
 
     cleanupScrollListener = () => {
         const iframe = this.iframeRef.current;
@@ -506,6 +540,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
 
         this.manageCustomScrollbar();
         this.startPolling();
+
+        if (this.props.isPicking) {
+            this.picker.start(iframe!);
+        } else if (this.props.selection) {
+            this.picker.selectBySelector(iframe!, this.props.selection);
+        }
 
         if (this.props.onLoad) {
             this.props.onLoad();

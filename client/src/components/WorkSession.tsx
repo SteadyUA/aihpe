@@ -4,7 +4,6 @@ import { Chat, ChatInternal } from './Chat';
 import { Workarea } from './Workarea';
 import { Session, SessionStatus } from '../types';
 import { ResizeHandle } from './ResizeHandle';
-import { ElementPicker } from '../lib/ElementPicker';
 
 interface WorkSessionProps {
     session: Session;
@@ -22,15 +21,12 @@ interface WorkSessionState {
 }
 
 export class WorkSession extends React.Component<WorkSessionProps, WorkSessionState> {
-    private picker: ElementPicker;
     private previewRef: React.RefObject<Workarea | null>;
     private chatRef: React.RefObject<ChatInternal | null>;
     private hasInitialScrollHappened = false;
 
     constructor(props: WorkSessionProps) {
         super(props);
-        this.picker = new ElementPicker();
-        this.picker.setOnSelect(this.handleElementSelected);
         this.previewRef = React.createRef();
         this.chatRef = React.createRef();
 
@@ -64,9 +60,6 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
         if (prevProps.isVisible && !this.props.isVisible) {
             this.stopPicking();
         } else if (!prevProps.isVisible && this.props.isVisible) {
-            if (this.props.session.selection) {
-                this.visualizeSelection(this.props.session.selection);
-            }
             this.chatRef.current?.focus();
         } else if (this.props.isVisible) {
             const wasLoading = prevProps.session.status === SessionStatus.PENDING || prevProps.session.status === SessionStatus.UNLOADED;
@@ -92,28 +85,17 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
             this.props.onUpdateSession({ pendingRefreshTurn: null });
         }
 
-        // 4. Handle Selection Restoration
-        if (this.props.session.selection && this.props.session.selection !== prevProps.session.selection) {
-            const tabChanged = prevProps.session.activeTab !== this.props.session.activeTab;
-            if (!turnChanged && !tabChanged) {
-                this.visualizeSelection(this.props.session.selection);
-            }
-        }
+        // 4. Handle Selection Restoration (Delegated to Preview)
 
         // 5. Handle Tab Switch Side Effects
         if (prevProps.session.activeTab !== this.props.session.activeTab) {
             if (this.props.session.activeTab !== 'preview') {
                 this.stopPicking();
-            } else {
-                if (this.props.session.selection) {
-                    this.visualizeSelection(this.props.session.selection);
-                }
             }
         }
     }
 
     componentWillUnmount() {
-        this.picker.stop();
         window.removeEventListener('mousemove', this.handleResizeMove);
         window.removeEventListener('mouseup', this.handleResizeEnd);
     }
@@ -143,46 +125,25 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
 
     /* SELECTION LOGIC */
     visualizeSelection = (selector: string, scrollTo: boolean = false) => {
-        const previewInstance = this.previewRef.current;
-        if (!previewInstance) return;
-        const iframe = previewInstance.getIframe();
-        if (!iframe) return;
-        this.picker.selectBySelector(iframe, selector, scrollTo);
+        this.previewRef.current?.visualizeSelection(selector, scrollTo);
     };
 
     handlePreviewLoad = () => {
-        if (this.props.session.selection) {
-            this.visualizeSelection(this.props.session.selection);
-        }
+        // Selection restoration is now handled inside Preview component
     };
 
     handleElementSelected = (selector: string | null) => {
         if (this.props.session.isPicking) {
-            this.picker.stop();
             this.props.onUpdateSession({ isPicking: false });
         }
         this.props.onUpdateSession({ selection: selector });
-        if (selector) {
-            this.visualizeSelection(selector);
-        } else {
-            this.picker.clearSelection();
-        }
     }
 
     startPicking = () => {
-        const previewInstance = this.previewRef.current;
-        if (!previewInstance) return;
-        const iframe = previewInstance.getIframe();
-        if (!iframe) {
-            alert('Preview not ready');
-            return;
-        }
         this.props.onUpdateSession({ isPicking: true });
-        this.picker.start(iframe);
     };
 
     stopPicking = () => {
-        this.picker.stop();
         this.props.onUpdateSession({ isPicking: false });
     };
 
@@ -192,7 +153,6 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
     };
 
     clearSelection = () => {
-        this.picker.clearSelection();
         this.props.onUpdateSession({ selection: null });
     };
 
@@ -303,6 +263,8 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
                     onPickElement={this.startPicking}
                     onCancelPick={this.stopPicking}
                     isPicking={session.isPicking || false}
+                    selection={session.selection || null}
+                    onSelectElement={this.handleElementSelected}
                 />
             </div>
         );
