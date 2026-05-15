@@ -4,6 +4,9 @@ import { apiAuth } from '../utils/api';
 export interface ClipboardRecord {
     id: string;
     description: string;
+    projectId?: string;
+    sessionId?: string;
+    version?: number;
 }
 
 export interface ClipboardContextProps {

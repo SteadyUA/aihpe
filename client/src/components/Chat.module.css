@@ -108,7 +108,7 @@
 
 .message {
     display: flex;
-    align-items: flex-end;
+    align-items: stretch;
     justify-content: flex-end;
     gap: 10px;
     margin-top: 1rem;
@@ -294,6 +294,7 @@
 .messageActions {
     display: flex;
     flex-direction: column;
+    justify-content: flex-end;
     gap: 4px;
     min-width: 28px;
 }
@@ -538,6 +539,25 @@
     color: var(--text-secondary);
     opacity: 0.7;
     align-self: center;
+}
+
+.versionIndicator {
+    margin-bottom: auto;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.75rem;
+    opacity: 0.7;
+    color: var(--text-secondary);
+    padding: 2px;
+    border-radius: 4px;
+    align-self: stretch;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.savedVersion {
+    opacity: 1;
+    background-color: var(--used-bg-color);
+    color: var(--used-color);
 }
 
 /* New Chat Input Design */

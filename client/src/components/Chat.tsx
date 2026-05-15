@@ -37,6 +37,7 @@ interface MessageProps {
     onImageLoad?: () => void;
     onQuoteActionClick?: (quoteText: string, rect: DOMRect) => void;
     onSelectResource?: (filename: string) => void;
+    isSavedVersion?: boolean;
 }
 
 const formatTime = (dateString?: string) => {
@@ -171,6 +172,7 @@ class Message extends React.Component<MessageProps> {
             isPending,
             statusMessages,
             startTime,
+            isSavedVersion,
         } = this.props;
         const isUser = msg.role === 'user';
         const isAssistant = msg.role === 'assistant';
@@ -337,6 +339,12 @@ class Message extends React.Component<MessageProps> {
                 </div>
                 {/* Message Actions */}
                 <div className={styles.messageActions}>
+                    {/* Version Indicator at top */}
+                    {isAssistant && !isPending && msg.version !== undefined && (
+                        <div className={classNames(styles.versionIndicator, { [styles.savedVersion]: isSavedVersion })}>
+                            v{msg.version}
+                        </div>
+                    )}
                     {isPending && (
                         <>
                             <span className={styles.spinner}></span>
@@ -1392,6 +1400,7 @@ export class ChatInternal extends React.Component<ChatPropsWithContext, ChatStat
                                         onSwitchSession={onSwitchSession}
                                         onQuoteActionClick={this.handleQuoteActionClick}
                                         onSelectResource={this.handleSelectResource}
+                                        isSavedVersion={this.props.clipboardRecord?.sessionId === this.props.sessionId && this.props.clipboardRecord?.version === m.version && m.version !== undefined}
                                     />
                                 );
                             })}

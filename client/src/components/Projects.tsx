@@ -10,8 +10,9 @@ import { UiButton, ButtonVariant, ButtonSize } from './UiButton';
 import { PlusIcon } from '../icons';
 import styles from './Projects.module.css';
 import classNames from 'classnames';
+import { withClipboard, ClipboardContextProps } from '../contexts/ClipboardContext';
 
-interface ProjectsProps extends RouterProps {
+interface ProjectsProps extends RouterProps, ClipboardContextProps {
     onSelectProject: (projectId: string, lastSessionId?: string) => void;
     currentProjectId: string | null;
 }
@@ -148,6 +149,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
     };
 
     renderCollage = (project: Project) => {
+        const { clipboardRecord } = this.props;
         let sessions = this.state.projectSessions[project.id] || [];
         
         if (project.sessionIds && Array.isArray(project.sessionIds) && sessions.length > 0) {
@@ -166,12 +168,13 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
             <div className={styles.collageContainer}>
                 {sessions.map((session, i) => {
                     const isActive = session.id === activeSessionId;
+                    const isSaved = clipboardRecord?.sessionId === session.id;
 
                     return (
-                        <div key={session.id} className={classNames(styles.cardWrapper, { [styles.activeWrapper]: isActive })}>
+                        <div key={session.id} className={classNames(styles.cardWrapper, { [styles.activeWrapper]: isActive, [styles.savedWrapper]: isSaved })}>
                             <img
                                 src={`${import.meta.env.BASE_URL}api/sessions/${session.id}/${session.currentVersion}/preview`}
-                                className={classNames(styles.collageCard, { [styles.activeCard]: isActive })}
+                                className={classNames(styles.collageCard, { [styles.activeCard]: isActive, [styles.savedCard]: isSaved })}
                                 alt={`Preview ${i}`}
                                 onError={(e) => {
                                     (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="60" height="100" fill="none" stroke="%23ccc"><rect width="60" height="100" rx="4"/></svg>';
@@ -185,7 +188,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
     };
 
     render() {
-        const { currentProjectId } = this.props;
+        const { currentProjectId, clipboardRecord } = this.props;
         const { projects, loading, error, showCreationModal, projectToDelete } = this.state;
 
         const headerElement = document.getElementById('header-portal-target');
@@ -213,7 +216,9 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                     )}
 
                     <div className={styles.projectGrid}>
-                        {projects.map(project => (
+                        {projects.map(project => {
+                            const isSavedProject = clipboardRecord?.projectId === project.id;
+                            return (
                             <div
                                 key={project.id}
                                 className={`${styles.projectCard} ${project.id === currentProjectId ? styles.active : ''}`}
@@ -225,7 +230,7 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
 
                                 <div className={styles.projectFooter}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <span>{project.sessionIds?.length || 0} Sessions</span>
+                                        <span className={classNames({ [styles.savedText]: isSavedProject })}>{project.sessionIds?.length || 0} Sessions</span>
                                         {project.status === 'initialization' && (
                                             <span style={{
                                                 padding: '2px 6px',
@@ -260,7 +265,8 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
                                     </UiButton>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
 
@@ -284,4 +290,4 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
     }
 }
 
-export default withRouter(Projects);
+export default withClipboard(withRouter(Projects));

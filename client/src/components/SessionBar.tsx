@@ -3,7 +3,9 @@ import { SessionStatus } from '../types';
 import classNames from 'classnames';
 import styles from './SessionBar.module.css';
 import { SettingsIcon, AlertCircleIcon, MessageSquareIcon, PlusIcon } from '../icons';
-interface SessionBarProps {
+import { withClipboard, ClipboardContextProps } from '../contexts/ClipboardContext';
+
+interface SessionBarProps extends ClipboardContextProps {
     sessions: string[];
     activeSessionId: string | null;
     onSwitch: (id: string) => void;
@@ -28,7 +30,7 @@ interface SessionBarState {
     hoveredTabId: string | null;
 }
 
-export class SessionBar extends React.Component<
+class SessionBarInternal extends React.Component<
     SessionBarProps,
     SessionBarState
 > {
@@ -144,6 +146,7 @@ export class SessionBar extends React.Component<
             pendingSessions,
             projectName,
             versions,
+            clipboardRecord,
         } = this.props;
 
         const { dropTargetIndex, showLeftScroll, showRightScroll } = this.state;
@@ -232,6 +235,7 @@ export class SessionBar extends React.Component<
                     >
                         {sessions.map((id, index) => {
                             const isActive = id === activeSessionId;
+                            const isSavedSession = clipboardRecord?.sessionId === id;
                             const status = statusMap?.[id] || SessionStatus.IDLE;
                             const isPending = pendingSessions.includes(id);
                             const isBusy = status === SessionStatus.BUSY || isPending;
@@ -278,6 +282,7 @@ export class SessionBar extends React.Component<
                                             {
                                                 [styles.active]: isActive,
                                                 [styles.pending]: isPending,
+                                                [styles.saved]: isSavedSession,
                                             },
                                             groupClass,
                                         )}
@@ -364,3 +369,5 @@ export class SessionBar extends React.Component<
         );
     }
 }
+
+export const SessionBar = withClipboard(SessionBarInternal);

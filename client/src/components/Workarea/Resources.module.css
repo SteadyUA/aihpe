@@ -69,9 +69,9 @@
 }
 
 .imageTileSelected .resourceActionBtn:hover {
-    background: #f0fdf4;
-    color: #16a34a;
-    border-color: #22c55e;
+    background: var(--used-bg-color);
+    color: var(--used-color);
+    border-color: var(--used-color);
 }
 
 .imageTile:hover {
@@ -80,7 +80,7 @@
 }
 
 .imageTileSelected {
-    border-color: #22c55e !important;
+    border-color: var(--used-color) !important;
 }
 
 .imageThumbContainer {
@@ -155,8 +155,8 @@
 }
 
 .usageBadgeUsed {
-    background-color: #e6f4ea;
-    color: #1e8e3e;
+    background-color: var(--used-bg-color);
+    color: var(--used-color);
 }
 
 .usageBadgeUnused {

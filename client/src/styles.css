@@ -9,6 +9,8 @@
     --accent-hover: #1d4ed8;
     --danger: #ef4444;
     --success: #10b981;
+    --used-color: #1e8e3e;
+    --used-bg-color: #e6f4ea;
     --secondary: #fff;
     --accent-primary: var(--accent);
     --accent-primary-alpha: rgba(37, 99, 235, 0.2);

@@ -143,6 +143,15 @@
     z-index: 1;
 }
 
+.sessionTab.saved {
+    background-color: var(--used-bg-color);
+}
+
+.sessionTab.active.saved {
+    background-color: var(--used-bg-color);
+    color: var(--used-color);
+}
+
 .sessionTabStatus {
     display: inline-flex;
     align-items: center;

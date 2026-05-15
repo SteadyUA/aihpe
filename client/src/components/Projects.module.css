@@ -82,7 +82,7 @@
     left: 0;
     width: 65px;
     height: 110px;
-    box-shadow: 0 2px 2px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0px 2px rgba(0, 0, 0, 0.3);
     border-radius: 2px;
     background-color: var(--bg-primary);
     object-fit: cover;
@@ -104,9 +104,19 @@
     transition: opacity 0.2s ease;
 }
 
+.cardWrapper.savedWrapper:not(.activeWrapper)::after {
+    background-color: var(--used-bg-color);
+}
+
 .activeCard {
     outline: 1px solid var(--accent-primary);
+    box-shadow: 0 0 4px var(--accent-primary) !important;
     z-index: 100;
+}
+
+.savedCard {
+    outline: 1px solid var(--used-color) !important;
+    box-shadow: 0 0 4px var(--used-color) !important;
 }
 
 .emptyCollage {
@@ -160,6 +170,10 @@
     color: var(--text-tertiary);
     display: flex;
     justify-content: space-between;
+}
+
+.savedText {
+    color: var(--used-color);
 }
 
 .loading,
