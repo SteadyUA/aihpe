@@ -43,7 +43,7 @@ export class WorkSession extends React.Component<WorkSessionProps, WorkSessionSt
         }
     }
 
-    getSnapshotBeforeUpdate(prevProps: WorkSessionProps) {
+    getSnapshotBeforeUpdate(_prevProps: WorkSessionProps) {
         return null;
     }
 

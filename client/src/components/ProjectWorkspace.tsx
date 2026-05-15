@@ -70,7 +70,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                 const sessionsRes = await apiAuth.fetch(`/api/sessions?projectId=${id}`);
                 if (sessionsRes.ok) {
                     const unsortedSessions = await sessionsRes.json();
-                    
+
                     if (data.sessionIds && Array.isArray(data.sessionIds)) {
                         sessionsData = data.sessionIds
                             .map((sessionId: string) => unsortedSessions.find((s: any) => s.id === sessionId))
@@ -155,8 +155,6 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             projectStatus, projectTaskId
         } = this.state;
 
-        console.log("RENDER ProjectWorkspace", { projectId, projectStatus, projectTaskId });
-
         if (!projectId) return <div>Loading Workspace...</div>;
 
         if (projectStatus === ProjectStatus.INITIALIZATION && projectTaskId) {
@@ -177,7 +175,6 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
                     onUpdateProject={this.handleSaveProjectSettings}
                     initialProjectSessions={this.state.sessions}
                     initialActiveSessionId={this.state.activeSessionId}
-                    
                     onCreateProject={async (_prov, _name, _file) => {
                         // Not implemented at workspace level yet, usually done in Projects
                     }}

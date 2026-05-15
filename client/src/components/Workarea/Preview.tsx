@@ -159,7 +159,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         }
     };
 
-    getSnapshotBeforeUpdate(prevProps: PreviewProps) {
+    getSnapshotBeforeUpdate(_prevProps: PreviewProps) {
         return null;
     }
 
@@ -169,7 +169,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
             let attempts = 0;
             const tryRestore = () => {
                 if (!this.props.active) return;
-                
+
                 const iframe = this.iframeRef.current;
                 if (iframe && iframe.contentWindow) {
                     if (iframe.offsetHeight > 0) {
@@ -177,7 +177,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         this.manageCustomScrollbar();
                     }
                 }
-                
+
                 attempts++;
                 if (attempts < 10) {
                     setTimeout(tryRestore, 30);
@@ -238,7 +238,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         if (iframe && iframe.contentWindow) {
             try {
                 iframe.contentWindow.scrollTo(e.detail.x, e.detail.y);
-            } catch (error) {}
+            } catch (error) { }
         }
     };
 
@@ -285,7 +285,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
     handleScroll = () => {
         const { sessionId, active } = this.props;
         if (!active || !sessionId) return;
-        
+
         const iframe = this.iframeRef.current;
         if (!iframe || !iframe.contentWindow) return;
 
@@ -297,14 +297,14 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                 Preview.scrollStore[sessionId] = { x, y };
                 window.dispatchEvent(new CustomEvent('preview-scroll-sync', { detail: { sessionId, x, y } }));
             }
-        } catch (e) {}
+        } catch (e) { }
     }
 
     startScrollbarInjector = () => {
         if (this.scrollbarInjectorInterval) {
             clearInterval(this.scrollbarInjectorInterval);
         }
-        
+
         this.scrollbarInjectorInterval = setInterval(() => {
             const iframe = this.iframeRef.current;
             if (iframe && iframe.contentDocument && iframe.contentDocument.head) {
@@ -583,11 +583,11 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         // Sync inputs/textareas to attributes so they persist in outerHTML
         const originalInputs = doc.querySelectorAll('input, textarea, select');
         const clonedInputs = htmlNode.querySelectorAll('input, textarea, select');
-        
+
         originalInputs.forEach((el, index) => {
             const cloneEl = clonedInputs[index];
             if (!cloneEl) return;
-            
+
             if (el.tagName === 'INPUT') {
                 const type = el.getAttribute('type');
                 if (type === 'checkbox' || type === 'radio') {
@@ -645,18 +645,18 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     if (ctx) {
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                         // Use PNG to preserve transparency if the video has alpha channel
-                        const dataUrl = canvas.toDataURL('image/png'); 
+                        const dataUrl = canvas.toDataURL('image/png');
                         const img = doc.createElement('img');
                         img.src = dataUrl;
                         img.style.cssText = cloneVideo.style.cssText;
                         img.className = cloneVideo.className;
                         img.id = cloneVideo.id;
-                        
+
                         const widthAttr = cloneVideo.getAttribute('width');
                         const heightAttr = cloneVideo.getAttribute('height');
                         if (widthAttr) img.setAttribute('width', widthAttr);
                         if (heightAttr) img.setAttribute('height', heightAttr);
-                        
+
                         cloneVideo.parentNode?.replaceChild(img, cloneVideo);
                     }
                 } else {
@@ -668,12 +668,12 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                         img.style.cssText = cloneVideo.style.cssText;
                         img.className = cloneVideo.className;
                         img.id = cloneVideo.id;
-                        
+
                         const widthAttr = cloneVideo.getAttribute('width');
                         const heightAttr = cloneVideo.getAttribute('height');
                         if (widthAttr) img.setAttribute('width', widthAttr);
                         if (heightAttr) img.setAttribute('height', heightAttr);
-                        
+
                         cloneVideo.parentNode?.replaceChild(img, cloneVideo);
                     } else {
                         cloneVideo.remove();
@@ -701,7 +701,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
                     // Tag the owner node to find its clone
                     const styleId = ownerNode.id || `snapshot-style-${i}`;
                     ownerNode.dataset.snapshotId = styleId;
-                    
+
                     const clonedStyle = htmlNode.querySelector(`style[data-snapshot-id="${styleId}"]`);
                     if (clonedStyle) {
                         clonedStyle.textContent = cssText;
@@ -719,7 +719,7 @@ export class Preview extends React.Component<PreviewProps, PreviewState> {
         scripts.forEach(s => s.remove());
 
         let htmlContent = htmlNode.outerHTML;
-        
+
         // Convert any absolute URLs pointing to localhost back into relative paths
         // so that the screenshot microservice (running in Docker) can resolve them via base href
         const currentOrigin = window.location.origin;

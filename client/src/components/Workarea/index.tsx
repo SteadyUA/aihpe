@@ -99,7 +99,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
         if (sessionChanged) {
             // Full reset for new session
             this.setState(
-                (prev) => {
+                (_prev) => {
                     const newState: Partial<WorkareaState> = {
                         loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
                         unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
@@ -129,7 +129,7 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                             }
                         }
                     }
-                    
+
                     const newState: Partial<WorkareaState> = {
                         loading: { [AssetType.HTML]: false, [AssetType.CSS]: false, [AssetType.JS]: false } as Record<AssetType, boolean>,
                         unsavedContent: { [AssetType.HTML]: null, [AssetType.CSS]: null, [AssetType.JS]: null } as Record<AssetType, string | null>,
@@ -564,8 +564,8 @@ export class Workarea extends React.Component<WorkareaProps, WorkareaState> {
                         })}
                         onClick={() => this.handleTabChange(TabType.RESOURCES)}
                     >Resources</button>
-                    <span 
-                        className={styles.versionLabel} 
+                    <span
+                        className={styles.versionLabel}
                         style={{ cursor: 'pointer' }}
                         onClick={this.handleVersionClick}
                         title="View Memory Files"
