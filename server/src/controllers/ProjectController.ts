@@ -109,9 +109,18 @@ export class ProjectController {
         const status = file ? ProjectStatus.INITIALIZATION : ProjectStatus.READY;
         const taskId = file ? this.taskManagerService.getNextId() : undefined;
 
+        let projectName = body.name?.trim();
+        if (!projectName && file) {
+            projectName = file.originalname;
+            const lastDotIndex = projectName.lastIndexOf('.');
+            if (lastDotIndex > 0) {
+                projectName = projectName.substring(0, lastDotIndex);
+            }
+        }
+
         const project = await this.projectService.createProject(
             body.defaultProvider,
-            body.name,
+            projectName,
             accountId,
             status,
             taskId

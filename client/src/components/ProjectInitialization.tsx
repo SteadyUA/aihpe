@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { apiAuth } from '../utils/api';
-import { MainLayout } from './MainLayout';
 import { UiButton, ButtonVariant} from './UiButton';
 import styles from './Projects.module.css';
 import { TaskStatus } from '../types';
@@ -96,9 +96,12 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         </div>
     );
 
+    const headerPortalTarget = document.getElementById('header-portal-target');
+
     if (error) {
         return (
-            <MainLayout headerContent={headerContent}>
+            <>
+                {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
                 <div className={styles.container} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                     <h2 style={{ color: '#ff4d4f' }}>Initialization Failed</h2>
                     <p>{error}</p>
@@ -110,20 +113,22 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                         Retry
                     </UiButton>
                 </div>
-            </MainLayout>
+            </>
         );
     }
 
     if (!task) {
         return (
-            <MainLayout headerContent={headerContent}>
+            <>
+                {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
                 <div className={styles.loading}>Initializing project...</div>
-            </MainLayout>
+            </>
         );
     }
 
     return (
-        <MainLayout headerContent={headerContent}>
+        <>
+            {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
             <div className={styles.container} style={{ padding: '2rem', overflowY: 'auto' }}>
                 <div style={{ maxWidth: '800px', margin: '0 auto' }}>
                     <h1>Preparing Your Project</h1>
@@ -148,26 +153,33 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
                         `}</style>
 
-                        {task.steps.map((step, sIdx) => (
-                            <div key={sIdx} style={{ marginBottom: '1.5rem', borderLeft: '3px solid #1890ff', paddingLeft: '1rem' }}>
-                                <h3 style={{ margin: '0 0 0.5rem 0' }}>{step.stepName}</h3>
-                                <ul style={{ listStyle: 'none', padding: 0 }}>
-                                    {step.concurrentJobs.map((job, tIdx) => (
-                                        <li key={tIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span style={{
-                                                color: job.completed ? '#52c41a' : '#888',
-                                                fontSize: '1.2rem'
-                                            }}>
-                                                {job.completed ? '✓' : '○'}
-                                            </span>
-                                            <span style={{ textDecoration: job.completed ? 'line-through' : 'none', color: job.completed ? '#888' : '#333' }}>
-                                                {job.shortDescription}
-                                            </span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        ))}
+                        {(() => {
+                            const activeStepIndex = task.steps.findIndex(step => step.concurrentJobs.some(job => !job.completed));
+                            return task.steps.map((step, sIdx) => {
+                                const isActive = sIdx === activeStepIndex;
+                                const borderColor = isActive ? '#1890ff' : '#ccc';
+                                return (
+                                    <div key={sIdx} style={{ marginBottom: '1.5rem', borderLeft: `3px solid ${borderColor}`, paddingLeft: '1rem' }}>
+                                        <h3 style={{ margin: '0 0 0.5rem 0', color: isActive ? '#333' : '#888' }}>{step.stepName}</h3>
+                                        <ul style={{ listStyle: 'none', padding: 0 }}>
+                                            {step.concurrentJobs.map((job, tIdx) => (
+                                                <li key={tIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                                    <span style={{
+                                                        color: job.completed ? '#52c41a' : '#888',
+                                                        fontSize: '1.2rem'
+                                                    }}>
+                                                        {job.completed ? '✓' : '○'}
+                                                    </span>
+                                                    <span style={{ textDecoration: job.completed ? 'line-through' : 'none', color: job.completed ? '#888' : '#333' }}>
+                                                        {job.shortDescription}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                );
+                            });
+                        })()}
 
                         {task.steps.length === 0 && (
                             <div style={{ color: '#888', fontStyle: 'italic' }}>
@@ -177,6 +189,6 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                     </div>
                 </div>
             </div>
-        </MainLayout>
+        </>
     );
 };

@@ -161,6 +161,7 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
             return (
                 <ProjectInitialization
                     taskId={projectTaskId}
+                    projectName={project?.name}
                     onComplete={() => this.fetchProject(projectId)}
                 />
             );

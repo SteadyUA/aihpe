@@ -73,7 +73,7 @@ export const ProjectCreationModal: React.FC<ProjectCreationModalProps> = ({ isOp
                 <UiLabel>HTML Archive (ZIP)</UiLabel>
                 <UiInput
                     type="file"
-                    accept=".zip"
+                    accept=".zip,application/zip,application/x-zip-compressed"
                     onChange={handleFileChange}
                 />
                 <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '-0.2rem' }}>
