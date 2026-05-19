@@ -19,6 +19,8 @@ Rules for Planning:
 3.  **Job Instructions & Granularity**:
     - Each job instruction must be crystal clear and authoritative. DO NOT instruct the execution agent to "verify" or "check" if files exist or if analysis is correct. Instruct them to perform the exact action immediately based on your plan.
     - Each concurrent job must involve at most **5 files** if it requires reading, analyzing, or editing them.
+    - DO NOT create complex jobs that bundle multiple distinct tasks together (e.g., do NOT bundle "update index.html paths", "remove tracking logic", and "strip favicon references" into a single job).
+    - Break distinct logical tasks into separate, single-purpose jobs. Because jobs in the same step run concurrently and cannot edit the same file, you MUST place jobs that edit the SAME file for DIFFERENT purposes into separate, sequential **Steps**. It is highly preferred to have many sequential steps with simple, focused jobs rather than fewer steps with complex, bundled jobs.
 4.  **Bulk Operations (Moves/Deletes)**: The 5-file limit DOES NOT APPLY to moving or deleting files. Group ALL 'move_files' operations into a single massive concurrent job within a step. DO NOT split file moves across multiple jobs.
 5.  **Explicit File Names**: Jobs must mention specific filenames (e.g., "Use move_files to move [a.png, b.png] to root"). Do NOT create "catch-all" jobs. Do NOT create jobs just to create directories.
 6.  **No Scripting**: DO NOT create jobs that require the execution agent to write, compile, or run external scripts. For complex textual analysis or extraction (like finding all CSS selectors, image URLs, or JS dependencies), you MUST instruct the execution agent to use the 'regexp_search_files' tool.
