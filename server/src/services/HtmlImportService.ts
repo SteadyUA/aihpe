@@ -6,6 +6,7 @@ import { FilesService } from './session/FilesService';
 import { ChatService } from './ChatService';
 import { HtmlConversionAgent } from './llm/agents/HtmlConversionAgent';
 import { TaskManagerService } from './TaskManagerService';
+import { SseService } from './SseService';
 import { Turn, TaskStatus, ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -26,8 +27,19 @@ export class HtmlImportService {
         @Inject() private chatService: ChatService,
         @Inject() private taskManagerService: TaskManagerService,
         @Inject() private htmlConversionAgent: HtmlConversionAgent,
-        @Inject() private resourceService: SessionResourceService
+        @Inject() private resourceService: SessionResourceService,
+        @Inject() private sseService: SseService
     ) { }
+
+    async getPlanContent(taskId: string): Promise<string> {
+        const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
+        const planPath = path.join(tempDir, '.memory', 'plan.md');
+        try {
+            return await fs.readFile(planPath, 'utf-8');
+        } catch (e) {
+            return 'Plan not generated yet or task is completed.';
+        }
+    }
 
     async importArchive(projectId: string, zipPath: string, providedTaskId: string): Promise<void> {
         const beginTime = new Date();
@@ -46,18 +58,30 @@ export class HtmlImportService {
 
             // 2. Extract ZIP
             const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
-            await fs.mkdir(tempDir, { recursive: true });
-            await extract(zipPath, { dir: tempDir });
 
-            // Clean up potentially problematic __MACOSX directories from zip
+            let isResume = false;
             try {
-                await fs.rm(path.join(tempDir, '__MACOSX'), { recursive: true, force: true });
+                await fs.access(path.join(tempDir, '.memory', 'plan.md'));
+                isResume = true;
+                console.log(`Found existing plan.md in ${tempDir}, resuming import.`);
             } catch (e) {
-                // Ignore if it doesn't exist
+                // Not a resume
             }
 
-            // Format all extracted files before LLM processing
-            await this.formatExtractedFiles(tempDir);
+            if (!isResume) {
+                await fs.mkdir(tempDir, { recursive: true });
+                await extract(zipPath, { dir: tempDir });
+
+                // Clean up potentially problematic __MACOSX directories from zip
+                try {
+                    await fs.rm(path.join(tempDir, '__MACOSX'), { recursive: true, force: true });
+                } catch (e) {
+                    // Ignore if it doesn't exist
+                }
+
+                // Format all extracted files before LLM processing
+                await this.formatExtractedFiles(tempDir);
+            }
 
             // Execute the import process
             await this.executeImportLoop(projectId, sessionId, taskId, tempDir, beginTime);
@@ -65,6 +89,10 @@ export class HtmlImportService {
         } catch (error: any) {
             console.error('HTML Import failed:', error);
             await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
+            const project = await this.projectService.getProject(projectId);
+            if (project?.accountId) {
+                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: error.message || String(error) });
+            }
         } finally {
             // Remove uploaded zip from tmpdir
             try {
@@ -99,71 +127,54 @@ export class HtmlImportService {
         } catch (error: any) {
             console.error('HTML Import Resume failed:', error);
             await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
+            const project = await this.projectService.getProjectByTaskId(taskId);
+            if (project?.accountId) {
+                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: error.message || String(error) });
+            }
         }
     }
 
     private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string, beginTime: Date): Promise<void> {
-        // 3. Run Optimization Loop
-        let allDone = false;
-        let iterations = 0;
-        const maxIterations = 20;
-
         await this.taskManagerService.updateStatus(taskId, TaskStatus.EXECUTING);
 
-        while (!allDone && iterations < maxIterations) {
-            iterations++;
+        const project = await this.projectService.getProject(projectId);
+        if (!project) throw new Error('Project not found');
 
-            if (!(await this.taskManagerService.hasJobs(taskId))) {
-                console.log(`[Task ${taskId}] No jobs defined. Initializing Planner Agent...`);
-                const abortController = new AbortController();
-                await this.htmlConversionAgent.plan(this.provider as any, {
-                    workingDirectory: tempDir,
-                    taskId: taskId,
-                    instruction: 'Analyze the working directory and create a granular optimization plan using add_jobs.',
-                    abortSignal: abortController.signal
-                });
-            } else {
-                const nextStep = await this.taskManagerService.getNextStep(taskId);
-                if (!nextStep) {
-                    console.log(`[Task ${taskId}] All jobs completed.`);
-                    allDone = true;
-                    break;
+        let isFinished = false;
+        let loops = 0;
+        const maxLoops = 5;
+
+        while (!isFinished && loops < maxLoops) {
+            loops++;
+            console.log(`[Task ${taskId}] Starting/Resuming Orchestrator loop (iteration ${loops})...`);
+
+            isFinished = await this.htmlConversionAgent.runOrchestratorLoop(this.provider as any, {
+                workingDirectory: tempDir,
+                taskId: taskId,
+                onPlanUpdated: () => {
+                    if (project.accountId) {
+                        this.sseService.broadcastToAccount(project.accountId, 'plan-updated', { taskId });
+                    }
+                },
+                onToolCall: (agentName, toolName, summary) => {
+                    if (project.accountId) {
+                        this.sseService.broadcastToAccount(project.accountId, 'tool-called', { taskId, agentName, toolName, summary });
+                    }
                 }
+            });
 
-                console.log(`[Task ${taskId}] Executing Step: ${nextStep.stepName}`);
-                const pendingJobs = await this.taskManagerService.getUncompletedJobs(taskId, nextStep);
-
-                await Promise.all(pendingJobs.map(async (nextJob) => {
-                    console.log(`[Task ${taskId}] Executing Job: ${nextJob.shortDescription}`);
-                    const abortController = new AbortController();
-                    await this.htmlConversionAgent.executeTask(this.provider as any, {
-                        workingDirectory: tempDir,
-                        taskId: taskId,
-                        currentTask: nextJob.description,
-                        instruction: 'Execute the job.',
-                        abortSignal: abortController.signal
-                    });
-                }));
-
-                const failedJobs = await this.taskManagerService.getFailedJobs(taskId);
-                if (failedJobs.length > 0) {
-                    console.log(`[Task ${taskId}] Step failed. Re-summoning Planner...`);
-                    const errorContexts = failedJobs.map(j => `Failed Job: ${j.description}\\nReason: ${j.errorContext}`).join('\\n\\n');
-                    await this.taskManagerService.clearAllJobs(taskId);
-
-                    const abortController = new AbortController();
-                    await this.htmlConversionAgent.plan(this.provider as any, {
-                        workingDirectory: tempDir,
-                        taskId: taskId,
-                        instruction: `Analyze the working directory and create a granular optimization plan using add_jobs.\\n\\nCRITICAL: The previous execution failed! You MUST adjust your plan to fix these issues:\\n${errorContexts}`,
-                        abortSignal: abortController.signal
-                    });
-                }
+            if (!isFinished) {
+                console.log(`[Task ${taskId}] Orchestrator loop paused or max steps reached. Checking if we should continue...`);
+                await new Promise(r => setTimeout(r, 2000));
             }
         }
 
-        if (allDone) {
+        if (isFinished) {
+            console.log(`[Task ${taskId}] Import finished. Saving files to session...`);
             await this.taskManagerService.updateStatus(taskId, TaskStatus.COMPLETED);
+            if (project.accountId) {
+                this.sseService.broadcastToAccount(project.accountId, 'task-completed', { taskId });
+            }
 
             // 5. Move files to Session Version 0
             const files: Record<string, string> = {};
@@ -176,7 +187,6 @@ export class HtmlImportService {
                 '.mp4', '.webm', '.ogg', '.mov'
             ]);
 
-            // Needs to capture 'this' for resourceService
             const self = this;
 
             async function getFilesRec(dir: string, baseDir: string) {
@@ -188,6 +198,9 @@ export class HtmlImportService {
                     } else {
                         const relPath = path.relative(baseDir, res);
                         const ext = path.extname(res).toLowerCase();
+
+                        // Skip internal state files
+                        if (relPath.startsWith('.memory') || relPath === '_state.json') continue;
 
                         if (resourceExtensions.has(ext)) {
                             // It's a binary resource, save it using ResourceService
@@ -244,7 +257,11 @@ export class HtmlImportService {
             // Clean up temp dir
             await fs.rm(tempDir, { recursive: true, force: true });
         } else {
-            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, 'Max iterations reached without completion');
+            const errorMsg = 'Max orchestrator loops reached without calling finish_import.';
+            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, errorMsg);
+            if (project.accountId) {
+                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: errorMsg });
+            }
         }
     }
 
@@ -268,7 +285,6 @@ export class HtmlImportService {
                         };
 
                         if (ext === '.html') {
-                            // Type assertion for HTMLOptions needed if using generic options object
                             content = beautify.html(content, formatOptions as beautify.HTMLBeautifyOptions);
                         } else if (ext === '.css') {
                             content = beautify.css(content, formatOptions as beautify.CSSBeautifyOptions);
