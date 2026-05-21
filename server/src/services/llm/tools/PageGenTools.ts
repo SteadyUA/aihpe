@@ -52,7 +52,14 @@ export function editTextRange(params: TextEditParams): string {
     }
 
     const start = Math.max(1, startLine);
-    const end = Math.min(lines.length, Math.max(start, endLine));
+    let end = Math.min(lines.length, Math.max(start, endLine));
+
+    if (targetString !== '') {
+        const expectedLinesCount = targetString.split(/\r?\n/).length;
+        if (end - start + 1 < expectedLinesCount) {
+            end = Math.min(lines.length, start + expectedLinesCount - 1);
+        }
+    }
 
     let slice = lines.slice(start - 1, end).join('\n');
 
@@ -72,7 +79,12 @@ export function editTextRange(params: TextEditParams): string {
                     targetString = normalizedTarget.trim();
                     slice = normalizedSlice;
                 } else {
-                    throw new Error(`expectedContent not found between lines ${start} and ${end}. The file may have been modified or you provided incorrect content. Please use the appropriate read tool to check the current lines.`);
+                    const errorMsg = `expectedContent not found in line range ${start}-${end}. The file may have been modified or you provided incorrect content with mismatched whitespace.\n` +
+                        `--- You Expected ---\n${targetString}\n` +
+                        `--- Actual Content in File (Lines ${start}-${end}) ---\n${slice}\n` +
+                        `Please correct your expectedContent or adjust the line range.`;
+                    console.log(`\n[DEBUG multi_edit_file] ` + errorMsg);
+                    throw new Error(errorMsg);
                 }
             }
         }
@@ -418,7 +430,7 @@ export function createPageGenTools(
                         filename: { type: 'string', enum: ['preferences.md', 'state.md', 'about.md'], description: 'The memory file to edit.' },
                         startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
                         endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
-                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Use empty string "" to append/replace the whole slice.' },
+                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Leave empty ("") if you want to blindly replace the lines between startLine and endLine without text matching.' },
                         newContent: { type: 'string', description: 'The new string to replace it with.' },
                         summary: { type: 'string', description: 'Explain why you are editing this memory file.' }
                     },

@@ -4,62 +4,95 @@ import { LlmMessage, LlmRequest, LlmRole } from '../core/types';
 import { LlmProvider } from '../../../types/chat';
 import { HtmlPlanPrompt } from '../prompts/HtmlPlanPrompt';
 import { HtmlExecutionPrompt } from '../prompts/HtmlExecutionPrompt';
-import { createHtmlConversionTools } from '../tools/HtmlConversionTools';
+import { createOrchestratorTools, createSubagentTools, HtmlConversionContext } from '../tools/HtmlConversionTools';
 
-export interface HtmlPlanRequest {
+export interface HtmlOrchestratorRequest {
     workingDirectory: string;
     taskId: string;
     instruction?: string;
     abortSignal?: AbortSignal;
+    onPlanUpdated?: () => void;
+    onToolCall?: (agentName: 'Orchestrator' | 'Subagent', toolName: string, summary: string) => void;
 }
 
-export interface HtmlExecutionRequest {
+export interface HtmlSubagentRequest {
     workingDirectory: string;
     taskId: string;
-    currentTask: string;
-    instruction?: string;
+    instruction: string;
+    targetFiles: string[];
     abortSignal?: AbortSignal;
+    onToolCall?: (agentName: 'Orchestrator' | 'Subagent', toolName: string, summary: string) => void;
 }
 
 @Service()
 export class HtmlConversionAgent {
 
-    public async plan(provider: LlmProvider, request: HtmlPlanRequest): Promise<string> {
+    public async runOrchestratorLoop(provider: LlmProvider, request: HtmlOrchestratorRequest): Promise<boolean> {
         const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
         const client = new OpenaiRawClient(litellmUrl, litellmKey, modelId);
         
         const systemPrompt = HtmlPlanPrompt;
         
-        const messages: LlmMessage[] = [
+        let messages: LlmMessage[] = [
             { role: LlmRole.SYSTEM, content: systemPrompt },
-            { role: LlmRole.USER, content: request.instruction || 'Analyze the working directory and create a granular optimization plan using add_jobs.' }
+            { role: LlmRole.USER, content: request.instruction || 'Analyze the directory and create/update the plan in plan.md, then execute it.' }
         ];
 
-        const context = {
-            workingDirectory: request.workingDirectory,
-            taskId: request.taskId,
+        let isFinished = false;
+
+        const onSubagentRun = async (instruction: string, targetFiles: string[]): Promise<string> => {
+            const subReq: HtmlSubagentRequest = {
+                workingDirectory: request.workingDirectory,
+                taskId: request.taskId,
+                instruction: instruction,
+                targetFiles: targetFiles,
+                abortSignal: request.abortSignal,
+                onToolCall: request.onToolCall
+            };
+            return await this.executeSubagentTask(provider, subReq);
         };
 
-        const allTools = createHtmlConversionTools()(request as any, context);
-        const planTools = allTools.filter(t => ['list_files', 'add_jobs'].includes(t.name));
+        const onFinishImport = () => {
+            isFinished = true;
+        };
+
+        const context: HtmlConversionContext = {
+            workingDirectory: request.workingDirectory,
+            taskId: request.taskId,
+            onSubagentRun,
+            onFinishImport,
+            onPlanUpdated: request.onPlanUpdated,
+            onToolCall: (agentName, toolName, summary) => {
+                if (request.onToolCall) {
+                    request.onToolCall(agentName, toolName, summary);
+                }
+            }
+        };
+
+        const tools = createOrchestratorTools()(request as any, context);
 
         const llmReq: LlmRequest = {
             messages,
-            tools: planTools.map(t => ({
+            tools: tools.map(t => ({
                 name: t.name,
                 description: t.description,
                 parameters: t.parameters,
-                execute: (args) => t.execute(args, context)
+                execute: async (args) => {
+                    if (context.onToolCall) {
+                        context.onToolCall('Orchestrator', t.name, args.summary || '');
+                    }
+                    return t.execute(args);
+                }
             })),
-            abortSignal: request.abortSignal
+            abortSignal: request.abortSignal,
+            maxSteps: 100
         };
 
-        const result = await client.generate(llmReq);
-        
-        return result.text;
+        await client.generate(llmReq);
+        return isFinished;
     }
 
-    public async executeTask(provider: LlmProvider, request: HtmlExecutionRequest): Promise<string> {
+    private async executeSubagentTask(provider: LlmProvider, request: HtmlSubagentRequest): Promise<string> {
         const { modelId, litellmUrl, litellmKey } = this.getConfig(provider);
         const client = new OpenaiRawClient(litellmUrl, litellmKey, modelId);
         
@@ -67,32 +100,48 @@ export class HtmlConversionAgent {
         
         const messages: LlmMessage[] = [
             { role: LlmRole.SYSTEM, content: systemPrompt },
-            { role: LlmRole.USER, content: `Execute this task: ${request.currentTask}\n\n${request.instruction || 'Execute the job.'}` }
+            { role: LlmRole.USER, content: `Execute this specific instruction:\n\n${request.instruction}\n\nTarget files for this task: ${request.targetFiles.join(', ')}` }
         ];
 
-        const context = {
+        let hasReportedSuccess = false;
+        let successSummary = '';
+
+        const context: HtmlConversionContext = {
             workingDirectory: request.workingDirectory,
             taskId: request.taskId,
+            onSubagentSuccess: (summary: string) => {
+                hasReportedSuccess = true;
+                successSummary = summary;
+            },
+            onToolCall: request.onToolCall
         };
 
-        const allTools = createHtmlConversionTools()(request as any, context);
-        const execTools = allTools.filter(t => t.name !== 'add_jobs');
+        const tools = createSubagentTools()(request as any, context);
 
         const llmReq: LlmRequest = {
             messages,
-            tools: execTools.map(t => ({
+            tools: tools.map(t => ({
                 name: t.name,
                 description: t.description,
                 parameters: t.parameters,
-                execute: (args) => t.execute(args, context)
+                execute: async (args) => {
+                    if (context.onToolCall) {
+                        context.onToolCall('Subagent', t.name, args.summary || '');
+                    }
+                    return t.execute(args);
+                }
             })),
             abortSignal: request.abortSignal,
-            maxSteps: 100
+            maxSteps: 30
         };
 
-        const result = await client.generate(llmReq);
+        await client.generate(llmReq);
         
-        return result.text;
+        if (!hasReportedSuccess) {
+            throw new Error('Subagent failed to call report_success. It may have reached the maximum step limit or hallucinated. All changes will be rolled back.');
+        }
+
+        return successSummary;
     }
 
     private getConfig(provider: LlmProvider) {
