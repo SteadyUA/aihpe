@@ -136,6 +136,26 @@ class App extends React.Component<RouterProps, AppState> {
                 this.setupSse();
             }, 5000);
         });
+
+        this.evtSource.addEventListener('plan-updated', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:plan-updated', { detail: data }));
+        });
+
+        this.evtSource.addEventListener('tool-called', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:tool-called', { detail: data }));
+        });
+
+        this.evtSource.addEventListener('task-completed', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:task-completed', { detail: data }));
+        });
+
+        this.evtSource.addEventListener('task-failed', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:task-failed', { detail: data }));
+        });
     };
 
     closeSse = () => {

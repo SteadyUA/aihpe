@@ -4,22 +4,13 @@ import { apiAuth } from '../utils/api';
 import { UiButton, ButtonVariant} from './UiButton';
 import styles from './Projects.module.css';
 import { TaskStatus } from '../types';
+import { createMarkedInstance } from '../utils/markdownUtils';
 
-interface Job {
-    description: string;
-    shortDescription: string;
-    completed: boolean;
-}
-
-interface Step {
-    stepName: string;
-    concurrentJobs: Job[];
-}
+const marked = createMarkedInstance({ styles: {} });
 
 interface Task {
     id: string;
     status: TaskStatus;
-    steps: Step[];
     errorMessage?: string;
 }
 
@@ -29,45 +20,110 @@ interface ProjectInitializationProps {
     onComplete: () => void;
 }
 
+interface ToolCallLog {
+    agentName: string;
+    toolName: string;
+    summary: string;
+    timestamp: number;
+}
+
 export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ taskId, projectName, onComplete }) => {
     const [task, setTask] = useState<Task | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [planHtml, setPlanHtml] = useState<string>('');
     const [retryCount, setRetryCount] = useState<number>(0);
+    const [toolLogs, setToolLogs] = useState<ToolCallLog[]>([]);
+
+    const fetchTaskStatus = async () => {
+        try {
+            const res = await apiAuth.fetch(`/api/tasks/${taskId}`);
+            if (!res.ok) throw new Error('Failed to fetch task status');
+            const data = await res.json();
+            setTask(data);
+
+            if (data.status === TaskStatus.COMPLETED) {
+                onComplete();
+                return true;
+            } else if (data.status === TaskStatus.FAILED) {
+                setError(data.errorMessage || 'Conversion failed');
+                return true;
+            }
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message);
+            return true;
+        }
+        return false;
+    };
+
+    const fetchPlanContent = async () => {
+        try {
+            const res = await apiAuth.fetch(`/api/tasks/${taskId}/plan`);
+            if (res.ok) {
+                const data = await res.json();
+                const rawMarkdown = data.content || '';
+                const html = marked.parse(rawMarkdown) as string;
+                setPlanHtml(html);
+            }
+        } catch (err) {
+            console.error('Failed to fetch plan:', err);
+        }
+    };
 
     useEffect(() => {
-        let interval: any;
+        // Initial fetch
+        fetchTaskStatus();
+        fetchPlanContent();
 
-        const fetchTaskStatus = async () => {
-            try {
-                const res = await apiAuth.fetch(`/api/tasks/${taskId}`);
-                if (!res.ok) throw new Error('Failed to fetch task status');
-                const data = await res.json();
-                setTask(data);
-
-                if (data.status === TaskStatus.COMPLETED) {
-                    clearInterval(interval);
-                    onComplete();
-                } else if (data.status === TaskStatus.FAILED) {
-                    clearInterval(interval);
-                    setError(data.errorMessage || 'Conversion failed');
-                }
-            } catch (err: any) {
-                console.error(err);
-                setError(err.message);
-                clearInterval(interval);
+        // SSE listener for plan updates
+        const handlePlanUpdated = (e: any) => {
+            if (e.detail && e.detail.taskId === taskId) {
+                fetchPlanContent();
             }
         };
 
-        fetchTaskStatus();
-        interval = setInterval(fetchTaskStatus, 2000);
+        const handleTaskCompleted = (e: any) => {
+            if (e.detail && e.detail.taskId === taskId) {
+                onComplete();
+            }
+        };
 
-        return () => clearInterval(interval);
+        const handleTaskFailed = (e: any) => {
+            if (e.detail && e.detail.taskId === taskId) {
+                setError(e.detail.error || 'Conversion failed');
+            }
+        };
+
+        const handleToolCalled = (e: any) => {
+            if (e.detail && e.detail.taskId === taskId) {
+                setToolLogs(prev => [...prev, {
+                    agentName: e.detail.agentName,
+                    toolName: e.detail.toolName,
+                    summary: e.detail.summary,
+                    timestamp: Date.now()
+                }]);
+            }
+        };
+
+        window.addEventListener('app:plan-updated', handlePlanUpdated);
+        window.addEventListener('app:task-completed', handleTaskCompleted);
+        window.addEventListener('app:task-failed', handleTaskFailed);
+        window.addEventListener('app:tool-called', handleToolCalled);
+
+        return () => {
+            window.removeEventListener('app:plan-updated', handlePlanUpdated);
+            window.removeEventListener('app:task-completed', handleTaskCompleted);
+            window.removeEventListener('app:task-failed', handleTaskFailed);
+            window.removeEventListener('app:tool-called', handleToolCalled);
+        };
     }, [taskId, onComplete, retryCount]);
 
     const handleRetry = async () => {
         try {
             setTask(null);
             setError(null);
+            setPlanHtml('');
+            setToolLogs([]);
             const res = await apiAuth.fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
             if (!res.ok) throw new Error('Failed to restart task');
             setRetryCount(prev => prev + 1);
@@ -151,39 +207,70 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
 
                         <style>{`
                             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                            .plan-content-wrapper {
+                                margin-top: 1.5rem;
+                                padding: 1.5rem;
+                                border-radius: 8px;
+                                background-color: var(--bg-secondary, #f8f9fa);
+                                border: 1px solid var(--border-color, #eaeaea);
+                                max-height: 500px;
+                                overflow-y: auto;
+                                text-align: left;
+                            }
+                            .plan-content-wrapper h1, .plan-content-wrapper h2, .plan-content-wrapper h3 {
+                                margin-top: 0;
+                            }
+                            .plan-content-wrapper ul {
+                                padding-left: 20px;
+                            }
+                            .plan-content-wrapper li {
+                                margin-bottom: 8px;
+                            }
                         `}</style>
 
-                        {(() => {
-                            const activeStepIndex = task.steps.findIndex(step => step.concurrentJobs.some(job => !job.completed));
-                            return task.steps.map((step, sIdx) => {
-                                const isActive = sIdx === activeStepIndex;
-                                const borderColor = isActive ? '#1890ff' : '#ccc';
-                                return (
-                                    <div key={sIdx} style={{ marginBottom: '1.5rem', borderLeft: `3px solid ${borderColor}`, paddingLeft: '1rem' }}>
-                                        <h3 style={{ margin: '0 0 0.5rem 0', color: isActive ? '#333' : '#888' }}>{step.stepName}</h3>
-                                        <ul style={{ listStyle: 'none', padding: 0 }}>
-                                            {step.concurrentJobs.map((job, tIdx) => (
-                                                <li key={tIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                                    <span style={{
-                                                        color: job.completed ? '#52c41a' : '#888',
-                                                        fontSize: '1.2rem'
-                                                    }}>
-                                                        {job.completed ? '✓' : '○'}
-                                                    </span>
-                                                    <span style={{ textDecoration: job.completed ? 'line-through' : 'none', color: job.completed ? '#888' : '#333' }}>
-                                                        {job.shortDescription}
-                                                    </span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                );
-                            });
-                        })()}
-
-                        {task.steps.length === 0 && (
-                            <div style={{ color: '#888', fontStyle: 'italic' }}>
+                        {planHtml ? (
+                            <div 
+                                className="plan-content-wrapper markdown-body" 
+                                dangerouslySetInnerHTML={{ __html: planHtml }} 
+                            />
+                        ) : (
+                            <div style={{ color: '#888', fontStyle: 'italic', marginTop: '1rem' }}>
                                 Planning initial steps...
+                            </div>
+                        )}
+
+                        {toolLogs.length > 0 && (
+                            <div style={{ marginTop: '2rem' }}>
+                                <h3>Agent Activity Log</h3>
+                                <div style={{
+                                    backgroundColor: '#1e1e1e',
+                                    color: '#d4d4d4',
+                                    padding: '1rem',
+                                    borderRadius: '8px',
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.85rem',
+                                    maxHeight: '300px',
+                                    overflowY: 'auto',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px'
+                                }}>
+                                    {toolLogs.map((log, index) => (
+                                        <div key={index} style={{ display: 'flex', gap: '10px' }}>
+                                            <span style={{ color: '#569cd6' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                                            <span style={{ 
+                                                color: log.agentName === 'Orchestrator' ? '#ce9178' : '#4ec9b0',
+                                                fontWeight: 'bold',
+                                                minWidth: '100px'
+                                            }}>
+                                                {log.agentName}
+                                            </span>
+                                            <span style={{ color: '#dcdcaa' }}>{log.toolName}</span>
+                                            <span style={{ color: '#9cdcfe' }}>-</span>
+                                            <span>{log.summary || 'No summary provided'}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>

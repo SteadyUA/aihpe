@@ -39,6 +39,10 @@ export const createMarkedInstance = (context: ChatMarkedContext) => {
             }
         }],
         renderer: {
+            html(token: any) {
+                const text = typeof token === 'string' ? token : (token.text || '');
+                return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            },
             codespan(token: any) {
                 const code = token.text || token; // Handle object or string
                 const rule = /^#([0-9a-fA-F]{3}){1,2}$/;
