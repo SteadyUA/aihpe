@@ -104,4 +104,11 @@ export class TaskController {
 
         return { message: 'Task retry initiated' };
     }
+
+    @Get('/api/tasks/:taskId/plan')
+    @UseBefore(AuthMiddleware)
+    async getTaskPlan(@Param('taskId') taskId: string): Promise<{ content: string }> {
+        const content = await this.htmlImportService.getPlanContent(taskId);
+        return { content };
+    }
 }

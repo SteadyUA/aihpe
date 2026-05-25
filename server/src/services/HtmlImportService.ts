@@ -17,8 +17,6 @@ import beautify from 'js-beautify';
 
 @Service()
 export class HtmlImportService {
-    private readonly provider = 'google';
-
     constructor(
         @Inject() private projectService: ProjectService,
         @Inject() private sessionService: SessionService,
@@ -41,7 +39,7 @@ export class HtmlImportService {
         }
     }
 
-    async importArchive(projectId: string, zipPath: string, providedTaskId: string): Promise<void> {
+    async importArchive(projectId: string, zipPath: string, providedTaskId: string, archiveName: string): Promise<void> {
         const beginTime = new Date();
         const taskId = providedTaskId;
         console.log(`Starting HTML import for project ${projectId}, task ${taskId}`);
@@ -52,7 +50,7 @@ export class HtmlImportService {
             const project = await this.projectService.getProject(projectId);
             if (!project) throw new Error('Project not found');
 
-            await this.chatService.createSession(sessionId, projectId);
+            await this.chatService.createSession(sessionId, projectId, undefined, project.defaultProvider as any);
             await this.projectService.addSessionToProject(projectId, sessionId);
             console.log(`Created session ${sessionId} for import`);
 
@@ -84,7 +82,7 @@ export class HtmlImportService {
             }
 
             // Execute the import process
-            await this.executeImportLoop(projectId, sessionId, taskId, tempDir, beginTime);
+            await this.executeImportLoop(projectId, sessionId, taskId, tempDir, beginTime, archiveName);
 
         } catch (error: any) {
             console.error('HTML Import failed:', error);
@@ -122,7 +120,7 @@ export class HtmlImportService {
                 throw new Error('Temporary import directory not found. Cannot resume.');
             }
 
-            await this.executeImportLoop(project.id, sessionId, taskId, tempDir, beginTime);
+            await this.executeImportLoop(project.id, sessionId, taskId, tempDir, beginTime, project.name ? project.name + '.zip' : 'archived files');
 
         } catch (error: any) {
             console.error('HTML Import Resume failed:', error);
@@ -134,11 +132,33 @@ export class HtmlImportService {
         }
     }
 
-    private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string, beginTime: Date): Promise<void> {
+    private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string, beginTime: Date, archiveName: string): Promise<void> {
         await this.taskManagerService.updateStatus(taskId, TaskStatus.EXECUTING);
 
         const project = await this.projectService.getProject(projectId);
+        console.log(`[Task ${taskId}] Project:`, project);
         if (!project) throw new Error('Project not found');
+
+        const bakDir = path.join(tempDir, '.bak');
+        try {
+            await fs.access(bakDir);
+            console.log(`[Task ${taskId}] Found .bak directory, recovering files...`);
+            const currentEntries = await fs.readdir(tempDir, { withFileTypes: true });
+            for (const entry of currentEntries) {
+                if (entry.name.startsWith('.')) continue;
+                await fs.rm(path.join(tempDir, entry.name), { recursive: true, force: true });
+            }
+            const bakEntries = await fs.readdir(bakDir, { withFileTypes: true });
+            for (const entry of bakEntries) {
+                const src = path.join(bakDir, entry.name);
+                const dest = path.join(tempDir, entry.name);
+                await fs.cp(src, dest, { recursive: true });
+            }
+            await fs.rm(bakDir, { recursive: true, force: true });
+            console.log(`[Task ${taskId}] Recovery complete.`);
+        } catch (e) {
+            // No backup found, proceed normally
+        }
 
         let isFinished = false;
         let loops = 0;
@@ -148,7 +168,8 @@ export class HtmlImportService {
             loops++;
             console.log(`[Task ${taskId}] Starting/Resuming Orchestrator loop (iteration ${loops})...`);
 
-            isFinished = await this.htmlConversionAgent.runOrchestratorLoop(this.provider as any, {
+            const providerToUse = project.defaultProvider || 'openai';
+            isFinished = await this.htmlConversionAgent.runOrchestratorLoop(providerToUse as any, {
                 workingDirectory: tempDir,
                 taskId: taskId,
                 onPlanUpdated: () => {
@@ -239,9 +260,9 @@ export class HtmlImportService {
                 turn: 1,
                 beginTime: beginTime,
                 endTime: now,
-                request: 'Uploaded archived files',
+                request: 'Uploaded ' + archiveName,
                 response: 'Files imported',
-                provider: this.provider as any, // Cast to avoid LlmProvider type issues if any
+                provider: (project.defaultProvider || 'openai') as any, // Cast to avoid LlmProvider type issues if any
                 fastMode: false,
                 version: 0,
             };

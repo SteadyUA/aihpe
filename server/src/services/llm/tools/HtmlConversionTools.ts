@@ -2,12 +2,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { readTextRange, editTextRange } from './PageGenTools';
+import { ToolAbortError } from '../core/types';
 
 export interface HtmlConversionContext {
     workingDirectory: string;
     taskId: string;
-    abortController?: AbortController;
-    onSubagentRun?: (instruction: string, targetFiles: string[]) => Promise<string>;
+    onSubagentRun?: (instruction: string) => Promise<string>;
     onFinishImport?: () => void;
     onPlanUpdated?: () => void;
     onSubagentSuccess?: (summary: string) => void;
@@ -74,7 +74,7 @@ const createListFilesTool = (workingDirectory: string) => ({
             const fileList = (await Promise.all(files.map(async f => {
                 const relPath = path.relative(workingDirectory, f);
                 
-                if (relPath.startsWith('.memory')) {
+                if (relPath.split(path.sep).some(p => p.startsWith('.'))) {
                     return null;
                 }
                 
@@ -223,7 +223,7 @@ const createRegexpSearchFilesTool = (workingDirectory: string) => ({
                     const res = path.resolve(dir, dirent.name);
                     const relPath = path.relative(workingDirectory, res);
                     
-                    if (relPath.startsWith('.memory')) {
+                    if (relPath.split(path.sep).some(p => p.startsWith('.'))) {
                         continue;
                     }
                     
@@ -332,6 +332,57 @@ const createValidateSyntaxTool = (workingDirectory: string) => ({
             }
         } catch (error: any) {
             return `Error during validation: ${error.message}`;
+        }
+    }
+});
+
+const createValidateHtmlTool = (workingDirectory: string) => ({
+    name: 'validate_html',
+    description: 'Validate the structural integrity of an HTML file (checks for unclosed <script>, <style>, <div>, etc.).',
+    parameters: {
+        type: 'object',
+        properties: {
+            filePath: { type: 'string', description: 'Relative path to the HTML file to validate.' },
+            summary: { type: 'string', description: 'Reason for validating.' }
+        },
+        required: ['filePath', 'summary']
+    },
+    execute: async ({ filePath }: { filePath: string }) => {
+        try {
+            const fullPath = resolvePath(workingDirectory, filePath);
+            const ext = path.extname(filePath).toLowerCase();
+            if (ext !== '.html') {
+                return `HTML validation is only supported for .html files. Cannot validate ${filePath}`;
+            }
+            
+            const htmlContent = await fs.readFile(fullPath, 'utf8');
+            
+            // Check critical tag balances
+            const checkBalance = (openRegex: RegExp, closeRegex: RegExp, tagName: string) => {
+                const openCount = (htmlContent.match(openRegex) || []).length;
+                const closeCount = (htmlContent.match(closeRegex) || []).length;
+                if (openCount !== closeCount) {
+                    return `Validation FAILED: Tag mismatch for <${tagName}>. Found ${openCount} opening tags but ${closeCount} closing tags.`;
+                }
+                return null;
+            };
+
+            const errors = [
+                checkBalance(/<script\b[^>]*>/gi, /<\/script>/gi, 'script'),
+                checkBalance(/<style\b[^>]*>/gi, /<\/style>/gi, 'style'),
+                checkBalance(/<div\b[^>]*>/gi, /<\/div>/gi, 'div'),
+                checkBalance(/<body\b[^>]*>/gi, /<\/body>/gi, 'body'),
+                checkBalance(/<html\b[^>]*>/gi, /<\/html>/gi, 'html'),
+                checkBalance(/<head\b[^>]*>/gi, /<\/head>/gi, 'head')
+            ].filter(e => e !== null);
+
+            if (errors.length > 0) {
+                return errors.join('\n');
+            }
+
+            return `Validation passed for ${filePath}. No critical tag mismatches found.`;
+        } catch (error: any) {
+            return `Error during HTML validation: ${error.message}`;
         }
     }
 });
@@ -681,57 +732,55 @@ export function createOrchestratorTools(): (request: any, context: HtmlConversio
                     type: 'object',
                     properties: {
                         instruction: { type: 'string', description: 'Precise instruction for the subagent on what to do.' },
-                        targetFiles: { 
-                            type: 'array', 
-                            items: { type: 'string' }, 
-                            description: 'List of files the subagent will read or modify. The system will create .bak copies of these files before execution for safety.'
-                        },
                         summary: { type: 'string', description: 'Reason for invoking the subagent.' }
                     },
-                    required: ['instruction', 'targetFiles', 'summary']
+                    required: ['instruction', 'summary']
                 },
-                execute: async ({ instruction, targetFiles }: { instruction: string; targetFiles: string[] }) => {
+                execute: async ({ instruction }: { instruction: string }) => {
                     if (!onSubagentRun) {
                         return 'Error: onSubagentRun callback not provided in context.';
                     }
                     
+                    const bakDir = path.join(workingDirectory, '.bak');
+                    
                     try {
-                        // Create backups
-                        for (const file of targetFiles) {
-                            try {
-                                const fullPath = resolvePath(workingDirectory, file);
-                                const stats = await fs.stat(fullPath);
-                                if (stats.isFile()) {
-                                    await fs.copyFile(fullPath, fullPath + '.bak');
-                                }
-                            } catch (e) {
-                                // Ignore if file doesn't exist (it might be a file the subagent will create)
-                            }
+                        // Create backups of all non-hidden files
+                        await fs.mkdir(bakDir, { recursive: true });
+                        const entries = await fs.readdir(workingDirectory, { withFileTypes: true });
+                        for (const entry of entries) {
+                            if (entry.name.startsWith('.')) continue;
+                            const src = path.join(workingDirectory, entry.name);
+                            const dest = path.join(bakDir, entry.name);
+                            await fs.cp(src, dest, { recursive: true });
                         }
 
-                        const result = await onSubagentRun(instruction, targetFiles);
+                        const result = await onSubagentRun(instruction);
                         return `Subagent completed with result:\n${result}`;
                     } catch (e: any) {
                         if (context.onToolCall) {
                             context.onToolCall('Orchestrator', 'SUBAGENT_CRASHED', `Subagent run terminated with exception: ${e.message}`);
                         }
-                        // Restore backups on catastrophic failure, though subagent could also report normal failure
-                        for (const file of targetFiles) {
-                            try {
-                                const fullPath = resolvePath(workingDirectory, file);
-                                await fs.copyFile(fullPath + '.bak', fullPath);
-                                await fs.rm(fullPath + '.bak');
-                            } catch (restoreError) {}
-                        }
+                        // Restore backups on failure
+                        try {
+                            const currentEntries = await fs.readdir(workingDirectory, { withFileTypes: true });
+                            for (const entry of currentEntries) {
+                                if (entry.name.startsWith('.')) continue;
+                                await fs.rm(path.join(workingDirectory, entry.name), { recursive: true, force: true });
+                            }
+                            
+                            const bakEntries = await fs.readdir(bakDir, { withFileTypes: true });
+                            for (const entry of bakEntries) {
+                                const src = path.join(bakDir, entry.name);
+                                const dest = path.join(workingDirectory, entry.name);
+                                await fs.cp(src, dest, { recursive: true });
+                            }
+                        } catch (restoreError) {}
                         return `Subagent failed with error: ${e.message}. Files have been restored from backup.`;
                     } finally {
                         // Cleanup backups
-                        for (const file of targetFiles) {
-                            try {
-                                const fullPath = resolvePath(workingDirectory, file);
-                                await fs.rm(fullPath + '.bak', { force: true });
-                            } catch (cleanupError) {}
-                        }
+                        try {
+                            await fs.rm(bakDir, { recursive: true, force: true });
+                        } catch (cleanupError) {}
                     }
                 }
             },
@@ -769,6 +818,7 @@ export function createSubagentTools(): (request: any, context: HtmlConversionCon
             createConcatFilesTool(workingDirectory),
             createDeleteFilesTool(workingDirectory),
             createValidateSyntaxTool(workingDirectory),
+            createValidateHtmlTool(workingDirectory),
             createRegexpSearchFilesTool(workingDirectory),
             createRegexpReplaceInFileTool(workingDirectory),
             createAnalyzeJsAstTool(workingDirectory),
@@ -784,9 +834,7 @@ export function createSubagentTools(): (request: any, context: HtmlConversionCon
                     required: ['reason', 'summary']
                 },
                 execute: async ({ reason }: { reason: string }) => {
-                    // Throwing an error here triggers the catch block in run_subagent (in Orchestrator),
-                    // which restores the .bak files and returns the error message to the Orchestrator.
-                    throw new Error(reason);
+                    throw new ToolAbortError(reason);
                 }
             },
             {

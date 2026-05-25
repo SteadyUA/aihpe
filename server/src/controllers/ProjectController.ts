@@ -131,7 +131,7 @@ export class ProjectController {
             await this.taskManagerService.createTask(taskId);
 
             // Start background import
-            this.htmlImportService.importArchive(project.id, file.path, taskId).catch((e: any) => {
+            this.htmlImportService.importArchive(project.id, file.path, taskId, file.originalname).catch((e: any) => {
                 console.error('Failed to start HTML import', e);
             });
         }

@@ -22,6 +22,8 @@
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.0.0",
+    "acorn": "^8.16.0",
+    "acorn-walk": "^8.3.5",
     "ai": "^5.0.113",
     "archiver": "^7.0.1",
     "class-transformer": "^0.5.1",
@@ -35,6 +37,7 @@
     "jsonwebtoken": "^9.0.3",
     "marked": "^17.0.1",
     "multer": "^2.0.2",
+    "node-html-parser": "^7.1.0",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.3",
     "sqlite3": "^5.1.7",

@@ -19,7 +19,6 @@ export interface HtmlSubagentRequest {
     workingDirectory: string;
     taskId: string;
     instruction: string;
-    targetFiles: string[];
     abortSignal?: AbortSignal;
     onToolCall?: (agentName: 'Orchestrator' | 'Subagent', toolName: string, summary: string) => void;
 }
@@ -40,12 +39,11 @@ export class HtmlConversionAgent {
 
         let isFinished = false;
 
-        const onSubagentRun = async (instruction: string, targetFiles: string[]): Promise<string> => {
+        const onSubagentRun = async (instruction: string): Promise<string> => {
             const subReq: HtmlSubagentRequest = {
                 workingDirectory: request.workingDirectory,
                 taskId: request.taskId,
                 instruction: instruction,
-                targetFiles: targetFiles,
                 abortSignal: request.abortSignal,
                 onToolCall: request.onToolCall
             };
@@ -100,7 +98,7 @@ export class HtmlConversionAgent {
         
         const messages: LlmMessage[] = [
             { role: LlmRole.SYSTEM, content: systemPrompt },
-            { role: LlmRole.USER, content: `Execute this specific instruction:\n\n${request.instruction}\n\nTarget files for this task: ${request.targetFiles.join(', ')}` }
+            { role: LlmRole.USER, content: `Execute this specific instruction:\n\n${request.instruction}` }
         ];
 
         let hasReportedSuccess = false;
@@ -135,8 +133,14 @@ export class HtmlConversionAgent {
             maxSteps: 30
         };
 
-        await client.generate(llmReq);
-        
+        try {
+            await client.generate(llmReq);
+        } catch (e: any) {
+            if (e.name !== 'AbortError') {
+                throw e;
+            }
+        }
+
         if (!hasReportedSuccess) {
             throw new Error('Subagent failed to call report_success. It may have reached the maximum step limit or hallucinated. All changes will be rolled back.');
         }
