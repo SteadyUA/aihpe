@@ -35,7 +35,7 @@ export interface TextEditParams {
     startLine: number;
     endLine: number;
     expectedContent: string;
-    newContent: string;
+    newContent: string | null;
 }
 
 export function editTextRange(params: TextEditParams): string {
@@ -43,7 +43,8 @@ export function editTextRange(params: TextEditParams): string {
 
     const sanitizeContent = (text: string) => text.replace(/^\s*\d+[:|]\s?/gm, '');
     let targetString = sanitizeContent(expectedContent);
-    const replacementString = sanitizeContent(newContent);
+    const isDeletion = newContent === null;
+    const replacementString = isDeletion ? '' : sanitizeContent(newContent as string);
 
     const lines = content.split(/\r?\n/);
 
@@ -93,10 +94,24 @@ export function editTextRange(params: TextEditParams): string {
             throw new Error(`expectedContent found multiple times between lines ${start} and ${end}. Provide a narrower range or more unique expectedContent.`);
         }
 
-        slice = slice.replace(targetString, replacementString);
+        if (isDeletion) {
+            if (slice.includes(targetString + '\n')) {
+                slice = slice.replace(targetString + '\n', '');
+            } else if (slice.includes(targetString + '\r\n')) {
+                slice = slice.replace(targetString + '\r\n', '');
+            } else if (slice.includes('\n' + targetString)) {
+                slice = slice.replace('\n' + targetString, '');
+            } else if (slice.includes('\r\n' + targetString)) {
+                slice = slice.replace('\r\n' + targetString, '');
+            } else {
+                slice = slice.replace(targetString, '');
+            }
+        } else {
+            slice = slice.replace(targetString, replacementString);
+        }
     }
 
-    const replacedSliceLines = slice.split('\n');
+    const replacedSliceLines = slice === '' ? [] : slice.split('\n');
     lines.splice(start - 1, end - start + 1, ...replacedSliceLines);
 
     return lines.join('\n');
@@ -206,7 +221,7 @@ export function createPageGenTools(
                         startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
                         endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
                         expectedContent: { type: 'string', description: 'The exact string to replace within the line range.' },
-                        newContent: { type: 'string', description: 'The new string to replace it with.' },
+                        newContent: { type: ['string', 'null'], description: 'The new string to replace it with. Set to `null` to completely delete the matched code.' },
                         summary: { type: 'string', description: 'Explain why you are making this edit.' }
                     },
                     required: ['file', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
@@ -222,7 +237,7 @@ export function createPageGenTools(
                     startLine: number;
                     endLine: number;
                     expectedContent: string;
-                    newContent: string;
+                    newContent: string | null;
                     summary: string;
                 }) => {
                     let nextVersion = await ensureNextVersion(request.sessionId);
@@ -431,12 +446,12 @@ export function createPageGenTools(
                         startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
                         endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
                         expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Leave empty ("") if you want to blindly replace the lines between startLine and endLine without text matching.' },
-                        newContent: { type: 'string', description: 'The new string to replace it with.' },
+                        newContent: { type: ['string', 'null'], description: 'The new string to replace it with. Set to `null` to completely delete the matched code.' },
                         summary: { type: 'string', description: 'Explain why you are editing this memory file.' }
                     },
                     required: ['filename', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
                 },
-                execute: async ({ filename, startLine, endLine, expectedContent, newContent }: { filename: string; startLine: number; endLine: number; expectedContent: string; newContent: string; summary: string }) => {
+                execute: async ({ filename, startLine, endLine, expectedContent, newContent }: { filename: string; startLine: number; endLine: number; expectedContent: string; newContent: string | null; summary: string }) => {
                     try {
                         const version = getTargetVersion() ?? request.currentVersion;
                         const content = memoryService.readMemoryFile(request.sessionId, version, filename) || '';

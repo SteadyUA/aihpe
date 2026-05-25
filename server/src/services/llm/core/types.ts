@@ -49,3 +49,10 @@ export interface LlmResult {
 export interface LlmClient {
     generate(request: LlmRequest): Promise<LlmResult>;
 }
+
+export class ToolAbortError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ToolAbortError';
+    }
+}

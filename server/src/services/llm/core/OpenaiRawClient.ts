@@ -1,4 +1,4 @@
-import { LlmClient, LlmRequest, LlmResult, LlmMessage, LlmRole } from './types';
+import { LlmClient, LlmRequest, LlmResult, LlmMessage, LlmRole, ToolAbortError } from './types';
 
 export const FALLBACK_RESPONSE: LlmResult = {
     text: 'API key not configured.'
@@ -382,6 +382,9 @@ export class OpenaiRawClient implements LlmClient {
                 try {
                     result = await implementation(args);
                 } catch (e: any) {
+                    if (e instanceof ToolAbortError) {
+                        throw e;
+                    }
                     result = `Error executing ${name}: ${e.message}`;
                 }
             } else {
