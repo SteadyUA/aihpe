@@ -30,7 +30,7 @@ This repository is a monorepo containing a **React/Vite client** and a **Node.js
 ## 2. Code Style & Conventions
 
 ### General
-- **Language:** TypeScript throughout.
+- **Language:** TypeScript throughout. All code comments and documentation in `.md` files MUST be written in English.
 - **Enums:** Always define and use TypeScript `enum`s for enumerable values instead of relying on magic strings.
 - **Indentation:** **4 spaces** for source code (`.ts`, `.tsx`), **2 spaces** for configuration/JSON (`.json`, `.yml`).
 - **Semicolons:** Always use semicolons.
@@ -134,3 +134,11 @@ To maintain a clean, readable, and consistent project history, all AI agents mus
 3. **`<subject>`**: A short, imperative summary of the change (maximum 72 characters). Start with a lowercase letter and do not put a period at the end.
    - *Example:* `add filename property to SessionVersionFileParams`
 4. **`<body>`**: Provide a detailed explanation of **WHY** the change was made and **HOW** it solves the problem. Agents should use this section to summarize their architectural decisions, making it easier for human developers to review the commit context without reading AI conversation logs. Wrap lines at 72 characters.
+
+---
+
+## 5. Testing Guidelines for Agents
+
+1. **Manual Testing:** Testing is predominantly manual and must be performed by the user. Do not use or create automated tests.
+2. **Testing Instructions:** After completing the work, you must provide clear instructions to the user on what needs to be manually tested.
+3. **Logic Verification (Exception):** If the user explicitly asks to verify the operation of specific logic, you may create a simple, temporary test script. This script MUST be deleted immediately after confirming that the logic works as intended.
