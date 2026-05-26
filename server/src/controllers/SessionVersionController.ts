@@ -1,6 +1,5 @@
 import { Body, Delete, Get, JsonController, Params, Post, UseBefore, NotFoundError, BadRequestError, InternalServerError, UploadedFile, UseInterceptor } from 'routing-controllers';
 import { AuthMiddleware } from '../middlewares/AuthMiddleware';
-import { ImmutableCacheMiddleware } from '../middlewares/ImmutableCacheMiddleware';
 import { Type } from 'class-transformer';
 import { FilesService } from '../services/session/FilesService';
 import { SessionResourceService, ResourceMetadata } from '../services/session/SessionResourceService';
@@ -300,7 +299,6 @@ document.querySelectorAll('form').forEach(form => {
     }
 
     @Get('/api/sessions/:sessionId/:version/resources/:filename/thumbnail')
-    @UseBefore(ImmutableCacheMiddleware)
     @UseInterceptor(FileResponseHandler)
     async getResourceThumbnail(
         @Params() params: SessionVersionFileParams,
@@ -478,7 +476,6 @@ document.querySelectorAll('form').forEach(form => {
     }
 
     @Get('/api/sessions/:sessionId/:version/preview')
-    @UseBefore(ImmutableCacheMiddleware)
     @UseInterceptor(FileResponseHandler)
     async getSessionPreview(
         @Params() params: SessionVersionParams,

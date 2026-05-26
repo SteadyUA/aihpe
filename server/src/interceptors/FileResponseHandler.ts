@@ -40,17 +40,51 @@ export class FileResponseHandler implements InterceptorInterface {
 
     intercept(action: Action, content: any) {
         let fileExt = '';
-        let fileStream;
+        let fileStream: any;
+        let filePathForStat: string | undefined;
+
         if (content instanceof FileResponse) {
             fileExt = path.extname(content.filePath).toLowerCase();
-            fileStream = fs.createReadStream(content.filePath);
+            filePathForStat = content.filePath;
         } else if (content instanceof FileStreamResponse) {
             fileExt = path.extname(content.filename).toLowerCase();
+            if (content.stream && content.stream.path) {
+                filePathForStat = content.stream.path;
+            }
             fileStream = content.stream;
         } else {
             return content;
         }
+
+        const req = action.request;
         const res = action.response;
+
+        if (filePathForStat) {
+            try {
+                const stats = fs.statSync(filePathForStat);
+                const etag = `W/"${stats.size}-${stats.mtime.getTime()}"`;
+
+                res.setHeader('ETag', etag);
+                res.setHeader('Cache-Control', 'no-cache');
+
+                if (req.headers['if-none-match'] === etag) {
+                    res.status(304);
+
+                    if (fileStream && typeof fileStream.destroy === 'function') {
+                        fileStream.destroy();
+                    }
+
+                    return Buffer.from('');
+                }
+            } catch (err) {
+                console.error(`Failed to stat file for ETag: ${filePathForStat}`, err);
+            }
+        }
+
+        if (content instanceof FileResponse && !fileStream) {
+            fileStream = fs.createReadStream(content.filePath);
+        }
+
         const contentType = this.mimeTypes[fileExt] || 'application/octet-stream';
         res.setHeader('Content-Type', contentType);
 
