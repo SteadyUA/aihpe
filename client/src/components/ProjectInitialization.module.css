@@ -1,0 +1,144 @@
+.headerWrapper {
+    margin-left: 1rem;
+    display: flex;
+    align-items: center;
+}
+
+.projectName {
+    font-weight: 600;
+    font-size: 1.2rem;
+    color: var(--text-primary);
+}
+
+.statusBadge {
+    margin-left: 1rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background-color: rgba(24, 144, 255, 0.1);
+    color: #1890ff;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.errorContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.errorTitle {
+    color: #ff4d4f;
+}
+
+.retryButton {
+    margin-top: 1rem;
+}
+
+.splitViewContainer {
+    flex: 1;
+    padding: 2rem;
+    display: flex;
+    gap: 2rem;
+    overflow: hidden;
+}
+
+.column {
+    flex: 1 1 50%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.placeholderText {
+    color: #888;
+    font-style: italic;
+    margin-top: 1rem;
+}
+
+.waitingText {
+    color: #888;
+    font-style: italic;
+}
+
+.logHeader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 1rem;
+}
+
+.logTitle {
+    margin: 0;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #ccc;
+    border-top-color: #1890ff;
+    animation: spin 1s linear infinite;
+}
+
+.logContainer {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    padding: 1rem;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.logTime {
+    color: #569cd6;
+}
+
+.logAgentOrchestrator {
+    color: #ce9178;
+    font-weight: bold;
+}
+
+.logAgentOther {
+    color: #4ec9b0;
+    font-weight: bold;
+}
+
+.logTool {
+    color: #dcdcaa;
+}
+
+.planContentWrapper {
+    padding: 1.5rem;
+    border-radius: 8px;
+    background-color: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, #eaeaea);
+    flex: 1;
+    overflow-y: auto;
+    text-align: left;
+}
+
+.planContentWrapper h1,
+.planContentWrapper h2,
+.planContentWrapper h3 {
+    margin-top: 0;
+}
+
+.planContentWrapper ul {
+    padding-left: 20px;
+}
+
+.planContentWrapper li {
+    margin-bottom: 8px;
+}

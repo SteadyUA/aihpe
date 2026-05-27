@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { apiAuth } from '../utils/api';
-import { UiButton, ButtonVariant} from './UiButton';
-import styles from './Projects.module.css';
+import { UiButton, ButtonVariant } from './UiButton';
+import sharedStyles from './Projects.module.css';
+import styles from './ProjectInitialization.module.css';
 import { TaskStatus } from '../types';
 import { createMarkedInstance } from '../utils/markdownUtils';
 
@@ -33,6 +34,13 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
     const [planHtml, setPlanHtml] = useState<string>('');
     const [retryCount, setRetryCount] = useState<number>(0);
     const [toolLogs, setToolLogs] = useState<ToolCallLog[]>([]);
+    const logContainerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (logContainerRef.current) {
+            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+    }, [toolLogs]);
 
     const fetchTaskStatus = async () => {
         try {
@@ -134,19 +142,11 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
     };
 
     const headerContent = (
-        <div style={{ marginLeft: '1rem', display: 'flex', alignItems: 'center' }}>
-            <span style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--text-primary)' }}>
+        <div className={styles.headerWrapper}>
+            <span className={styles.projectName}>
                 {projectName || 'Initializing Project...'}
             </span>
-            <span style={{
-                marginLeft: '1rem',
-                padding: '2px 8px',
-                borderRadius: '12px',
-                backgroundColor: 'rgba(24, 144, 255, 0.1)',
-                color: '#1890ff',
-                fontSize: '0.8rem',
-                fontWeight: 600
-            }}>
+            <span className={styles.statusBadge}>
                 Initialization
             </span>
         </div>
@@ -158,13 +158,13 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         return (
             <>
                 {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
-                <div className={styles.container} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                    <h2 style={{ color: '#ff4d4f' }}>Initialization Failed</h2>
+                <div className={`${sharedStyles.container} ${styles.errorContainer}`}>
+                    <h2 className={styles.errorTitle}>Initialization Failed</h2>
                     <p>{error}</p>
-                    <UiButton 
-                        variant={ButtonVariant.PRIMARY} 
-                        onClick={handleRetry} 
-                        style={{ marginTop: '1rem' }}
+                    <UiButton
+                        variant={ButtonVariant.PRIMARY}
+                        onClick={handleRetry}
+                        className={styles.retryButton}
                     >
                         Retry
                     </UiButton>
@@ -177,7 +177,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         return (
             <>
                 {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
-                <div className={styles.loading}>Initializing project...</div>
+                <div className={sharedStyles.loading}>Initializing project...</div>
             </>
         );
     }
@@ -185,94 +185,49 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
     return (
         <>
             {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
-            <div className={styles.container} style={{ padding: '2rem', overflowY: 'auto' }}>
-                <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-                    <h1>Preparing Your Project</h1>
-                    <p>We are converting your HTML archive into an interactive session. This may take a few minutes.</p>
-
-                    <div style={{ marginTop: '2rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
-                            <div style={{
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: '50%',
-                                border: '3px solid #ccc',
-                                borderTopColor: '#1890ff',
-                                animation: 'spin 1s linear infinite'
-                            }} />
-                            <span style={{ fontWeight: 600, fontSize: '1.1rem' }}>
-                                Status: {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
-                            </span>
-                        </div>
-
-                        <style>{`
-                            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                            .plan-content-wrapper {
-                                margin-top: 1.5rem;
-                                padding: 1.5rem;
-                                border-radius: 8px;
-                                background-color: var(--bg-secondary, #f8f9fa);
-                                border: 1px solid var(--border-color, #eaeaea);
-                                max-height: 500px;
-                                overflow-y: auto;
-                                text-align: left;
-                            }
-                            .plan-content-wrapper h1, .plan-content-wrapper h2, .plan-content-wrapper h3 {
-                                margin-top: 0;
-                            }
-                            .plan-content-wrapper ul {
-                                padding-left: 20px;
-                            }
-                            .plan-content-wrapper li {
-                                margin-bottom: 8px;
-                            }
-                        `}</style>
-
+            <div className={sharedStyles.container}>
+                <div className={styles.splitViewContainer}>
+                    {/* Left Column: Plan */}
+                    <div className={styles.column}>
                         {planHtml ? (
-                            <div 
-                                className="plan-content-wrapper markdown-body" 
-                                dangerouslySetInnerHTML={{ __html: planHtml }} 
+                            <div
+                                className={`${styles.planContentWrapper} markdown-body`}
+                                dangerouslySetInnerHTML={{ __html: planHtml }}
                             />
                         ) : (
-                            <div style={{ color: '#888', fontStyle: 'italic', marginTop: '1rem' }}>
+                            <div className={styles.placeholderText}>
                                 Planning initial steps...
                             </div>
                         )}
+                    </div>
 
-                        {toolLogs.length > 0 && (
-                            <div style={{ marginTop: '2rem' }}>
-                                <h3>Agent Activity Log</h3>
-                                <div style={{
-                                    backgroundColor: '#1e1e1e',
-                                    color: '#d4d4d4',
-                                    padding: '1rem',
-                                    borderRadius: '8px',
-                                    fontFamily: 'monospace',
-                                    fontSize: '0.85rem',
-                                    maxHeight: '300px',
-                                    overflowY: 'auto',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '8px'
-                                }}>
-                                    {toolLogs.map((log, index) => (
-                                        <div key={index} style={{ display: 'flex', gap: '10px' }}>
-                                            <span style={{ color: '#569cd6' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
-                                            <span style={{ 
-                                                color: log.agentName === 'Orchestrator' ? '#ce9178' : '#4ec9b0',
-                                                fontWeight: 'bold',
-                                                minWidth: '100px'
-                                            }}>
-                                                {log.agentName}
-                                            </span>
-                                            <span style={{ color: '#dcdcaa' }}>{log.toolName}</span>
-                                            <span style={{ color: '#9cdcfe' }}>-</span>
-                                            <span>{log.summary || 'No summary provided'}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+                    {/* Right Column: Logs */}
+                    <div className={styles.column}>
+                        <div className={styles.logHeader}>
+                            <h3 className={styles.logTitle}>Agent Activity Log</h3>
+                            {task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED && (
+                                <div className={styles.spinner} />
+                            )}
+                        </div>
+                        <div ref={logContainerRef} className={styles.logContainer}>
+                            {toolLogs.length === 0 ? (
+                                <div className={styles.waitingText}>Waiting for agent activity...</div>
+                            ) : (
+                                toolLogs.map((log, index) => (
+                                    <div key={index}>
+                                        <span className={styles.logTime}>[{new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}]</span>
+                                        {' '}
+                                        <span className={log.agentName === 'Orchestrator' ? styles.logAgentOrchestrator : styles.logAgentOther}>
+                                            {log.agentName}
+                                        </span>
+                                        {' '}
+                                        <span className={styles.logTool}>{log.toolName}</span>
+                                        {' '}
+                                        <span>{log.summary || 'No summary provided'}</span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

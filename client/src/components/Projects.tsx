@@ -196,16 +196,18 @@ class Projects extends Component<ProjectsProps, ProjectsState> {
         return (
             <div className={styles.container}>
                 {headerElement && createPortal(
-                    <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>,
+                    <>
+                        <div style={{ marginLeft: '1rem', fontWeight: 600, fontSize: '1.2rem' }}>My Projects</div>
+                        <div style={{ marginLeft: 'auto', marginRight: '1rem' }}>
+                            <UiButton variant={ButtonVariant.PRIMARY} onClick={this.toggleCreationModal}>
+                                <PlusIcon size={18} /> New Project
+                            </UiButton>
+                        </div>
+                    </>,
                     headerElement
                 )}
 
                 <div className={styles.content}>
-                    <div className={styles.controls}>
-                        <UiButton variant={ButtonVariant.PRIMARY} onClick={this.toggleCreationModal}>
-                            <PlusIcon size={18} /> New Project
-                        </UiButton>
-                    </div>
 
                     {loading && <div className={styles.loading}>Loading projects...</div>}
 
