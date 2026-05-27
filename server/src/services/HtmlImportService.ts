@@ -5,9 +5,8 @@ import { TurnService } from './session/TurnService';
 import { FilesService } from './session/FilesService';
 import { ChatService } from './ChatService';
 import { HtmlConversionAgent } from './llm/agents/HtmlConversionAgent';
-import { TaskManagerService } from './TaskManagerService';
 import { SseService } from './SseService';
-import { Turn, TaskStatus, ProjectStatus } from '../types/chat';
+import { Turn, ProjectStatus } from '../types/chat';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import extract from 'extract-zip';
@@ -23,14 +22,13 @@ export class HtmlImportService {
         @Inject() private turnService: TurnService,
         @Inject() private filesService: FilesService,
         @Inject() private chatService: ChatService,
-        @Inject() private taskManagerService: TaskManagerService,
         @Inject() private htmlConversionAgent: HtmlConversionAgent,
         @Inject() private resourceService: SessionResourceService,
         @Inject() private sseService: SseService
     ) { }
 
-    async getPlanContent(taskId: string): Promise<string> {
-        const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
+    async getPlanContent(projectId: string): Promise<string> {
+        const tempDir = path.join(process.cwd(), 'data', 'import', projectId);
         const planPath = path.join(tempDir, '.memory', 'plan.md');
         try {
             return await fs.readFile(planPath, 'utf-8');
@@ -39,10 +37,9 @@ export class HtmlImportService {
         }
     }
 
-    async importArchive(projectId: string, zipPath: string, providedTaskId: string, archiveName: string): Promise<void> {
+    async importArchive(projectId: string, zipPath: string, archiveName: string): Promise<void> {
         const beginTime = new Date();
-        const taskId = providedTaskId;
-        console.log(`Starting HTML import for project ${projectId}, task ${taskId}`);
+        console.log(`Starting HTML import for project ${projectId}`);
         const sessionId = crypto.randomUUID();
 
         try {
@@ -55,7 +52,7 @@ export class HtmlImportService {
             console.log(`Created session ${sessionId} for import`);
 
             // 2. Extract ZIP
-            const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
+            const tempDir = path.join(process.cwd(), 'data', 'import', projectId);
 
             let isResume = false;
             try {
@@ -82,14 +79,14 @@ export class HtmlImportService {
             }
 
             // Execute the import process
-            await this.executeImportLoop(projectId, sessionId, taskId, tempDir, beginTime, archiveName);
+            await this.executeImportLoop(projectId, sessionId, tempDir, beginTime, archiveName);
 
         } catch (error: any) {
             console.error('HTML Import failed:', error);
-            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
+            await this.projectService.updateProjectStatus(projectId, ProjectStatus.ERROR);
             const project = await this.projectService.getProject(projectId);
             if (project?.accountId) {
-                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: error.message || String(error) });
+                this.sseService.broadcastToAccount(project.accountId, 'import-failed', { projectId, error: error.message || String(error) });
             }
         } finally {
             // Remove uploaded zip from tmpdir
@@ -101,17 +98,17 @@ export class HtmlImportService {
         }
     }
 
-    async resumeArchiveImport(taskId: string): Promise<void> {
+    async resumeArchiveImport(projectId: string): Promise<void> {
         const beginTime = new Date();
-        console.log(`Resuming HTML import for task ${taskId}`);
+        console.log(`Resuming HTML import for project ${projectId}`);
         try {
-            const project = await this.projectService.getProjectByTaskId(taskId);
-            if (!project) throw new Error('Project not found for this task');
+            const project = await this.projectService.getProject(projectId);
+            if (!project) throw new Error('Project not found');
 
             const sessionId = project.sessionIds[project.sessionIds.length - 1];
             if (!sessionId) throw new Error('No session initialized for this project yet');
 
-            const tempDir = path.join(process.cwd(), 'data', 'import', taskId);
+            const tempDir = path.join(process.cwd(), 'data', 'import', projectId);
 
             // Check if tempDir exists
             try {
@@ -120,29 +117,29 @@ export class HtmlImportService {
                 throw new Error('Temporary import directory not found. Cannot resume.');
             }
 
-            await this.executeImportLoop(project.id, sessionId, taskId, tempDir, beginTime, project.name ? project.name + '.zip' : 'archived files');
+            await this.executeImportLoop(projectId, sessionId, tempDir, beginTime, project.name ? project.name + '.zip' : 'archived files');
 
         } catch (error: any) {
             console.error('HTML Import Resume failed:', error);
-            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, error.message || String(error));
-            const project = await this.projectService.getProjectByTaskId(taskId);
+            await this.projectService.updateProjectStatus(projectId, ProjectStatus.ERROR);
+            const project = await this.projectService.getProject(projectId);
             if (project?.accountId) {
-                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: error.message || String(error) });
+                this.sseService.broadcastToAccount(project.accountId, 'import-failed', { projectId, error: error.message || String(error) });
             }
         }
     }
 
-    private async executeImportLoop(projectId: string, sessionId: string, taskId: string, tempDir: string, beginTime: Date, archiveName: string): Promise<void> {
-        await this.taskManagerService.updateStatus(taskId, TaskStatus.EXECUTING);
+    private async executeImportLoop(projectId: string, sessionId: string, tempDir: string, beginTime: Date, archiveName: string): Promise<void> {
+        await this.projectService.updateProjectStatus(projectId, ProjectStatus.INITIALIZATION);
 
         const project = await this.projectService.getProject(projectId);
-        console.log(`[Task ${taskId}] Project:`, project);
+        console.log(`[Project ${projectId}] Project:`, project);
         if (!project) throw new Error('Project not found');
 
         const bakDir = path.join(tempDir, '.bak');
         try {
             await fs.access(bakDir);
-            console.log(`[Task ${taskId}] Found .bak directory, recovering files...`);
+            console.log(`[Project ${projectId}] Found .bak directory, recovering files...`);
             const currentEntries = await fs.readdir(tempDir, { withFileTypes: true });
             for (const entry of currentEntries) {
                 if (entry.name.startsWith('.')) continue;
@@ -155,7 +152,7 @@ export class HtmlImportService {
                 await fs.cp(src, dest, { recursive: true });
             }
             await fs.rm(bakDir, { recursive: true, force: true });
-            console.log(`[Task ${taskId}] Recovery complete.`);
+            console.log(`[Project ${projectId}] Recovery complete.`);
         } catch (e) {
             // No backup found, proceed normally
         }
@@ -166,42 +163,42 @@ export class HtmlImportService {
 
         while (!isFinished && loops < maxLoops) {
             loops++;
-            console.log(`[Task ${taskId}] Starting/Resuming Orchestrator loop (iteration ${loops})...`);
+            console.log(`[Project ${projectId}] Starting/Resuming Orchestrator loop (iteration ${loops})...`);
 
             const providerToUse = project.defaultProvider || 'openai';
             isFinished = await this.htmlConversionAgent.runOrchestratorLoop(providerToUse as any, {
                 workingDirectory: tempDir,
-                taskId: taskId,
+                projectId: projectId,
                 onPlanUpdated: () => {
                     if (project.accountId) {
-                        this.sseService.broadcastToAccount(project.accountId, 'plan-updated', { taskId });
+                        this.sseService.broadcastToAccount(project.accountId, 'plan-updated', { projectId });
                     }
                 },
                 onToolCall: (agentName, toolName, summary) => {
                     if (project.accountId) {
-                        this.sseService.broadcastToAccount(project.accountId, 'tool-called', { taskId, agentName, toolName, summary });
+                        this.sseService.broadcastToAccount(project.accountId, 'tool-called', { projectId, agentName, toolName, summary });
                     }
                 }
             });
 
             if (!isFinished) {
-                console.log(`[Task ${taskId}] Orchestrator loop paused or max steps reached. Checking if we should continue...`);
+                console.log(`[Project ${projectId}] Orchestrator loop paused or max steps reached. Checking if we should continue...`);
                 await new Promise(r => setTimeout(r, 2000));
             }
         }
 
         if (isFinished) {
-            console.log(`[Task ${taskId}] Import finished. Saving files to session...`);
-            await this.taskManagerService.updateStatus(taskId, TaskStatus.COMPLETED);
+            console.log(`[Project ${projectId}] Import finished. Saving files to session...`);
+            await this.projectService.updateProjectStatus(projectId, ProjectStatus.READY);
             if (project.accountId) {
-                this.sseService.broadcastToAccount(project.accountId, 'task-completed', { taskId });
+                this.sseService.broadcastToAccount(project.accountId, 'import-completed', { projectId });
             }
 
             // 5. Move files to Session Version 0
             const files: Record<string, string> = {};
             const resourceExtensions = new Set([
                 // Images
-                '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.heic',
+                '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.heic', '.avif',
                 // Fonts
                 '.woff', '.woff2', '.ttf', '.otf', '.eot',
                 // Videos
@@ -279,9 +276,9 @@ export class HtmlImportService {
             await fs.rm(tempDir, { recursive: true, force: true });
         } else {
             const errorMsg = 'Max orchestrator loops reached without calling finish_import.';
-            await this.taskManagerService.updateStatus(taskId, TaskStatus.FAILED, errorMsg);
+            await this.projectService.updateProjectStatus(projectId, ProjectStatus.ERROR);
             if (project.accountId) {
-                this.sseService.broadcastToAccount(project.accountId, 'task-failed', { taskId, error: errorMsg });
+                this.sseService.broadcastToAccount(project.accountId, 'import-failed', { projectId, error: errorMsg });
             }
         }
     }

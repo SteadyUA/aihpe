@@ -34,7 +34,6 @@ export interface Project {
     sessionIds: string[];
     activeSessionId?: string;
     status?: ProjectStatus;
-    taskId?: string;
     createdAt: string;
     updatedAt: string;
     sessions?: any[];
@@ -58,15 +57,8 @@ export enum LlmProvider {
 
 export enum ProjectStatus {
     INITIALIZATION = 'initialization',
-    READY = 'ready'
-}
-
-export enum TaskStatus {
-    PENDING = 'pending',
-    PLANNING = 'planning',
-    EXECUTING = 'executing',
-    COMPLETED = 'completed',
-    FAILED = 'failed'
+    READY = 'ready',
+    ERROR = 'error'
 }
 
 export enum ChatRole {

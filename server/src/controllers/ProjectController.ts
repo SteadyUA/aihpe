@@ -19,7 +19,6 @@ import { IsString, IsOptional, IsArray } from 'class-validator';
 import { Service } from 'typedi';
 import { ProjectService } from '../services/ProjectService';
 import { HtmlImportService } from '../services/HtmlImportService';
-import { TaskManagerService } from '../services/TaskManagerService';
 import { LlmProvider, ProjectStatus } from '../types/chat';
 import { Project } from '../entities/Project';
 import { SessionService } from '../services/session/SessionService';
@@ -78,7 +77,6 @@ export class ProjectController {
     constructor(
         private readonly projectService: ProjectService,
         private readonly htmlImportService: HtmlImportService,
-        private readonly taskManagerService: TaskManagerService,
         private readonly sessionService: SessionService,
     ) {
         console.log('ProjectController initialized');
@@ -91,7 +89,6 @@ export class ProjectController {
             defaultProvider: project.defaultProvider,
             activeSessionId: project.activeSessionId,
             status: project.status,
-            taskId: project.taskId,
             sessionIds: project.sessionIds || [],
             createdAt: project.createdAt.toISOString(),
             updatedAt: project.updatedAt.toISOString(),
@@ -107,7 +104,6 @@ export class ProjectController {
     ): Promise<ProjectResponse> {
         const accountId = user?.accountId;
         const status = file ? ProjectStatus.INITIALIZATION : ProjectStatus.READY;
-        const taskId = file ? this.taskManagerService.getNextId() : undefined;
 
         let projectName = body.name?.trim();
         if (!projectName && file) {
@@ -122,21 +118,63 @@ export class ProjectController {
             body.defaultProvider,
             projectName,
             accountId,
-            status,
-            taskId
+            status
         );
 
-        if (file && taskId) {
-            // Create pending task entity before sending response to avoid 404 on immediate poll
-            await this.taskManagerService.createTask(taskId);
-
+        if (file) {
             // Start background import
-            this.htmlImportService.importArchive(project.id, file.path, taskId, file.originalname).catch((e: any) => {
+            this.htmlImportService.importArchive(project.id, file.path, file.originalname).catch((e: any) => {
                 console.error('Failed to start HTML import', e);
             });
         }
 
         return this.mapProjectToResponse(project);
+    }
+
+    @Post('/:projectId/import-retry')
+    @HttpCode(202)
+    async retryImport(
+        @Param('projectId') projectId: string,
+        @CurrentUser() user: any
+    ): Promise<OkResponse> {
+        const accountId = user?.accountId;
+        const project = await this.projectService.getProject(projectId);
+        if (!project) {
+            throw new NotFoundError('Project not found');
+        }
+        if (project.accountId !== null && project.accountId !== undefined && project.accountId !== accountId) {
+            throw new ForbiddenError('Access denied');
+        }
+        if (project.status !== ProjectStatus.ERROR) {
+            throw new Error('Project must be in ERROR state to retry import');
+        }
+
+        this.htmlImportService.resumeArchiveImport(project.id).catch((e: any) => {
+            console.error('Failed to resume HTML import', e);
+        });
+
+        return { message: 'Import retry initiated' };
+    }
+
+    @Get('/:projectId/import-plan')
+    async getImportPlan(
+        @Param('projectId') projectId: string,
+        @CurrentUser() user: any
+    ): Promise<{ content: string }> {
+        const accountId = user?.accountId;
+        const project = await this.projectService.getProject(projectId);
+        if (!project) {
+            throw new NotFoundError('Project not found');
+        }
+        if (project.accountId !== null && project.accountId !== undefined && project.accountId !== accountId) {
+            throw new ForbiddenError('Access denied');
+        }
+        if (project.status !== ProjectStatus.INITIALIZATION) {
+            throw new NotFoundError('Import plan is only available during initialization');
+        }
+
+        const content = await this.htmlImportService.getPlanContent(project.id);
+        return { content };
     }
 
     @Get()

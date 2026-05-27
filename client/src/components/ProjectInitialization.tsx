@@ -4,19 +4,19 @@ import { apiAuth } from '../utils/api';
 import { UiButton, ButtonVariant } from './UiButton';
 import sharedStyles from './Projects.module.css';
 import styles from './ProjectInitialization.module.css';
-import { TaskStatus } from '../types';
+import { ProjectStatus } from '../types';
 import { createMarkedInstance } from '../utils/markdownUtils';
 
 const marked = createMarkedInstance({ styles: {} });
 
-interface Task {
+interface Project {
     id: string;
-    status: TaskStatus;
-    errorMessage?: string;
+    status: ProjectStatus;
+    errorMessage?: string; // Not in Project entity strictly, but handled via SSE for display here
 }
 
 interface ProjectInitializationProps {
-    taskId: string;
+    projectId: string;
     projectName?: string;
     onComplete: () => void;
 }
@@ -28,8 +28,8 @@ interface ToolCallLog {
     timestamp: number;
 }
 
-export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ taskId, projectName, onComplete }) => {
-    const [task, setTask] = useState<Task | null>(null);
+export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ projectId, projectName, onComplete }) => {
+    const [project, setProject] = useState<Project | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [planHtml, setPlanHtml] = useState<string>('');
     const [retryCount, setRetryCount] = useState<number>(0);
@@ -42,18 +42,20 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         }
     }, [toolLogs]);
 
-    const fetchTaskStatus = async () => {
+    const fetchProjectStatus = async () => {
         try {
-            const res = await apiAuth.fetch(`/api/tasks/${taskId}`);
-            if (!res.ok) throw new Error('Failed to fetch task status');
+            const res = await apiAuth.fetch(`/api/projects/${projectId}`);
+            if (!res.ok) throw new Error('Failed to fetch project status');
             const data = await res.json();
-            setTask(data);
+            setProject(data);
 
-            if (data.status === TaskStatus.COMPLETED) {
+            if (data.status === ProjectStatus.READY) {
                 onComplete();
                 return true;
-            } else if (data.status === TaskStatus.FAILED) {
-                setError(data.errorMessage || 'Conversion failed');
+            } else if (data.status === ProjectStatus.ERROR) {
+                // If it's already in error state on load, we might not have the detailed message,
+                // but we know it failed.
+                setError('Conversion failed previously. Please retry.');
                 return true;
             }
         } catch (err: any) {
@@ -66,7 +68,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
 
     const fetchPlanContent = async () => {
         try {
-            const res = await apiAuth.fetch(`/api/tasks/${taskId}/plan`);
+            const res = await apiAuth.fetch(`/api/projects/${projectId}/import-plan`);
             if (res.ok) {
                 const data = await res.json();
                 const rawMarkdown = data.content || '';
@@ -80,30 +82,31 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
 
     useEffect(() => {
         // Initial fetch
-        fetchTaskStatus();
+        fetchProjectStatus();
         fetchPlanContent();
 
         // SSE listener for plan updates
         const handlePlanUpdated = (e: any) => {
-            if (e.detail && e.detail.taskId === taskId) {
+            if (e.detail && e.detail.projectId === projectId) {
                 fetchPlanContent();
             }
         };
 
         const handleTaskCompleted = (e: any) => {
-            if (e.detail && e.detail.taskId === taskId) {
+            if (e.detail && e.detail.projectId === projectId) {
                 onComplete();
             }
         };
 
         const handleTaskFailed = (e: any) => {
-            if (e.detail && e.detail.taskId === taskId) {
+            if (e.detail && e.detail.projectId === projectId) {
                 setError(e.detail.error || 'Conversion failed');
+                setProject(prev => prev ? { ...prev, status: ProjectStatus.ERROR } : null);
             }
         };
 
         const handleToolCalled = (e: any) => {
-            if (e.detail && e.detail.taskId === taskId) {
+            if (e.detail && e.detail.projectId === projectId) {
                 setToolLogs(prev => [...prev, {
                     agentName: e.detail.agentName,
                     toolName: e.detail.toolName,
@@ -114,25 +117,25 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         };
 
         window.addEventListener('app:plan-updated', handlePlanUpdated);
-        window.addEventListener('app:task-completed', handleTaskCompleted);
-        window.addEventListener('app:task-failed', handleTaskFailed);
+        window.addEventListener('app:import-completed', handleTaskCompleted);
+        window.addEventListener('app:import-failed', handleTaskFailed);
         window.addEventListener('app:tool-called', handleToolCalled);
 
         return () => {
             window.removeEventListener('app:plan-updated', handlePlanUpdated);
-            window.removeEventListener('app:task-completed', handleTaskCompleted);
-            window.removeEventListener('app:task-failed', handleTaskFailed);
+            window.removeEventListener('app:import-completed', handleTaskCompleted);
+            window.removeEventListener('app:import-failed', handleTaskFailed);
             window.removeEventListener('app:tool-called', handleToolCalled);
         };
-    }, [taskId, onComplete, retryCount]);
+    }, [projectId, onComplete, retryCount]);
 
     const handleRetry = async () => {
         try {
-            setTask(null);
+            setProject(null);
             setError(null);
             setPlanHtml('');
             setToolLogs([]);
-            const res = await apiAuth.fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+            const res = await apiAuth.fetch(`/api/projects/${projectId}/import-retry`, { method: 'POST' });
             if (!res.ok) throw new Error('Failed to restart task');
             setRetryCount(prev => prev + 1);
         } catch (err: any) {
@@ -154,7 +157,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
 
     const headerPortalTarget = document.getElementById('header-portal-target');
 
-    if (error) {
+    if (error || (project && project.status === ProjectStatus.ERROR)) {
         return (
             <>
                 {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
@@ -173,7 +176,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
         );
     }
 
-    if (!task) {
+    if (!project) {
         return (
             <>
                 {headerPortalTarget && createPortal(headerContent, headerPortalTarget)}
@@ -205,7 +208,7 @@ export const ProjectInitialization: React.FC<ProjectInitializationProps> = ({ ta
                     <div className={styles.column}>
                         <div className={styles.logHeader}>
                             <h3 className={styles.logTitle}>Agent Activity Log</h3>
-                            {task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED && (
+                            {project.status !== ProjectStatus.READY && project.status !== ProjectStatus.ERROR && (
                                 <div className={styles.spinner} />
                             )}
                         </div>

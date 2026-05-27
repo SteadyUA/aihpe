@@ -8,7 +8,7 @@ import { createOrchestratorTools, createSubagentTools, HtmlConversionContext } f
 
 export interface HtmlOrchestratorRequest {
     workingDirectory: string;
-    taskId: string;
+    projectId: string;
     instruction?: string;
     abortSignal?: AbortSignal;
     onPlanUpdated?: () => void;
@@ -17,7 +17,7 @@ export interface HtmlOrchestratorRequest {
 
 export interface HtmlSubagentRequest {
     workingDirectory: string;
-    taskId: string;
+    projectId: string;
     instruction: string;
     abortSignal?: AbortSignal;
     onToolCall?: (agentName: 'Orchestrator' | 'Subagent', toolName: string, summary: string) => void;
@@ -42,7 +42,7 @@ export class HtmlConversionAgent {
         const onSubagentRun = async (instruction: string): Promise<string> => {
             const subReq: HtmlSubagentRequest = {
                 workingDirectory: request.workingDirectory,
-                taskId: request.taskId,
+                projectId: request.projectId,
                 instruction: instruction,
                 abortSignal: request.abortSignal,
                 onToolCall: request.onToolCall
@@ -56,7 +56,7 @@ export class HtmlConversionAgent {
 
         const context: HtmlConversionContext = {
             workingDirectory: request.workingDirectory,
-            taskId: request.taskId,
+            projectId: request.projectId,
             onSubagentRun,
             onFinishImport,
             onPlanUpdated: request.onPlanUpdated,
@@ -106,7 +106,7 @@ export class HtmlConversionAgent {
 
         const context: HtmlConversionContext = {
             workingDirectory: request.workingDirectory,
-            taskId: request.taskId,
+            projectId: request.projectId,
             onSubagentSuccess: (summary: string) => {
                 hasReportedSuccess = true;
                 successSummary = summary;

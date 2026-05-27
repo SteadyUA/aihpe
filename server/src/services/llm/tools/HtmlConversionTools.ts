@@ -6,7 +6,7 @@ import { ToolAbortError } from '../core/types';
 
 export interface HtmlConversionContext {
     workingDirectory: string;
-    taskId: string;
+    projectId: string;
     onSubagentRun?: (instruction: string) => Promise<string>;
     onFinishImport?: () => void;
     onPlanUpdated?: () => void;

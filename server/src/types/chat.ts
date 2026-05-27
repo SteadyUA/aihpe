@@ -7,15 +7,8 @@ export enum SessionStatus {
 
 export enum ProjectStatus {
     INITIALIZATION = 'initialization',
-    READY = 'ready'
-}
-
-export enum TaskStatus {
-    PENDING = 'pending',
-    PLANNING = 'planning',
-    EXECUTING = 'executing',
-    COMPLETED = 'completed',
-    FAILED = 'failed'
+    READY = 'ready',
+    ERROR = 'error'
 }
 
 export enum ChatRole {
@@ -53,7 +46,6 @@ export interface Project {
     lastAssignedSessionGroup?: number;
     activeSessionId?: string;
     status: ProjectStatus;
-    taskId?: string;
 }
 
 export interface SessionMetadata {

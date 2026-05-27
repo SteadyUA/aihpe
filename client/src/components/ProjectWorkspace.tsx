@@ -152,15 +152,15 @@ class ProjectWorkspace extends React.Component<ProjectWorkspaceProps, ProjectWor
     render() {
         const {
             projectId, project, projectDefaultProvider,
-            projectStatus, projectTaskId
+            projectStatus
         } = this.state;
 
         if (!projectId) return <div>Loading Workspace...</div>;
 
-        if (projectStatus === ProjectStatus.INITIALIZATION && projectTaskId) {
+        if (projectStatus === ProjectStatus.INITIALIZATION || projectStatus === ProjectStatus.ERROR) {
             return (
                 <ProjectInitialization
-                    taskId={projectTaskId}
+                    projectId={projectId}
                     projectName={project?.name}
                     onComplete={() => this.fetchProject(projectId)}
                 />

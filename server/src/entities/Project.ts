@@ -32,9 +32,6 @@ export class Project {
     @Column({ type: 'varchar', default: ProjectStatus.READY })
     status!: ProjectStatus;
 
-    @Column({ nullable: true })
-    taskId?: string;
-
     @CreateDateColumn()
     createdAt!: Date;
 
