@@ -464,7 +464,7 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
                             type="file"
                             id="image-upload-input"
                             multiple
-                            accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml, .svg, video/mp4, video/webm, font/woff, font/woff2, font/ttf, .ttf, .woff, .woff2"
+                            accept="image/png, image/jpeg, image/gif, image/webp, image/avif, image/svg+xml, .svg, .avif, video/mp4, video/webm, font/woff, font/woff2, font/ttf, .ttf, .woff, .woff2"
                             style={{ display: 'none' }}
                             onChange={this.handleFileSelect}
                             disabled={isUploading}

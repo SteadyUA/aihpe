@@ -184,11 +184,35 @@ function extractFrame(videoPath, timestamp) {
     });
 }
 
+// Extract image frame using FFmpeg (fallback for unsupported images)
+function extractImageFrame(imagePath) {
+    return new Promise((resolve, reject) => {
+        const tempImage = path.join(os.tmpdir(), `fallback_${crypto.randomUUID()}.png`);
+        ffmpeg(imagePath)
+            .outputOptions(['-vframes 1'])
+            .output(tempImage)
+            .on('end', () => resolve(tempImage))
+            .on('error', (err) => reject(err))
+            .run();
+    });
+}
+
 // Get mime type using the system `file` utility
 async function getMimeType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.avif') return 'image/avif';
+    if (ext === '.webp') return 'image/webp';
+    if (ext === '.heic') return 'image/heic';
+    if (ext === '.heif') return 'image/heif';
+    
     try {
         const { stdout } = await execFile('file', ['--mime-type', '-b', filePath]);
-        return stdout.trim();
+        const mime = stdout.trim();
+        if (mime === 'application/octet-stream') {
+            if (ext === '.mp4') return 'video/mp4';
+            if (ext === '.webm') return 'video/webm';
+        }
+        return mime;
     } catch (err) {
         console.error('Error running file command:', err);
         return 'application/octet-stream';
@@ -551,7 +575,21 @@ app.get('/thumbnail', async (req, res) => {
                 imageBuffer = await fs.promises.readFile(targetFilePath);
             }
 
-            let s = sharp(imageBuffer);
+            let s;
+            try {
+                s = sharp(imageBuffer);
+                await s.metadata(); // force read to catch errors early
+            } catch (sharpErr) {
+                if (sharpErr.message.includes('unsupported image format') || sharpErr.message.includes('Input file contains')) {
+                    const tempFallback = await withTimeout(extractImageFrame(targetFilePath), TIMEOUT_MS);
+                    const fallbackBuffer = await fs.promises.readFile(tempFallback);
+                    s = sharp(fallbackBuffer);
+                    if (!tempFrameFile) tempFrameFile = tempFallback; // ensure cleanup
+                } else {
+                    throw sharpErr;
+                }
+            }
+
             if (size) {
                 s = s.resize(size, size, { fit: 'inside' });
             }
@@ -673,19 +711,34 @@ app.get('/preview', async (req, res) => {
                 // No sharp resizing needed; renderFont already sets the correct viewport width.
             } else if (isImage) {
                 const imageSize = size || 1000;
-                const metadata = await sharp(targetFilePath).metadata();
+                let metadata;
+                let bufferToRead = await fs.promises.readFile(targetFilePath);
+                
+                try {
+                    metadata = await sharp(bufferToRead).metadata();
+                } catch (sharpErr) {
+                    if (sharpErr.message.includes('unsupported image format') || sharpErr.message.includes('Input file contains')) {
+                        const tempFallback = await withTimeout(extractImageFrame(targetFilePath), TIMEOUT_MS);
+                        bufferToRead = await fs.promises.readFile(tempFallback);
+                        metadata = await sharp(bufferToRead).metadata();
+                        tempFrameFiles.push(tempFallback);
+                    } else {
+                        throw sharpErr;
+                    }
+                }
+
                 const isSvg = mimeType.includes('svg');
 
                 if (metadata.width <= imageSize && metadata.height <= imageSize) {
                     if (isSvg) {
-                        finalBuffer = await sharp(targetFilePath).png().toBuffer();
+                        finalBuffer = await sharp(bufferToRead).png().toBuffer();
                         contentType = 'image/png';
                     } else {
-                        finalBuffer = await fs.promises.readFile(targetFilePath);
+                        finalBuffer = bufferToRead;
                         contentType = mimeType;
                     }
                 } else {
-                    finalBuffer = await sharp(targetFilePath)
+                    finalBuffer = await sharp(bufferToRead)
                         .resize(imageSize, imageSize, { fit: 'inside' })
                         .jpeg()
                         .toBuffer();
@@ -742,7 +795,20 @@ app.get('/info', async (req, res) => {
             const isFont = mimeType.includes('font') || mimeType.includes('opentype') || mimeType.includes('truetype');
 
             if (isImage) {
-                const metadata = await sharp(targetFilePath).metadata();
+                let metadata;
+                try {
+                    metadata = await sharp(targetFilePath).metadata();
+                } catch (sharpErr) {
+                    if (sharpErr.message.includes('unsupported image format') || sharpErr.message.includes('Input file contains')) {
+                        const tempFallback = await withTimeout(extractImageFrame(targetFilePath), TIMEOUT_MS);
+                        const fallbackBuffer = await fs.promises.readFile(tempFallback);
+                        metadata = await sharp(fallbackBuffer).metadata();
+                        metadata.format = path.extname(targetFilePath).slice(1) || 'unknown';
+                        fs.unlink(tempFallback, () => {});
+                    } else {
+                        throw sharpErr;
+                    }
+                }
                 return res.json({
                     type: 'image',
                     format: metadata.format,
