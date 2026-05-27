@@ -284,7 +284,9 @@ class Message extends React.Component<MessageProps> {
                                     imageUrl={`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${msg.version || 0}/resources/${msg.resource}/thumbnail`}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        window.open(`${import.meta.env.BASE_URL}api/sessions/${sessionId}/${msg.version || 0}/files/${msg.resource}`, '_blank');
+                                        if (this.props.onSelectResource) {
+                                            this.props.onSelectResource(msg.resource!);
+                                        }
                                     }}
                                     title={`Resource: ${msg.resource}`}
                                 />
