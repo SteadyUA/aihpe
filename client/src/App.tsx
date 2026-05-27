@@ -147,14 +147,14 @@ class App extends React.Component<RouterProps, AppState> {
             window.dispatchEvent(new CustomEvent('app:tool-called', { detail: data }));
         });
 
-        this.evtSource.addEventListener('task-completed', (e: any) => {
+        this.evtSource.addEventListener('import-completed', (e: any) => {
             const data = JSON.parse(e.data);
-            window.dispatchEvent(new CustomEvent('app:task-completed', { detail: data }));
+            window.dispatchEvent(new CustomEvent('app:import-completed', { detail: data }));
         });
 
-        this.evtSource.addEventListener('task-failed', (e: any) => {
+        this.evtSource.addEventListener('import-failed', (e: any) => {
             const data = JSON.parse(e.data);
-            window.dispatchEvent(new CustomEvent('app:task-failed', { detail: data }));
+            window.dispatchEvent(new CustomEvent('app:import-failed', { detail: data }));
         });
     };
 

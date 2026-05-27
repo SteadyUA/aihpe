@@ -189,10 +189,6 @@ export class HtmlImportService {
 
         if (isFinished) {
             console.log(`[Project ${projectId}] Import finished. Saving files to session...`);
-            await this.projectService.updateProjectStatus(projectId, ProjectStatus.READY);
-            if (project.accountId) {
-                this.sseService.broadcastToAccount(project.accountId, 'import-completed', { projectId });
-            }
 
             // 5. Move files to Session Version 0
             const files: Record<string, string> = {};
@@ -274,6 +270,10 @@ export class HtmlImportService {
 
             // Clean up temp dir
             await fs.rm(tempDir, { recursive: true, force: true });
+            
+            if (project.accountId) {
+                this.sseService.broadcastToAccount(project.accountId, 'import-completed', { projectId });
+            }
         } else {
             const errorMsg = 'Max orchestrator loops reached without calling finish_import.';
             await this.projectService.updateProjectStatus(projectId, ProjectStatus.ERROR);
