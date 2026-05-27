@@ -18,6 +18,13 @@ export const ImageTokenUsedEvent = EventBus.createEvent<{
     total: number;
 }>('IMAGE_TOKEN_USED');
 
+export const ResourceDescriptionUpdatedEvent = EventBus.createEvent<{
+    sessionId: string;
+    version: number;
+    filename: string;
+    description: string;
+}>('RESOURCE_DESCRIPTION_UPDATED');
+
 export enum ResourceFontType {
     ICONS = 'icons',
     FONT = 'font'
@@ -396,6 +403,13 @@ export class SessionResourceService {
         }
         resource.metadata.description = newDescription;
         await this.repository.save(resource);
+
+        this.eventBus.publish(ResourceDescriptionUpdatedEvent({
+            sessionId,
+            version,
+            filename,
+            description: newDescription,
+        }));
     }
 
     async listImages(sessionId: string, version: number): Promise<ResourceMetadata[]> {

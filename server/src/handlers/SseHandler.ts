@@ -4,6 +4,7 @@ import { AppStoppingEvent, Subscribe } from "../utils/bus";
 import { SessionCreatedEvent, SessionPatchEvent, SessionStatusChangedEvent } from "../services/ChatService";
 import { TurnCompletedEvent } from "../services/session/TurnService";
 import { TokenUsageChangedEvent } from "../services/llm/TokenUsageService";
+import { ResourceDescriptionUpdatedEvent } from "../services/session/SessionResourceService";
 
 @Service()
 export class SseHandler {
@@ -54,5 +55,10 @@ export class SseHandler {
     @Subscribe(SessionPatchEvent)
     async onSessionPatch(payload: ReturnType<typeof SessionPatchEvent>['payload']) {
         this.sseService.emitSessionUpdate(payload);
+    }
+
+    @Subscribe(ResourceDescriptionUpdatedEvent)
+    async onResourceDescriptionUpdated(payload: ReturnType<typeof ResourceDescriptionUpdatedEvent>['payload']) {
+        this.sseService.emitResourceDescriptionUpdated(payload);
     }
 }

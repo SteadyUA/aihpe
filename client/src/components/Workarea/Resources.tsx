@@ -101,6 +101,7 @@ interface ResourcesState {
 export class Resources extends React.Component<ResourcesProps, ResourcesState> {
     componentWillUnmount() {
         window.removeEventListener('paste', this.handlePaste);
+        window.removeEventListener('app:resource-description-updated', this.handleResourceDescriptionUpdated as EventListener);
     }
 
     constructor(props: ResourcesProps) {
@@ -132,7 +133,19 @@ export class Resources extends React.Component<ResourcesProps, ResourcesState> {
         if (this.props.active) {
             this.fetchImages();
         }
+        window.addEventListener('app:resource-description-updated', this.handleResourceDescriptionUpdated as EventListener);
     }
+
+    handleResourceDescriptionUpdated = (e: CustomEvent) => {
+        const { sessionId, version, filename, description } = e.detail;
+        if (this.props.sessionId === sessionId && this.props.version === version) {
+            this.setState(prev => ({
+                resources: prev.resources.map(img => 
+                    img.filename === filename ? { ...img, description } : img
+                )
+            }));
+        }
+    };
 
     componentDidUpdate(prevProps: ResourcesProps) {
         // If became active, fetch if empty

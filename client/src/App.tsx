@@ -156,6 +156,11 @@ class App extends React.Component<RouterProps, AppState> {
             const data = JSON.parse(e.data);
             window.dispatchEvent(new CustomEvent('app:import-failed', { detail: data }));
         });
+
+        this.evtSource.addEventListener('resource-description-updated', (e: any) => {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('app:resource-description-updated', { detail: data }));
+        });
     };
 
     closeSse = () => {

@@ -109,6 +109,14 @@ export class SseService {
         });
     }
 
+    emitResourceDescriptionUpdated(payload: any): void {
+        const enriched = {
+            ...payload,
+            timestamp: payload.timestamp ?? new Date().toISOString(),
+        };
+        this.broadcast('resource-description-updated', enriched);
+    }
+
     private broadcast(event: string, data: unknown): void {
         const serialized = JSON.stringify(data);
         for (const client of this.clients.values()) {
