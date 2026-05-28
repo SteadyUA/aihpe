@@ -137,32 +137,22 @@ const createReadFileTool = (workingDirectory: string) => ({
     }
 });
 
-const createMultiEditFileTool = (context: HtmlConversionContext) => ({
-    name: 'multi_edit_file',
-    description: 'Edit a text file by replacing multiple non-contiguous blocks of text. The tool will automatically sort the replacements from bottom to top (descending line numbers). Always use read_file first to check line numbers. expectedContent should not include the line numbers prepended by read_file. If the file does not exist, it will be created.',
+const createEditFileTool = (context: HtmlConversionContext) => ({
+    name: 'edit_file',
+    description: 'Edit a text file by replacing a specific block of text within a specified line range. Always use read_file first to check line numbers. expectedContent should not include the line numbers prepended by read_file. If the file does not exist, it will be created.',
     parameters: {
         type: 'object',
         properties: {
             filePath: { type: 'string', description: 'Relative path to the file.' },
-            edits: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
-                        endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
-                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Leave empty ("") to blindly replace the lines between startLine and endLine without text matching. This is highly recommended to avoid whitespace mismatch errors.' },
-                        newContent: { type: 'string', description: 'The new string to replace it with.' }
-                    },
-                    required: ['startLine', 'endLine', 'expectedContent', 'newContent']
-                },
-                description: 'List of edits to apply to the file.'
-            },
+            startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
+            endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
+            expectedContent: { type: 'string', description: 'The exact string to replace within the line range. Leave empty ("") to blindly replace the lines between startLine and endLine without text matching. This is highly recommended to avoid whitespace mismatch errors.' },
+            newContent: { type: 'string', description: 'The new string to replace it with.' },
             summary: { type: 'string', description: 'Reason for editing the file.' }
         },
-        required: ['filePath', 'edits', 'summary']
+        required: ['filePath', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
     },
-    execute: async ({ filePath, edits, summary: _summary }: { filePath: string; edits: any[]; summary: string }) => {
+    execute: async ({ filePath, startLine, endLine, expectedContent, newContent, summary: _summary }: { filePath: string; startLine: number; endLine: number; expectedContent: string; newContent: string; summary: string }) => {
         try {
             const fullPath = resolvePath(context.workingDirectory, filePath);
             // Ensure file exists or create it
@@ -175,22 +165,17 @@ const createMultiEditFileTool = (context: HtmlConversionContext) => ({
 
             let content = await fs.readFile(fullPath, 'utf-8');
 
-            // Sort edits by startLine descending to prevent line drift
-            edits.sort((a, b) => b.startLine - a.startLine);
-
-            for (const edit of edits) {
-                content = editTextRange({
-                    content,
-                    startLine: edit.startLine,
-                    endLine: edit.endLine,
-                    expectedContent: edit.expectedContent,
-                    newContent: edit.newContent
-                });
-            }
+            content = editTextRange({
+                content,
+                startLine,
+                endLine,
+                expectedContent,
+                newContent
+            });
 
             await fs.writeFile(fullPath, content, 'utf-8');
 
-            return `Successfully applied ${edits.length} edits to ${filePath}`;
+            return `Successfully edited ${filePath} between lines ${Math.max(1, startLine)} and ${Math.min(content.split(/\\r?\\n/).length, Math.max(1, endLine))}`;
         } catch (error: any) {
             return `Error editing file ${filePath}: ${error.message}`;
         }
@@ -589,32 +574,22 @@ const createReadMemoryFileTool = (workingDirectory: string) => ({
     }
 });
 
-const createMultiEditMemoryFileTool = (context: HtmlConversionContext) => ({
-    name: 'multi_edit_memory_file',
-    description: 'Edit a memory file by replacing multiple non-contiguous blocks of text. The tool will automatically sort the replacements from bottom to top (descending line numbers). Always use read_memory_file first to check line numbers. expectedContent should not include the line numbers prepended by read_memory_file. If the file does not exist, it will be created.',
+const createEditMemoryFileTool = (context: HtmlConversionContext) => ({
+    name: 'edit_memory_file',
+    description: 'Edit a memory file by replacing a specific block of text within a specified line range. Always use read_memory_file first to check line numbers. expectedContent should not include the line numbers prepended by read_memory_file. If the file does not exist, it will be created.',
     parameters: {
         type: 'object',
         properties: {
             filename: { type: 'string', description: 'Name of the memory file (e.g. plan.md).' },
-            edits: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
-                        endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
-                        expectedContent: { type: 'string', description: 'The exact string to replace within the line range.' },
-                        newContent: { type: 'string', description: 'The new string to replace it with.' }
-                    },
-                    required: ['startLine', 'endLine', 'expectedContent', 'newContent']
-                },
-                description: 'List of edits to apply to the file.'
-            },
+            startLine: { type: 'number', description: 'The starting line number of the block to replace (1-indexed).' },
+            endLine: { type: 'number', description: 'The ending line number of the block to replace (1-indexed).' },
+            expectedContent: { type: 'string', description: 'The exact string to replace within the line range.' },
+            newContent: { type: 'string', description: 'The new string to replace it with.' },
             summary: { type: 'string', description: 'Reason for editing the memory file.' }
         },
-        required: ['filename', 'edits', 'summary']
+        required: ['filename', 'startLine', 'endLine', 'expectedContent', 'newContent', 'summary']
     },
-    execute: async ({ filename, edits, summary: _summary }: { filename: string; edits: any[]; summary: string }) => {
+    execute: async ({ filename, startLine, endLine, expectedContent, newContent, summary: _summary }: { filename: string; startLine: number; endLine: number; expectedContent: string; newContent: string; summary: string }) => {
         try {
             const fullPath = resolvePath(context.workingDirectory, path.join('.memory', filename));
             // Ensure file exists or create it
@@ -627,18 +602,13 @@ const createMultiEditMemoryFileTool = (context: HtmlConversionContext) => ({
 
             let content = await fs.readFile(fullPath, 'utf-8');
 
-            // Sort edits by startLine descending to prevent line drift
-            edits.sort((a, b) => b.startLine - a.startLine);
-
-            for (const edit of edits) {
-                content = editTextRange({
-                    content,
-                    startLine: edit.startLine,
-                    endLine: edit.endLine,
-                    expectedContent: edit.expectedContent,
-                    newContent: edit.newContent
-                });
-            }
+            content = editTextRange({
+                content,
+                startLine,
+                endLine,
+                expectedContent,
+                newContent
+            });
 
             await fs.writeFile(fullPath, content, 'utf-8');
 
@@ -646,7 +616,7 @@ const createMultiEditMemoryFileTool = (context: HtmlConversionContext) => ({
                 context.onPlanUpdated();
             }
 
-            return `Successfully applied ${edits.length} edits to ${filename}`;
+            return `Successfully edited ${filename} between lines ${Math.max(1, startLine)} and ${Math.min(content.split(/\\r?\\n/).length, Math.max(1, endLine))}`;
         } catch (error: any) {
             return `Error editing memory file ${filename}: ${error.message}`;
         }
@@ -724,7 +694,7 @@ export function createOrchestratorTools(): (request: any, context: HtmlConversio
             createListFilesTool(workingDirectory),
             createListMemoryFilesTool(workingDirectory),
             createReadMemoryFileTool(workingDirectory),
-            createMultiEditMemoryFileTool(context),
+            createEditMemoryFileTool(context),
             {
                 name: 'run_subagent',
                 description: 'Trigger the executor subagent to perform an atomic file modification based on your instruction.',
@@ -812,7 +782,7 @@ export function createSubagentTools(): (request: any, context: HtmlConversionCon
         return [
             createListFilesTool(workingDirectory),
             createReadFileTool(workingDirectory),
-            createMultiEditFileTool(context),
+            createEditFileTool(context),
             createMoveFilesTool(workingDirectory),
             createCopyFilesTool(workingDirectory),
             createConcatFilesTool(workingDirectory),
