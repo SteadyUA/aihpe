@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v5.0.0] - 2026-05-28
+
+### Added
+- **Project Import/Initialization**: Enhanced project layout, initialization UI, workflow, and markdown rendering.
+- **Client Features**:
+  - Implemented visual highlighting for active clipboard items.
+  - Implemented LRU cache and robust scroll sync for session previews.
+  - Polished Project Workspace UI and `UiButton` component.
+  - Moved element picker to preview toolbar.
+- **Server Features**:
+  - Implemented file-based ETag caching in `FileResponseHandler`.
+  - Stabilized and enhanced autonomous HTML import orchestration pipeline workflows.
+- **Shared/Core**:
+  - Pushed resource description updates via SSE.
+  - Enhanced LLM file editing tools and handled `ToolAbortError`.
+
+### Changed
+- **Client Architecture**: Implemented React Portals for the layout system and adjusted UI styles.
+- **Server Architecture**: Simplified edit tools, enforced fail-fast in prompts, refined job granularity rules in the HTML plan prompt, and strictly enforced exact resource filenames in `PageGenPrompt`.
+- **Shared Data Models**: Removed the `Task` entity and migrated the project initialization flow.
+- **Documentation**: Consolidated agent rules and removed obsolete files.
+
+### Fixed
+- Added support for AVIF thumbnails and metadata extraction.
+- Fixed resource selection on thumbnail click in user messages.
+- Isolated ElementPicker per Preview iframe to preserve selection.
+- Matched session collage order with project session order.
+- Deferred import-completed broadcast until temp dir is cleaned up.
+- Fixed `HtmlImportService` SSE status broadcasting and paths.
+- Applied IDE curl/wget patch in devcontainer and removed obsolete path workaround.
+- Ignored nested `dist` and `node_modules` directories in docker build.
+
 ## [v4.0.0] - 2026-05-12
 
 ### Added
